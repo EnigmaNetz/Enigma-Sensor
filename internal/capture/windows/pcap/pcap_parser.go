@@ -1,13 +1,15 @@
-package capture
+// Package pcap provides Windows-specific PCAP processing functionality
+// for converting pktmon ETL captures to Zeek format via PCAP intermediary
+package pcap
 
 import (
 	"fmt"
 	"os"
 
-	"EnigmaNetz/Enigma-Go-Agent/internal/zeekconv"
-
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/pcapgo"
+
+	"EnigmaNetz/Enigma-Go-Agent/internal/processor/parser/zeekconv"
 )
 
 // PacketStats holds statistics about processed packets
@@ -22,13 +24,13 @@ func (s PacketStats) String() string {
 		s.TotalPackets, s.TotalBytes, s.ProtocolCounts)
 }
 
-// PcapParser handles pcap file processing
+// PcapParser handles reading and processing pcap/pcapng files generated from pktmon ETL
 type PcapParser struct {
 	filePath string
 	outDir   string
 }
 
-// NewPcapParser creates a new PcapParser instance
+// NewPcapParser creates a new pcap parser instance for processing Windows pktmon captures
 func NewPcapParser(filePath string, outputDir string) *PcapParser {
 	return &PcapParser{
 		filePath: filePath,

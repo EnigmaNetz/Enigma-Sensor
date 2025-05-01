@@ -2,6 +2,8 @@ package pcap
 
 import (
 	"encoding/json"
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -255,3 +257,226 @@ func (m *mockPacket) ErrorLayer() gopacket.ErrorLayer                 { return n
 func (m *mockPacket) LinkLayer() gopacket.LinkLayer                   { return nil }
 func (m *mockPacket) NetworkLayer() gopacket.NetworkLayer             { return nil }
 func (m *mockPacket) TransportLayer() gopacket.TransportLayer         { return nil }
+
+func TestProcessTCPPacketIPv6(t *testing.T) {
+	parser := NewPcapParser("", "")
+
+	// Create a mock packet with TCP layer and IPv6
+	ipv6 := &layers.IPv6{
+		Version:      6,
+		TrafficClass: 0,
+		FlowLabel:    0,
+		Length:       20,
+		NextHeader:   layers.IPProtocolTCP,
+		HopLimit:     64,
+		SrcIP:        net.ParseIP("2001:db8::1"),
+		DstIP:        net.ParseIP("2001:db8::2"),
+	}
+	tcp := &layers.TCP{
+		SrcPort: layers.TCPPort(12345),
+		DstPort: layers.TCPPort(80),
+		SYN:     true,
+	}
+
+	mockPacket := &mockPacket{
+		layers: []gopacket.Layer{ipv6, tcp},
+		metadata: &gopacket.PacketMetadata{
+			CaptureInfo: gopacket.CaptureInfo{
+				Timestamp: time.Now(),
+			},
+		},
+	}
+
+	parser.processTCPPacket(mockPacket, tcp)
+
+	require.Len(t, parser.connLogs, 1)
+	log := parser.connLogs[0]
+	assert.Equal(t, "2001:db8::1", log.SrcIP)
+	assert.Equal(t, uint16(12345), log.SrcPort)
+	assert.Equal(t, "2001:db8::2", log.DstIP)
+	assert.Equal(t, uint16(80), log.DstPort)
+	assert.Equal(t, "tcp", log.Proto)
+}
+
+func TestProcessDNSPacketErrors(t *testing.T) {
+	parser := NewPcapParser("", "")
+
+	t.Run("Missing IP Layer", func(t *testing.T) {
+		dns := &layers.DNS{
+			Questions: []layers.DNSQuestion{{
+				Name: []byte("example.com"),
+			}},
+		}
+		mockPacket := &mockPacket{
+			layers: []gopacket.Layer{dns},
+			metadata: &gopacket.PacketMetadata{
+				CaptureInfo: gopacket.CaptureInfo{
+					Timestamp: time.Now(),
+				},
+			},
+		}
+		parser.processDNSPacket(mockPacket, dns)
+		assert.Empty(t, parser.dnsLogs)
+	})
+
+	t.Run("Malformed DNS Answer", func(t *testing.T) {
+		ip := &layers.IPv4{
+			SrcIP: []byte{192, 168, 1, 1},
+			DstIP: []byte{8, 8, 8, 8},
+		}
+		dns := &layers.DNS{
+			Questions: []layers.DNSQuestion{{
+				Name: []byte("example.com"),
+				Type: layers.DNSTypeA,
+			}},
+			Answers: []layers.DNSResourceRecord{{
+				Type: layers.DNSTypeA,
+				IP:   nil, // Invalid IP
+			}},
+		}
+		mockPacket := &mockPacket{
+			layers: []gopacket.Layer{ip, dns},
+			metadata: &gopacket.PacketMetadata{
+				CaptureInfo: gopacket.CaptureInfo{
+					Timestamp: time.Now(),
+				},
+			},
+		}
+		parser.processDNSPacket(mockPacket, dns)
+		assert.Len(t, parser.dnsLogs, 1)
+		assert.Empty(t, parser.dnsLogs[0].Answers)
+	})
+}
+
+func TestEdgeCases(t *testing.T) {
+	t.Run("Empty PCAP File", func(t *testing.T) {
+		tempDir, err := os.MkdirTemp("", "pcap_test")
+		require.NoError(t, err)
+		defer os.RemoveAll(tempDir)
+
+		emptyFile := filepath.Join(tempDir, "empty.pcap")
+		f, err := os.Create(emptyFile)
+		require.NoError(t, err)
+		f.Close()
+
+		parser := NewPcapParser(emptyFile, tempDir)
+		stats, err := parser.ProcessFile()
+		assert.Error(t, err)
+		assert.Nil(t, stats)
+	})
+
+	t.Run("Invalid Output Directory", func(t *testing.T) {
+		parser := NewPcapParser("test.pcap", "/nonexistent/directory")
+		err := parser.writeLogs()
+		assert.Error(t, err)
+	})
+
+	t.Run("Large Number of Logs", func(t *testing.T) {
+		tempDir, err := os.MkdirTemp("", "pcap_test")
+		require.NoError(t, err)
+		defer os.RemoveAll(tempDir)
+
+		parser := NewPcapParser("", tempDir)
+
+		// Add 10000 connection logs
+		for i := 0; i < 10000; i++ {
+			parser.connLogs = append(parser.connLogs, ConnLog{
+				TS:    time.Now(),
+				UID:   fmt.Sprintf("C%d", i),
+				SrcIP: "192.168.1.1",
+				DstIP: "192.168.1.2",
+				Proto: "tcp",
+			})
+		}
+
+		err = parser.writeLogs()
+		assert.NoError(t, err)
+
+		// Verify file exists and is readable
+		connLogPath := filepath.Join(tempDir, "conn.log")
+		assert.FileExists(t, connLogPath)
+
+		// Verify we can read all logs back
+		data, err := os.ReadFile(connLogPath)
+		require.NoError(t, err)
+		var logs []ConnLog
+		err = json.Unmarshal(data, &logs)
+		require.NoError(t, err)
+		assert.Len(t, logs, 10000)
+	})
+}
+
+func BenchmarkProcessDNSPacket(b *testing.B) {
+	parser := NewPcapParser("", "")
+	ip := &layers.IPv4{
+		SrcIP: []byte{192, 168, 1, 1},
+		DstIP: []byte{8, 8, 8, 8},
+	}
+	udp := &layers.UDP{
+		SrcPort: layers.UDPPort(12345),
+		DstPort: layers.UDPPort(53),
+	}
+	dns := &layers.DNS{
+		Questions: []layers.DNSQuestion{{
+			Name:  []byte("example.com"),
+			Type:  layers.DNSTypeA,
+			Class: layers.DNSClassIN,
+		}},
+		Answers: []layers.DNSResourceRecord{{
+			Type: layers.DNSTypeA,
+			IP:   []byte{93, 184, 216, 34},
+		}},
+	}
+	mockPacket := &mockPacket{
+		layers: []gopacket.Layer{ip, udp, dns},
+		metadata: &gopacket.PacketMetadata{
+			CaptureInfo: gopacket.CaptureInfo{
+				Timestamp: time.Now(),
+			},
+		},
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		parser.processDNSPacket(mockPacket, dns)
+	}
+}
+
+func BenchmarkWriteLogs(b *testing.B) {
+	tempDir, err := os.MkdirTemp("", "pcap_bench")
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	parser := NewPcapParser("", tempDir)
+
+	// Add some test logs
+	for i := 0; i < 1000; i++ {
+		parser.connLogs = append(parser.connLogs, ConnLog{
+			TS:    time.Now(),
+			UID:   fmt.Sprintf("C%d", i),
+			SrcIP: "192.168.1.1",
+			DstIP: "192.168.1.2",
+			Proto: "tcp",
+		})
+		parser.dnsLogs = append(parser.dnsLogs, DNSLog{
+			TS:    time.Now(),
+			UID:   fmt.Sprintf("D%d", i),
+			Query: "example.com",
+		})
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		testDir := filepath.Join(tempDir, fmt.Sprintf("test%d", i))
+		err := os.MkdirAll(testDir, 0755)
+		if err != nil {
+			b.Fatal(err)
+		}
+		parser.outDir = testDir
+		if err := parser.writeLogs(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

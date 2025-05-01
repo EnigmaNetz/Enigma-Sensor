@@ -141,18 +141,29 @@ func (p *PcapParser) ProcessFile() (*PacketStats, error) {
 }
 
 func (p *PcapParser) processTCPPacket(packet gopacket.Packet, tcp *layers.TCP) {
-	ipLayer := packet.Layer(layers.LayerTypeIPv4)
-	if ipLayer == nil {
+	var srcIP, dstIP string
+
+	// Try IPv4 first
+	if ipv4Layer := packet.Layer(layers.LayerTypeIPv4); ipv4Layer != nil {
+		ip := ipv4Layer.(*layers.IPv4)
+		srcIP = ip.SrcIP.String()
+		dstIP = ip.DstIP.String()
+	} else if ipv6Layer := packet.Layer(layers.LayerTypeIPv6); ipv6Layer != nil {
+		// Try IPv6
+		ip := ipv6Layer.(*layers.IPv6)
+		srcIP = ip.SrcIP.String()
+		dstIP = ip.DstIP.String()
+	} else {
+		// No IP layer found
 		return
 	}
-	ip := ipLayer.(*layers.IPv4)
 
 	connLog := ConnLog{
 		TS:        packet.Metadata().Timestamp,
-		UID:       generateUID(ip, tcp),
-		SrcIP:     ip.SrcIP.String(),
+		UID:       fmt.Sprintf("C%d", time.Now().UnixNano()),
+		SrcIP:     srcIP,
 		SrcPort:   uint16(tcp.SrcPort),
-		DstIP:     ip.DstIP.String(),
+		DstIP:     dstIP,
 		DstPort:   uint16(tcp.DstPort),
 		Proto:     "tcp",
 		Duration:  0, // Will be calculated when connection ends
@@ -163,18 +174,29 @@ func (p *PcapParser) processTCPPacket(packet gopacket.Packet, tcp *layers.TCP) {
 }
 
 func (p *PcapParser) processUDPPacket(packet gopacket.Packet, udp *layers.UDP) {
-	ipLayer := packet.Layer(layers.LayerTypeIPv4)
-	if ipLayer == nil {
+	var srcIP, dstIP string
+
+	// Try IPv4 first
+	if ipv4Layer := packet.Layer(layers.LayerTypeIPv4); ipv4Layer != nil {
+		ip := ipv4Layer.(*layers.IPv4)
+		srcIP = ip.SrcIP.String()
+		dstIP = ip.DstIP.String()
+	} else if ipv6Layer := packet.Layer(layers.LayerTypeIPv6); ipv6Layer != nil {
+		// Try IPv6
+		ip := ipv6Layer.(*layers.IPv6)
+		srcIP = ip.SrcIP.String()
+		dstIP = ip.DstIP.String()
+	} else {
+		// No IP layer found
 		return
 	}
-	ip := ipLayer.(*layers.IPv4)
 
 	connLog := ConnLog{
 		TS:        packet.Metadata().Timestamp,
-		UID:       generateUID(ip, udp),
-		SrcIP:     ip.SrcIP.String(),
+		UID:       fmt.Sprintf("C%d", time.Now().UnixNano()),
+		SrcIP:     srcIP,
 		SrcPort:   uint16(udp.SrcPort),
-		DstIP:     ip.DstIP.String(),
+		DstIP:     dstIP,
 		DstPort:   uint16(udp.DstPort),
 		Proto:     "udp",
 		Duration:  0,
@@ -184,11 +206,22 @@ func (p *PcapParser) processUDPPacket(packet gopacket.Packet, udp *layers.UDP) {
 }
 
 func (p *PcapParser) processDNSPacket(packet gopacket.Packet, dns *layers.DNS) {
-	ipLayer := packet.Layer(layers.LayerTypeIPv4)
-	if ipLayer == nil {
+	var srcIP, dstIP string
+
+	// Try IPv4 first
+	if ipv4Layer := packet.Layer(layers.LayerTypeIPv4); ipv4Layer != nil {
+		ip := ipv4Layer.(*layers.IPv4)
+		srcIP = ip.SrcIP.String()
+		dstIP = ip.DstIP.String()
+	} else if ipv6Layer := packet.Layer(layers.LayerTypeIPv6); ipv6Layer != nil {
+		// Try IPv6
+		ip := ipv6Layer.(*layers.IPv6)
+		srcIP = ip.SrcIP.String()
+		dstIP = ip.DstIP.String()
+	} else {
+		// No IP layer found
 		return
 	}
-	ip := ipLayer.(*layers.IPv4)
 
 	var srcPort, dstPort uint16
 	if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
@@ -204,10 +237,10 @@ func (p *PcapParser) processDNSPacket(packet gopacket.Packet, dns *layers.DNS) {
 	for _, q := range dns.Questions {
 		dnsLog := DNSLog{
 			TS:      packet.Metadata().Timestamp,
-			UID:     generateUID(ip, nil),
-			SrcIP:   ip.SrcIP.String(),
+			UID:     fmt.Sprintf("D%d", time.Now().UnixNano()),
+			SrcIP:   srcIP,
 			SrcPort: srcPort,
-			DstIP:   ip.DstIP.String(),
+			DstIP:   dstIP,
 			DstPort: dstPort,
 			Proto:   "udp",
 			TransID: uint16(dns.ID),

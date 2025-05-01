@@ -4,6 +4,7 @@ go 1.21
 
 require (
 	github.com/google/gopacket v1.1.19
+	github.com/joho/godotenv v1.5.1
 	github.com/stretchr/testify v1.8.4
 	google.golang.org/grpc v1.60.1
 	google.golang.org/protobuf v1.32.0

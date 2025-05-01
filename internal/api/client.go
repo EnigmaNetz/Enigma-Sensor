@@ -41,11 +41,15 @@ func NewLogUploader(serverAddr string, apiKey string, insecure bool) (*LogUpload
 	var opts []grpc.DialOption
 
 	if !insecure {
+		// Use SSL credentials without client certificates (matching Docker implementation)
 		creds := credentials.NewClientTLSFromCert(nil, "")
 		opts = append(opts, grpc.WithTransportCredentials(creds))
 	} else {
 		opts = append(opts, grpc.WithInsecure())
 	}
+
+	// Add keepalive options
+	opts = append(opts, grpc.WithDefaultServiceConfig(`{"loadBalancingConfig": [{"round_robin":{}}]}`))
 
 	conn, err := grpc.Dial(serverAddr, opts...)
 	if err != nil {

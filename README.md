@@ -9,18 +9,16 @@ A cross-platform network capture agent that collects and processes network traff
 ├── cmd/
 │   ├── enigma-agent/          # Main application entry point
 │   └── windows/
-│       └── pcap-analyzer/    # Windows PCAP analysis CLI tool
+│       └── pcap-analyzer/    # PCAP analysis CLI tool
 ├── internal/
 │   ├── api/                   # API client for Enigma backend
 │   ├── capture/
 │   │   ├── common/           # Common capture interfaces and types
 │   │   ├── windows/          # Windows-specific capture (pktmon)
-│   │   │   └── pcap/        # PCAP processing implementation
-│   │   └── linux/            # Linux-specific capture (Zeek)
+│   │   └── linux/            # Linux-specific capture (tcpdump)
 │   ├── config/               # Configuration management
-│   ├── processor/            # Unified Zeek data processing
-│   │   ├── parser/          # Zeek format parsing
-│   │   │   └── zeekconv/   # Zeek format conversion logic
+│   ├── processor/            # Traffic data processing
+│   │   ├── pcap/            # PCAP processing and log generation
 │   │   ├── validator/       # Data validation
 │   │   └── storage/         # Data storage management
 │   ├── proto/                # Protocol definitions
@@ -33,14 +31,15 @@ A cross-platform network capture agent that collects and processes network traff
 ## Component Overview
 
 - `capture`: Platform-specific packet capture implementations
-  - `windows`: Pktmon-based capture and conversion to Zeek format
-  - `linux`: Direct Zeek integration
+  - `windows`: Uses pktmon to capture network traffic
+  - `linux`: Uses tcpdump for efficient packet capture
   - `common`: Shared interfaces and types for capture implementations
 
-- `processor`: Platform-agnostic Zeek data processing
+- `processor`: Platform-agnostic packet processing
+  - Common PCAP processing and log generation
   - Handles data validation, transformation, and preparation for upload
   - Common storage management and cleanup policies
-  - Unified processing pipeline for both capture methods
+  - Unified processing pipeline for both platforms
 
 - `api`: Enigma API client implementation
   - gRPC-based communication
@@ -65,19 +64,28 @@ A cross-platform network capture agent that collects and processes network traff
 3. Build: go build -o bin/enigma-agent ./cmd/enigma-agent
 4. Run: ./bin/enigma-agent
 
+### Platform-Specific Requirements
+
+#### Windows
+- Administrator privileges (for pktmon)
+
+#### Linux
+- Root privileges (for tcpdump)
+- tcpdump package installed (usually pre-installed on most distributions)
+
 ## Testing
 
 1. Run all tests: `go test ./...`
 2. Run tests with output: `go test -v ./...`
 3. Run specific package tests: `go test -v ./internal/capture/...`
-4. Run a specific test: `go test -v -run TestPcapParser_ProcessFile ./internal/capture/...`
+4. Run a specific test: `go test -v -run TestPcapParser_ProcessFile ./internal/processor/pcap/...`
 
 Test files are located in their respective package directories. The main test data files are in the `test/` directory.
 
 ## Tools
 
-### Windows PCAP Analyzer
-The PCAP analyzer tool converts Windows pktmon ETL and PCAP/PCAPNG files to Zeek log format. This tool is only needed for Windows captures.
+### PCAP Analyzer
+The PCAP analyzer tool processes PCAP/PCAPNG files and generates connection and DNS logs. It works with captures from both Windows (pktmon) and Linux (tcpdump).
 
 1. Build the tool:
 ```bash
@@ -95,5 +103,5 @@ Example:
 ```
 
 This will generate:
-- logs/conn.log: Connection tracking in Zeek format
-- logs/dns.log: DNS queries and responses in Zeek format
+- logs/conn.log: Connection tracking information
+- logs/dns.log: DNS queries and responses

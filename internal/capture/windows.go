@@ -4,13 +4,14 @@
 package capture
 
 import (
-	"EnigmaNetz/Enigma-Go-Agent/internal/capture/windows/pcap"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"time"
+
+	"EnigmaNetz/Enigma-Go-Agent/internal/processor/pcap"
 )
 
 // WindowsCapturer implements PacketCapturer for Windows

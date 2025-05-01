@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"EnigmaNetz/Enigma-Go-Agent/internal/capture"
+	"EnigmaNetz/Enigma-Go-Agent/internal/processor/pcap"
 )
 
 func main() {
@@ -28,7 +28,7 @@ func main() {
 	}
 
 	// Create parser
-	parser := capture.NewPcapParser(*inputFile, *outputDir)
+	parser := pcap.NewPcapParser(*inputFile, *outputDir)
 
 	// Process the file
 	stats, err := parser.ProcessFile()

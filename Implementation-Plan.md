@@ -29,12 +29,12 @@
   - Clean up temporary ETL files after conversion
 - Windows-specific configuration and error handling
 
-### Linux Capture (Zeek)
-- Direct Zeek integration:
-  - Execute Zeek with appropriate configuration
-  - Ensure Zeek installation/dependencies
+### Linux Capture (tcpdump)
+- Implement tcpdump wrapper for packet capture:
+  - Execute tcpdump with appropriate privileges
+  - Direct PCAP file capture
   - Handle Linux-specific paths and permissions
-  - Monitor Zeek process health
+  - Monitor tcpdump process health
 
 ### Common Capture Management
 - Platform-agnostic capture orchestration:
@@ -43,9 +43,10 @@
   - Implement log rotation and cleanup (7-day retention)
   - Common error handling and retry logic
 
-## 3. Unified Zeek Processing
-- Common interface for processing Zeek-formatted data:
-  - Platform-agnostic data validation
+## 3. Unified PCAP Processing
+- Common interface for processing PCAP data:
+  - Platform-agnostic PCAP parsing using gopacket
+  - Connection and DNS log generation
   - Standardized data structure handling
   - Unified error handling and logging
   - Common compression and preparation for upload
@@ -55,22 +56,22 @@
   - Unified archival strategy
 
 **Success Criteria:**
-- Windows: Pktmon successfully captures and converts to Zeek format
-- Linux: Direct Zeek capture works correctly
+- Windows: Pktmon successfully captures and converts to PCAP
+- Linux: tcpdump capture works correctly
 - Common processing pipeline handles both sources identically
 - Capture timing matches requirements (2-min interval, 30s window)
 - Log rotation and cleanup work consistently across platforms
 
 **Tests:**
 - Platform-specific capture tests
-- Common processing pipeline tests
+- Common PCAP processing pipeline tests
 - Integration tests for each capture method
 - Cross-platform compatibility verification
 - Unified processing validation
 
 ## 4. API Upload Logic
 - Implement gRPC client using `grpc_config.proto`:
-  - Upload converted Zeek-format data
+  - Upload processed log data
   - Handle API key securely
   - Implement retry/backoff for upload failures
 - Compress and encode data before upload
@@ -135,7 +136,7 @@
 
 **Risks/Notes:**
 - Pktmon requires admin privileges
-- ETL to PCAP conversion reliability
+- tcpdump requires root privileges
 - Network adapter compatibility
 - Resource usage during capture
 - Service recovery after network changes

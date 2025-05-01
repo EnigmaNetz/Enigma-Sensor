@@ -8,7 +8,7 @@ The agent follows a platform-agnostic design with platform-specific capture impl
 
 1. **Packet Capture Layer** (Platform-specific)
    - Windows: Uses pktmon to capture traffic into ETL format, converts to PCAP
-   - Linux: Uses tcpdump to capture traffic directly to PCAP format
+   - Linux/macOS: Uses tcpdump to capture traffic directly to PCAP format
    - Common interface ensures consistent behavior across platforms
 
 2. **Processing Layer** (Platform-agnostic)
@@ -144,10 +144,10 @@ Field descriptions:
 - Administrator privileges (for pktmon)
 - Windows 10 1809 or later (pktmon requirement)
 
-#### Linux
+#### Linux/macOS
 
 - Root privileges (for tcpdump)
-- tcpdump package installed
+- tcpdump package installed (usually pre-installed on most distributions and macOS)
 
 ### Building
 
@@ -160,10 +160,10 @@ Field descriptions:
 
 - Administrator privileges (for pktmon)
 
-#### Linux
+#### Linux/macOS
 
 - Root privileges (for tcpdump)
-- tcpdump package installed (usually pre-installed on most distributions)
+- tcpdump package installed (usually pre-installed on most distributions and macOS)
 
 ## Testing
 

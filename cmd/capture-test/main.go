@@ -153,7 +153,7 @@ func main() {
 
 	// Get output files
 	dnsPath := filepath.Join(*outputDir, "dns.xlsx")
-	connPath := filepath.Join(*outputDir, "conn.log")
+	connPath := filepath.Join(*outputDir, "conn.xlsx")
 
 	if *local {
 		log.Printf("Logs saved locally at:\n  DNS Log: %s\n  Conn Log: %s", dnsPath, connPath)

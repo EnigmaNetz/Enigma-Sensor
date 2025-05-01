@@ -50,10 +50,10 @@ func (c *LinuxCapturer) Stop() error {
 	c.log.Info("Stopping Linux capture")
 	if c.cmd != nil && c.cmd.Process != nil {
 		if err := c.cmd.Process.Kill(); err != nil {
-			c.log.Error("Failed to stop tshark: %v", err)
-			return fmt.Errorf("failed to stop tshark: %v", err)
+			c.log.Error("Failed to stop tcpdump: %v", err)
+			return fmt.Errorf("failed to stop tcpdump: %v", err)
 		}
-		c.log.Debug("Successfully stopped tshark process")
+		c.log.Debug("Successfully stopped tcpdump process")
 	}
 	c.lastStatus.IsRunning = false
 	return nil
@@ -88,28 +88,34 @@ func (c *LinuxCapturer) captureLoop(ctx context.Context, config common.CaptureCo
 func (c *LinuxCapturer) runCapture(config common.CaptureConfig) error {
 	// Generate output filename with timestamp
 	timestamp := time.Now().Format("20060102_150405")
-	outputFile := filepath.Join(c.outputDir, fmt.Sprintf("capture_%s.pcapng", timestamp))
+	outputFile := filepath.Join(c.outputDir, fmt.Sprintf("capture_%s.pcap", timestamp))
 
 	c.log.Debug("Starting new capture to file: %s", outputFile)
 
-	// Build tshark command
+	// Build tcpdump command
 	args := []string{
 		"-i", "any", // Capture on all interfaces
-		"-a", fmt.Sprintf("duration:%d", int(config.CaptureWindow.Seconds())), // Capture duration
-		"-w", outputFile, // Output file
+		"-w", outputFile, // Write to file
+		"-G", fmt.Sprintf("%d", int(config.CaptureWindow.Seconds())), // Rotate after duration
+		"-W", "1", // Create only one file
+		"-K",      // Don't verify checksums
+		"-n",      // Don't convert addresses
+		"-q",      // Quick output
+		"-s", "0", // Capture entire packet
+		"port 53", // Capture DNS traffic (port 53)
 	}
 
-	c.log.Debug("Running tshark with args: %v", args)
+	c.log.Debug("Running tcpdump with args: %v", args)
 
-	// Start tshark
-	c.cmd = exec.Command("tshark", args...)
+	// Start tcpdump
+	c.cmd = exec.Command("tcpdump", args...)
 	c.lastStatus.IsRunning = true
 	c.lastStatus.LastCapture = time.Now()
 
 	// Run capture
 	if err := c.cmd.Run(); err != nil {
-		c.log.Error("Tshark capture failed: %v", err)
-		return fmt.Errorf("tshark capture failed: %v", err)
+		c.log.Error("tcpdump capture failed: %v", err)
+		return fmt.Errorf("tcpdump capture failed: %v", err)
 	}
 
 	// Check capture file size

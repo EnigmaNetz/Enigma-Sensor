@@ -149,7 +149,7 @@ func main() {
 	}
 
 	// Get output files
-	dnsPath := filepath.Join(*outputDir, "dns.log")
+	dnsPath := filepath.Join(*outputDir, "dns.xlsx")
 	connPath := filepath.Join(*outputDir, "conn.log")
 
 	// Upload logs

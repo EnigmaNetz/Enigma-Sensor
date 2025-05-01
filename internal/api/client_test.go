@@ -68,7 +68,7 @@ func (m *mockPublishClient) GetMethod(ctx context.Context, in *publish.GetReques
 func TestLogUploader_UploadLogs(t *testing.T) {
 	// Create temporary test files
 	tmpDir := t.TempDir()
-	dnsPath := filepath.Join(tmpDir, "dns.log")
+	dnsPath := filepath.Join(tmpDir, "dns.xlsx")
 	connPath := filepath.Join(tmpDir, "conn.log")
 
 	// Write test data
@@ -172,7 +172,7 @@ func TestLogUploader_UploadLogs(t *testing.T) {
 func TestLogUploader_PrepareLogData(t *testing.T) {
 	// Create temporary test files
 	tmpDir := t.TempDir()
-	dnsPath := filepath.Join(tmpDir, "dns.log")
+	dnsPath := filepath.Join(tmpDir, "dns.xlsx")
 	connPath := filepath.Join(tmpDir, "conn.log")
 
 	dnsData := []byte("test dns data")

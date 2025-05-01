@@ -9,7 +9,7 @@ import (
 
 // createMockLogFiles creates empty log files to simulate capture
 func createMockLogFiles(dir string) error {
-	files := []string{"dns.log", "conn.log"}
+	files := []string{"dns.xlsx", "conn.xlsx"}
 	for _, f := range files {
 		path := filepath.Join(dir, f)
 		if err := os.WriteFile(path, []byte(""), 0644); err != nil {

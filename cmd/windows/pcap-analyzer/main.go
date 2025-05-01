@@ -41,6 +41,6 @@ func main() {
 	fmt.Printf("\nProcessing complete!\n")
 	fmt.Printf("Output files:\n")
 	fmt.Printf("- %s\n", filepath.Join(*outputDir, "conn.log"))
-	fmt.Printf("- %s\n", filepath.Join(*outputDir, "dns.log"))
+	fmt.Printf("- %s\n", filepath.Join(*outputDir, "dns.xlsx"))
 	fmt.Printf("\nPacket Statistics:\n%s\n", stats)
 }

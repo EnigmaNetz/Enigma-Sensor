@@ -16,7 +16,7 @@ The agent follows a platform-agnostic design with platform-specific capture impl
    - Uses gopacket for packet analysis
    - Processes into standardized Zeek-format logs:
      - conn.log: TCP/UDP connection tracking (IPv4/IPv6)
-     - dns.log: DNS queries, responses, and metadata
+     - dns.xlsx: DNS queries, responses, and metadata
 
 ## Project Structure
 
@@ -54,7 +54,7 @@ JSON format with fields:
 }
 ```
 
-### DNS Log (dns.log)
+### DNS Log (dns.xlsx)
 JSON format with fields:
 ```json
 {
@@ -182,4 +182,4 @@ Example:
 
 This will generate:
 - logs/conn.log: Connection tracking in JSON format
-- logs/dns.log: DNS queries and responses in JSON format
+- logs/dns.xlsx: DNS queries and responses in JSON format

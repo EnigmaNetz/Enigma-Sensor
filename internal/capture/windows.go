@@ -28,8 +28,8 @@ func NewWindowsCapturer(cfg Config) PacketCapturer {
 	return &WindowsCapturer{
 		config:      cfg,
 		etlFile:     filepath.Join(cfg.OutputDir, "capture.etl"),
-		dnsLogPath:  filepath.Join(cfg.OutputDir, "dns.log"),
-		connLogPath: filepath.Join(cfg.OutputDir, "conn.log"),
+		dnsLogPath:  filepath.Join(cfg.OutputDir, "dns.xlsx"),
+		connLogPath: filepath.Join(cfg.OutputDir, "conn.xlsx"),
 	}
 }
 
@@ -95,15 +95,15 @@ func (w *WindowsCapturer) StopCapture() error {
 func (w *WindowsCapturer) OutputFiles() (string, string, error) {
 	// Check if files exist
 	if _, err := os.Stat(w.dnsLogPath); err != nil {
-		return "", "", fmt.Errorf("dns.log not found: %v", err)
+		return "", "", fmt.Errorf("dns.xlsx not found: %v", err)
 	}
 	if _, err := os.Stat(w.connLogPath); err != nil {
-		return "", "", fmt.Errorf("conn.log not found: %v", err)
+		return "", "", fmt.Errorf("conn.xlsx not found: %v", err)
 	}
 	return w.dnsLogPath, w.connLogPath, nil
 }
 
-// processLogs converts pktmon output to dns.log and conn.log format
+// processLogs converts pktmon output to dns.xlsx and conn.xlsx format
 func (w *WindowsCapturer) processLogs(inputFile string) error {
 	log.Printf("Opening input file: %s", inputFile)
 

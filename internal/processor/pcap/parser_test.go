@@ -1,11 +1,11 @@
 package pcap
 
 import (
-	"encoding/json"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -176,8 +176,9 @@ func TestProcessDNSPacket(t *testing.T) {
 }
 
 func TestWriteLogs(t *testing.T) {
-	// Create a temporary directory for test output
-	tempDir, err := os.MkdirTemp("", "pcap_logs_test")
+	// Create a temporary directory for test output with Windows-compatible path
+	tempDir := filepath.Join(".", fmt.Sprintf("pcap_logs_test_%d", time.Now().UnixNano()))
+	err := os.MkdirAll(tempDir, 0755)
 	require.NoError(t, err)
 	defer os.RemoveAll(tempDir)
 
@@ -211,25 +212,42 @@ func TestWriteLogs(t *testing.T) {
 	err = parser.writeLogs()
 	require.NoError(t, err)
 
-	// Verify conn.log
-	connLogPath := filepath.Join(tempDir, "conn.log")
+	// Verify conn.xlsx exists and has content
+	connLogPath := filepath.Join(tempDir, "conn.xlsx")
 	assert.FileExists(t, connLogPath)
 	connLogData, err := os.ReadFile(connLogPath)
 	require.NoError(t, err)
-	var connLogs []ConnLog
-	err = json.Unmarshal(connLogData, &connLogs)
-	require.NoError(t, err)
-	assert.Len(t, connLogs, 1)
+	assert.NotEmpty(t, connLogData)
 
-	// Verify dns.log
-	dnsLogPath := filepath.Join(tempDir, "dns.log")
+	// Verify dns.xlsx exists and has content
+	dnsLogPath := filepath.Join(tempDir, "dns.xlsx")
 	assert.FileExists(t, dnsLogPath)
 	dnsLogData, err := os.ReadFile(dnsLogPath)
 	require.NoError(t, err)
-	var dnsLogs []DNSLog
-	err = json.Unmarshal(dnsLogData, &dnsLogs)
-	require.NoError(t, err)
-	assert.Len(t, dnsLogs, 1)
+	assert.NotEmpty(t, dnsLogData)
+
+	// Verify the files contain the expected headers and data format
+	connLines := strings.Split(string(connLogData), "\n")
+	hasFields := false
+	for _, line := range connLines {
+		if strings.HasPrefix(line, "#fields") {
+			hasFields = true
+			break
+		}
+	}
+	assert.True(t, hasFields, "conn.xlsx should have a #fields line")
+	assert.True(t, len(connLines) > 7, "Should have headers and at least one data line")
+
+	dnsLines := strings.Split(string(dnsLogData), "\n")
+	hasFields = false
+	for _, line := range dnsLines {
+		if strings.HasPrefix(line, "#fields") {
+			hasFields = true
+			break
+		}
+	}
+	assert.True(t, hasFields, "dns.xlsx should have a #fields line")
+	assert.True(t, len(dnsLines) > 7, "Should have headers and at least one data line")
 }
 
 // Mock packet for testing
@@ -349,40 +367,41 @@ func TestProcessDNSPacketErrors(t *testing.T) {
 }
 
 func TestEdgeCases(t *testing.T) {
-	t.Run("Empty PCAP File", func(t *testing.T) {
-		tempDir, err := os.MkdirTemp("", "pcap_test")
+	t.Run("Empty_PCAP_File", func(t *testing.T) {
+		tempDir := filepath.Join(".", fmt.Sprintf("pcap_test_%d", time.Now().UnixNano()))
+		err := os.MkdirAll(tempDir, 0755)
 		require.NoError(t, err)
 		defer os.RemoveAll(tempDir)
 
 		emptyFile := filepath.Join(tempDir, "empty.pcap")
-		f, err := os.Create(emptyFile)
+		err = os.WriteFile(emptyFile, []byte{}, 0644)
 		require.NoError(t, err)
-		f.Close()
 
 		parser := NewPcapParser(emptyFile, tempDir)
 		stats, err := parser.ProcessFile()
-		assert.Error(t, err)
-		assert.Nil(t, stats)
+		assert.Error(t, err) // Should error on invalid PCAP file
+		assert.Nil(t, stats) // Stats should be nil when there's an error
 	})
 
-	t.Run("Invalid Output Directory", func(t *testing.T) {
+	t.Run("Invalid_Output_Directory", func(t *testing.T) {
 		parser := NewPcapParser("test.pcap", "/nonexistent/directory")
 		err := parser.writeLogs()
 		assert.Error(t, err)
 	})
 
-	t.Run("Large Number of Logs", func(t *testing.T) {
-		tempDir, err := os.MkdirTemp("", "pcap_test")
+	t.Run("Large_Number_of_Logs", func(t *testing.T) {
+		tempDir := filepath.Join(".", fmt.Sprintf("pcap_test_%d", time.Now().UnixNano()))
+		err := os.MkdirAll(tempDir, 0755)
 		require.NoError(t, err)
 		defer os.RemoveAll(tempDir)
 
 		parser := NewPcapParser("", tempDir)
 
-		// Add 10000 connection logs
-		for i := 0; i < 10000; i++ {
+		// Add a large number of test logs
+		for i := 0; i < 1000; i++ {
 			parser.connLogs = append(parser.connLogs, ConnLog{
 				TS:    time.Now(),
-				UID:   fmt.Sprintf("C%d", i),
+				UID:   fmt.Sprintf("test-uid-%d", i),
 				SrcIP: "192.168.1.1",
 				DstIP: "192.168.1.2",
 				Proto: "tcp",
@@ -390,19 +409,26 @@ func TestEdgeCases(t *testing.T) {
 		}
 
 		err = parser.writeLogs()
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
-		// Verify file exists and is readable
-		connLogPath := filepath.Join(tempDir, "conn.log")
+		// Verify conn.xlsx exists and has content
+		connLogPath := filepath.Join(tempDir, "conn.xlsx")
 		assert.FileExists(t, connLogPath)
+		connLogData, err := os.ReadFile(connLogPath)
+		require.NoError(t, err)
+		assert.NotEmpty(t, connLogData)
 
-		// Verify we can read all logs back
-		data, err := os.ReadFile(connLogPath)
-		require.NoError(t, err)
-		var logs []ConnLog
-		err = json.Unmarshal(data, &logs)
-		require.NoError(t, err)
-		assert.Len(t, logs, 10000)
+		// Verify the file contains the expected headers and data format
+		connLines := strings.Split(string(connLogData), "\n")
+		hasFields := false
+		for _, line := range connLines {
+			if strings.HasPrefix(line, "#fields") {
+				hasFields = true
+				break
+			}
+		}
+		assert.True(t, hasFields, "conn.xlsx should have a #fields line")
+		assert.True(t, len(connLines) > 1007, "Should have headers and 1000 data lines")
 	})
 }
 

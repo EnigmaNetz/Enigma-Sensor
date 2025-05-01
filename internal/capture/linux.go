@@ -30,8 +30,8 @@ func NewLinuxCapturer(cfg Config) PacketCapturer {
 	return &LinuxCapturer{
 		config:      cfg,
 		pcapPath:    filepath.Join(cfg.OutputDir, "capture.pcap"),
-		dnsLogPath:  filepath.Join(cfg.OutputDir, "dns.log"),
-		connLogPath: filepath.Join(cfg.OutputDir, "conn.log"),
+		dnsLogPath:  filepath.Join(cfg.OutputDir, "dns.xlsx"),
+		connLogPath: filepath.Join(cfg.OutputDir, "conn.xlsx"),
 	}
 }
 

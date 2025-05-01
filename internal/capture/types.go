@@ -25,7 +25,7 @@ type PacketCapturer interface {
 	StopCapture() error
 
 	// OutputFiles returns the paths to the generated Zeek-format log files.
-	// Returns the paths to dns.log and conn.log respectively, or an error if
+	// Returns the paths to dns.xlsx and conn.xlsx respectively, or an error if
 	// the files don't exist or are not accessible.
 	OutputFiles() (dnsLog string, connLog string, err error)
 }

@@ -1,0 +1,42 @@
+name: Go Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        go-version: ['1.21.x']
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ matrix.go-version }}
+        cache: true
+
+    - name: Install dependencies
+      run: go mod download
+
+    - name: Install pcap dependencies (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libpcap-dev
+
+    - name: Install pcap dependencies (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        choco install npcap --version=1.60 -y
+        choco install winpcap -y
+
+    - name: Run tests
+      run: go test -v -race ./...

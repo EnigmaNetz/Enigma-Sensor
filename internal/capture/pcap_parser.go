@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 
+	"EnigmaNetz/Enigma-Go-Agent/internal/zeekconv"
+
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/pcapgo"
 )
@@ -23,16 +25,18 @@ func (s PacketStats) String() string {
 // PcapParser handles pcap file processing
 type PcapParser struct {
 	filePath string
+	outDir   string
 }
 
 // NewPcapParser creates a new PcapParser instance
-func NewPcapParser(filePath string) *PcapParser {
+func NewPcapParser(filePath string, outputDir string) *PcapParser {
 	return &PcapParser{
 		filePath: filePath,
+		outDir:   outputDir,
 	}
 }
 
-// ProcessFile reads and processes a pcap file, returning packet statistics
+// ProcessFile reads and processes a pcap file, returning packet statistics and generating Zeek logs
 func (p *PcapParser) ProcessFile() (*PacketStats, error) {
 	// Open the pcap file
 	handle, err := os.Open(p.filePath)
@@ -62,6 +66,9 @@ func (p *PcapParser) ProcessFile() (*PacketStats, error) {
 		ProtocolCounts: make(map[string]uint64),
 	}
 
+	// Create Zeek converter
+	converter := zeekconv.NewZeekConverter(p.outDir)
+
 	// Process packets
 	for packet := range packetSource.Packets() {
 		stats.TotalPackets++
@@ -71,6 +78,14 @@ func (p *PcapParser) ProcessFile() (*PacketStats, error) {
 		for _, layer := range packet.Layers() {
 			stats.ProtocolCounts[layer.LayerType().String()]++
 		}
+
+		// Process packet for Zeek logs
+		converter.ProcessPacket(packet)
+	}
+
+	// Write Zeek logs
+	if err := converter.WriteLogs(); err != nil {
+		return nil, fmt.Errorf("error writing Zeek logs: %v", err)
 	}
 
 	return stats, nil

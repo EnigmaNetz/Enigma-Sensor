@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package publish;
+
+service publishService {
+  rpc getMethod(getRequest) returns (getResponse);
+  rpc uploadExcelMethod(uploadExcelRequest) returns (uploadExcelResponse);
+}
+
+message getRequest {
+  string data = 1;
+}
+
+message getResponse {
+  string status = 1;
+  int32 statusCode = 2;
+  string message = 3;
+}
+
+message uploadExcelRequest {
+  bytes data = 1;
+  string employeeId = 2;
+}
+
+message uploadExcelResponse {
+  string status = 1;
+  int32 statusCode = 2;
+  string message = 3;
+}

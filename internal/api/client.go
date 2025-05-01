@@ -10,15 +10,14 @@ import (
 	"os"
 	"time"
 
-	"EnigmaNetz/Enigma-Go-Agent/internal/api/publish"
-
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/metadata"
 )
 
 // LogUploader handles uploading logs to the gRPC server
 type LogUploader struct {
-	client     publish.PublishServiceClient
+	client     grpcClient
 	apiKey     string
 	retryCount int
 	retryDelay time.Duration
@@ -42,7 +41,7 @@ func NewLogUploader(serverAddr string, apiKey string, insecure bool) (*LogUpload
 
 	if !insecure {
 		// Use SSL credentials without client certificates (matching Docker implementation)
-		creds := credentials.NewClientTLSFromCert(nil, "")
+		creds := credentials.NewClientTLSFromCert(nil, serverAddr)
 		opts = append(opts, grpc.WithTransportCredentials(creds))
 	} else {
 		opts = append(opts, grpc.WithInsecure())
@@ -57,11 +56,40 @@ func NewLogUploader(serverAddr string, apiKey string, insecure bool) (*LogUpload
 	}
 
 	return &LogUploader{
-		client:     publish.NewPublishServiceClient(conn),
+		client:     grpcClient{conn},
 		apiKey:     apiKey,
 		retryCount: 3,
 		retryDelay: 5 * time.Second,
 	}, nil
+}
+
+type grpcClient struct {
+	conn *grpc.ClientConn
+}
+
+func (c *grpcClient) uploadExcelMethod(ctx context.Context, data []byte, employeeId string) (string, int32, string, error) {
+	// Make the gRPC call
+	var header metadata.MD
+	var trailer metadata.MD
+
+	out := struct {
+		Status     string `json:"status"`
+		StatusCode int32  `json:"statusCode"`
+		Message    string `json:"message"`
+	}{}
+
+	err := c.conn.Invoke(ctx, "/publish.publishService/uploadExcelMethod", &struct {
+		Data       []byte `json:"data"`
+		EmployeeId string `json:"employeeId"`
+	}{
+		Data:       data,
+		EmployeeId: employeeId,
+	}, &out, grpc.Header(&header), grpc.Trailer(&trailer))
+	if err != nil {
+		return "", 0, "", fmt.Errorf("gRPC call failed: %v", err)
+	}
+
+	return out.Status, out.StatusCode, out.Message, nil
 }
 
 // UploadLogs uploads the DNS and connection logs to the server
@@ -130,18 +158,13 @@ func (u *LogUploader) prepareLogData(files LogFiles) ([]byte, error) {
 
 // upload sends the compressed data to the server
 func (u *LogUploader) upload(ctx context.Context, data []byte) error {
-	req := &publish.UploadExcelRequest{
-		Data:       data,
-		EmployeeId: u.apiKey,
-	}
-
-	resp, err := u.client.UploadExcelMethod(ctx, req)
+	_, statusCode, message, err := u.client.uploadExcelMethod(ctx, data, u.apiKey)
 	if err != nil {
 		return fmt.Errorf("gRPC call failed: %v", err)
 	}
 
-	if resp.StatusCode != 200 {
-		return fmt.Errorf("upload failed: %s (code: %d)", resp.Message, resp.StatusCode)
+	if statusCode != 200 {
+		return fmt.Errorf("upload failed: %s (code: %d)", message, statusCode)
 	}
 
 	return nil

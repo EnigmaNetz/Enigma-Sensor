@@ -12,11 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"EnigmaNetz/Enigma-Go-Agent/internal/api/publish"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -41,28 +38,26 @@ func base64DecodeAndDecompress(data string) ([]byte, error) {
 	return decompressData(decoded)
 }
 
-// mockPublishClient implements publish.PublishServiceClient for testing
+// mockPublishClient implements the grpcClient interface for testing
 type mockPublishClient struct {
 	uploadResponses []uploadResponse
 	currentCall     int
 }
 
 type uploadResponse struct {
-	resp *publish.UploadExcelResponse
-	err  error
+	status     string
+	statusCode int32
+	message    string
+	err        error
 }
 
-func (m *mockPublishClient) UploadExcelMethod(ctx context.Context, in *publish.UploadExcelRequest, opts ...grpc.CallOption) (*publish.UploadExcelResponse, error) {
+func (m *mockPublishClient) uploadExcelMethod(ctx context.Context, data []byte, employeeId string) (string, int32, string, error) {
 	if m.currentCall >= len(m.uploadResponses) {
-		return nil, status.Error(codes.Internal, "unexpected call")
+		return "", 0, "", status.Error(codes.Internal, "unexpected call")
 	}
 	resp := m.uploadResponses[m.currentCall]
 	m.currentCall++
-	return resp.resp, resp.err
-}
-
-func (m *mockPublishClient) GetMethod(ctx context.Context, in *publish.GetRequest, opts ...grpc.CallOption) (*publish.GetResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "not implemented")
+	return resp.status, resp.statusCode, resp.message, resp.err
 }
 
 func TestLogUploader_UploadLogs(t *testing.T) {
@@ -85,12 +80,10 @@ func TestLogUploader_UploadLogs(t *testing.T) {
 			name: "successful upload",
 			uploadResponses: []uploadResponse{
 				{
-					resp: &publish.UploadExcelResponse{
-						Status:     "success",
-						StatusCode: 200,
-						Message:    "ok",
-					},
-					err: nil,
+					status:     "success",
+					statusCode: 200,
+					message:    "ok",
+					err:        nil,
 				},
 			},
 			wantErr:    false,
@@ -100,16 +93,16 @@ func TestLogUploader_UploadLogs(t *testing.T) {
 			name: "retry success",
 			uploadResponses: []uploadResponse{
 				{
-					resp: nil,
-					err:  status.Error(codes.Unavailable, "server unavailable"),
+					status:     "",
+					statusCode: 0,
+					message:    "",
+					err:        status.Error(codes.Unavailable, "server unavailable"),
 				},
 				{
-					resp: &publish.UploadExcelResponse{
-						Status:     "success",
-						StatusCode: 200,
-						Message:    "ok",
-					},
-					err: nil,
+					status:     "success",
+					statusCode: 200,
+					message:    "ok",
+					err:        nil,
 				},
 			},
 			wantErr:    false,
@@ -119,16 +112,22 @@ func TestLogUploader_UploadLogs(t *testing.T) {
 			name: "all retries fail",
 			uploadResponses: []uploadResponse{
 				{
-					resp: nil,
-					err:  status.Error(codes.Unavailable, "server unavailable"),
+					status:     "",
+					statusCode: 0,
+					message:    "",
+					err:        status.Error(codes.Unavailable, "server unavailable"),
 				},
 				{
-					resp: nil,
-					err:  status.Error(codes.Unavailable, "server unavailable"),
+					status:     "",
+					statusCode: 0,
+					message:    "",
+					err:        status.Error(codes.Unavailable, "server unavailable"),
 				},
 				{
-					resp: nil,
-					err:  status.Error(codes.Unavailable, "server unavailable"),
+					status:     "",
+					statusCode: 0,
+					message:    "",
+					err:        status.Error(codes.Unavailable, "server unavailable"),
 				},
 			},
 			wantErr:    true,

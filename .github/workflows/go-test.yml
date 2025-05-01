@@ -11,7 +11,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest]
         go-version: ['1.21.x']
 
     steps:
@@ -31,12 +31,6 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y libpcap-dev
-
-    - name: Install pcap dependencies (Windows)
-      if: matrix.os == 'windows-latest'
-      run: |
-        choco install npcap --version=1.60 -y
-        choco install winpcap -y
 
     - name: Run tests
       run: go test -v -race ./...

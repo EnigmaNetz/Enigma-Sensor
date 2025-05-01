@@ -274,8 +274,27 @@ func getConnState(tcp *layers.TCP) string {
 func extractAnswers(dns *layers.DNS) []string {
 	var answers []string
 	for _, answer := range dns.Answers {
-		if answer.Name != nil {
-			answers = append(answers, string(answer.Name))
+		switch answer.Type {
+		case layers.DNSTypeA:
+			if answer.IP != nil {
+				answers = append(answers, answer.IP.String())
+			}
+		case layers.DNSTypeAAAA:
+			if answer.IP != nil {
+				answers = append(answers, answer.IP.String())
+			}
+		case layers.DNSTypeCNAME, layers.DNSTypeNS, layers.DNSTypePTR:
+			if answer.CNAME != nil {
+				answers = append(answers, string(answer.CNAME))
+			}
+		case layers.DNSTypeMX:
+			if len(answer.MX.Name) > 0 {
+				answers = append(answers, string(answer.MX.Name))
+			}
+		case layers.DNSTypeTXT:
+			if answer.TXT != nil {
+				answers = append(answers, string(answer.TXT[0]))
+			}
 		}
 	}
 	return answers

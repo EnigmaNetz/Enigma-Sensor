@@ -2,7 +2,9 @@ syntax = "proto3";
 
 package publish;
 
-option go_package = "EnigmaNetz/Enigma-Go-Agent/internal/api/publish";
+option go_package = "internal/api/publish";
+
+import "google/protobuf/any.proto";
 
 service publishService {
   rpc getMethod(getRequest) returns (getResponse);

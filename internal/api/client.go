@@ -8,12 +8,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/proto"
+
+	pb "EnigmaNetz/Enigma-Go-Agent/internal/api/publish"
 )
+
+// grpcClient defines the interface for gRPC operations
+type grpcClient interface {
+	uploadExcelMethod(ctx context.Context, data []byte, employeeId string) (string, int32, string, error)
+}
 
 // LogUploader handles uploading logs to the gRPC server
 type LogUploader struct {
@@ -35,13 +43,24 @@ type CombinedLogs struct {
 	Conn string `json:"conn"` // base64 encoded compressed data
 }
 
+// grpcClientImpl implements the grpcClient interface
+type grpcClientImpl struct {
+	client pb.PublishServiceClient
+}
+
 // NewLogUploader creates a new log uploader instance
 func NewLogUploader(serverAddr string, apiKey string, insecure bool) (*LogUploader, error) {
 	var opts []grpc.DialOption
 
 	if !insecure {
-		// Use SSL credentials without client certificates (matching Docker implementation)
-		creds := credentials.NewClientTLSFromCert(nil, serverAddr)
+		// Extract hostname without port for TLS verification
+		host := serverAddr
+		if idx := strings.LastIndex(serverAddr, ":"); idx >= 0 {
+			host = serverAddr[:idx]
+		}
+
+		// Use SSL credentials without client certificates
+		creds := credentials.NewClientTLSFromCert(nil, host)
 		opts = append(opts, grpc.WithTransportCredentials(creds))
 	} else {
 		opts = append(opts, grpc.WithInsecure())
@@ -56,40 +75,30 @@ func NewLogUploader(serverAddr string, apiKey string, insecure bool) (*LogUpload
 	}
 
 	return &LogUploader{
-		client:     grpcClient{conn},
+		client:     &grpcClientImpl{client: pb.NewPublishServiceClient(conn)},
 		apiKey:     apiKey,
 		retryCount: 3,
 		retryDelay: 5 * time.Second,
 	}, nil
 }
 
-type grpcClient struct {
-	conn *grpc.ClientConn
-}
-
-func (c *grpcClient) uploadExcelMethod(ctx context.Context, data []byte, employeeId string) (string, int32, string, error) {
-	// Make the gRPC call
-	var header metadata.MD
-	var trailer metadata.MD
-
-	out := struct {
-		Status     string `json:"status"`
-		StatusCode int32  `json:"statusCode"`
-		Message    string `json:"message"`
-	}{}
-
-	err := c.conn.Invoke(ctx, "/publish.publishService/uploadExcelMethod", &struct {
-		Data       []byte `json:"data"`
-		EmployeeId string `json:"employeeId"`
-	}{
+func (c *grpcClientImpl) uploadExcelMethod(ctx context.Context, data []byte, employeeId string) (string, int32, string, error) {
+	req := &pb.UploadExcelRequest{
 		Data:       data,
 		EmployeeId: employeeId,
-	}, &out, grpc.Header(&header), grpc.Trailer(&trailer))
+	}
+
+	// Ensure the message implements proto.Message
+	if _, ok := interface{}(req).(proto.Message); !ok {
+		return "", 0, "", fmt.Errorf("request does not implement proto.Message")
+	}
+
+	resp, err := c.client.UploadExcelMethod(ctx, req)
 	if err != nil {
 		return "", 0, "", fmt.Errorf("gRPC call failed: %v", err)
 	}
 
-	return out.Status, out.StatusCode, out.Message, nil
+	return resp.Status, resp.StatusCode, resp.Message, nil
 }
 
 // UploadLogs uploads the DNS and connection logs to the server

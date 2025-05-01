@@ -5,13 +5,6 @@ import (
 	"time"
 )
 
-// PacketCapturer abstracts platform-specific capture logic.
-type PacketCapturer interface {
-	StartCapture() error
-	StopCapture() error
-	OutputFiles() ([]string, error)
-}
-
 // CaptureManager handles the shared capture loop and log management.
 type CaptureManager struct {
 	capturer PacketCapturer

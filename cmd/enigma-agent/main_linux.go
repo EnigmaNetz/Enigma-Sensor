@@ -4,7 +4,9 @@ package main
 
 import (
 	"log"
-	"time"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"EnigmaNetz/Enigma-Go-Agent/internal/capture"
 )
@@ -22,8 +24,9 @@ func main() {
 	}
 	log.Printf("[DEBUG] Loaded config: %+v\n", cfg)
 
-	log.Println("[INFO] Initializing Linux capture manager...")
-	manager := capture.NewLinuxCaptureManager(cfg)
+	// Create the capture manager with our Linux capturer
+	capturer := capture.NewLinuxCapturer(cfg)
+	manager := capture.NewCaptureManager(cfg, capturer)
 
 	log.Println("[INFO] Starting capture manager...")
 	if err := manager.Start(); err != nil {
@@ -31,8 +34,15 @@ func main() {
 		return
 	}
 
+	// Handle graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
 	log.Println("[INFO] Capture manager started. Agent is running.")
-	for {
-		time.Sleep(10 * time.Second)
+	<-sigChan // Wait for shutdown signal
+
+	log.Println("[INFO] Shutting down...")
+	if err := manager.Stop(); err != nil {
+		log.Printf("[ERROR] Error during shutdown: %v\n", err)
 	}
 }

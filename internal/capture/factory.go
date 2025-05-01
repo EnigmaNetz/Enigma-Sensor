@@ -3,15 +3,19 @@ package capture
 import (
 	"fmt"
 	"runtime"
+
+	"EnigmaNetz/Enigma-Go-Agent/internal/capture/common"
+	"EnigmaNetz/Enigma-Go-Agent/internal/capture/linux"
+	"EnigmaNetz/Enigma-Go-Agent/internal/capture/windows"
 )
 
-// NewCapturer creates a new PacketCapturer appropriate for the current platform
-func NewCapturer(cfg Config) PacketCapturer {
+// NewCapturer creates a new Capturer appropriate for the current platform
+func NewCapturer(cfg common.CaptureConfig) common.Capturer {
 	switch runtime.GOOS {
 	case "windows":
-		return NewWindowsCapturer(cfg)
+		return windows.NewWindowsCapturer()
 	case "linux", "darwin": // Both Linux and macOS use the same implementation
-		return NewLinuxCapturer(cfg)
+		return linux.NewLinuxCapturer()
 	default:
 		panic(fmt.Sprintf("unsupported platform: %s", runtime.GOOS))
 	}

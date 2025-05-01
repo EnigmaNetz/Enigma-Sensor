@@ -8,15 +8,15 @@ import (
 // CaptureManager handles the shared capture loop and log management.
 type CaptureManager struct {
 	capturer PacketCapturer
-	config   Config
+	opts     CaptureOptions
 	quitChan chan struct{}
 }
 
 // NewCaptureManager creates a new CaptureManager.
-func NewCaptureManager(cfg Config, capturer PacketCapturer) *CaptureManager {
+func NewCaptureManager(opts CaptureOptions, capturer PacketCapturer) *CaptureManager {
 	return &CaptureManager{
 		capturer: capturer,
-		config:   cfg,
+		opts:     opts,
 		quitChan: make(chan struct{}),
 	}
 }
@@ -24,6 +24,12 @@ func NewCaptureManager(cfg Config, capturer PacketCapturer) *CaptureManager {
 // Start begins the shared capture loop.
 func (m *CaptureManager) Start() error {
 	log.Println("[INFO] Starting shared capture loop...")
+
+	// Initialize the capturer with our options
+	if err := m.capturer.Initialize(m.opts); err != nil {
+		return err
+	}
+
 	go m.captureLoop()
 	return nil
 }
@@ -32,21 +38,25 @@ func (m *CaptureManager) Start() error {
 func (m *CaptureManager) Stop() error {
 	log.Println("[INFO] Stopping shared capture loop...")
 	close(m.quitChan)
-	return nil
+	return m.capturer.Cleanup()
 }
 
 // RotateLogs performs log rotation and cleanup.
 func (m *CaptureManager) RotateLogs() error {
-	log.Println("[DEBUG] Rotating logs (7-day retention)...")
+	if m.opts.RetentionDays <= 0 {
+		return nil // No rotation needed
+	}
+	log.Printf("[DEBUG] Rotating logs (%d-day retention)...", m.opts.RetentionDays)
 	// TODO: Implement log rotation
 	return nil
 }
 
 // captureLoop runs the capture at the configured interval.
 func (m *CaptureManager) captureLoop() {
-	log.Printf("[INFO] Capture loop started. Interval: %ds, Window: %ds", m.config.CaptureInterval, m.config.CaptureWindow)
-	ticker := time.NewTicker(time.Duration(m.config.CaptureInterval) * time.Second)
+	log.Printf("[INFO] Capture loop started. Interval: %ds", m.opts.CaptureInterval)
+	ticker := time.NewTicker(time.Duration(m.opts.CaptureInterval) * time.Second)
 	defer ticker.Stop()
+
 	for {
 		select {
 		case <-m.quitChan:
@@ -54,10 +64,20 @@ func (m *CaptureManager) captureLoop() {
 			return
 		case <-ticker.C:
 			log.Println("[DEBUG] Triggering packet capture...")
-			if err := m.capturer.StartCapture(); err != nil {
-				log.Printf("[ERROR] Packet capture failed: %v", err)
+			resultChan, err := m.capturer.StartCapture()
+			if err != nil {
+				log.Printf("[ERROR] Failed to start capture: %v", err)
+				continue
 			}
-			// TODO: Handle output files, parse/transform logs
+
+			// Wait for capture to complete
+			result := <-resultChan
+			if result.Error != nil {
+				log.Printf("[ERROR] Capture failed: %v", result.Error)
+			} else {
+				log.Printf("[INFO] Capture completed: %d packets, %d bytes",
+					result.PacketCount, result.ByteCount)
+			}
 		}
 	}
 }

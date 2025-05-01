@@ -7,13 +7,13 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"syscall"
 	"time"
 
 	"EnigmaNetz/Enigma-Go-Agent/internal/api"
 	"EnigmaNetz/Enigma-Go-Agent/internal/capture"
+	"EnigmaNetz/Enigma-Go-Agent/internal/capture/common"
 
 	"github.com/joho/godotenv"
 )
@@ -103,28 +103,23 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// Create platform-specific capturer
-	cfg := capture.Config{
-		OutputDir:     *outputDir,
-		CaptureWindow: int(duration.Seconds()),
-		// Set reasonable defaults for other fields
-		CaptureInterval: int(duration.Seconds()),
-		RetentionDays:   7, // Keep logs for a week by default
+	// Create capture configuration
+	cfg := common.CaptureConfig{
+		CaptureWindow:   *duration,
+		CaptureInterval: *duration,
+		OutputDir:       *outputDir,
 	}
 
-	var capturer capture.PacketCapturer
-	switch runtime.GOOS {
-	case "windows":
-		capturer = capture.NewWindowsCapturer(cfg)
-	case "linux":
-		capturer = capture.NewLinuxCapturer(cfg)
-	default:
-		log.Fatalf("Unsupported platform: %s", runtime.GOOS)
-	}
+	// Create platform-specific capturer
+	capturer := capture.NewCapturer(cfg)
+
+	// Create context for capture
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	// Start capture
 	log.Printf("Starting capture on interface %s for %v", *interface_, *duration)
-	if err := capturer.StartCapture(); err != nil {
+	if err := capturer.Start(ctx, cfg); err != nil {
 		log.Fatalf("Capture failed: %v", err)
 	}
 
@@ -132,7 +127,7 @@ func main() {
 	go func() {
 		<-sigChan
 		log.Println("Received shutdown signal")
-		if err := capturer.StopCapture(); err != nil {
+		if err := capturer.Stop(); err != nil {
 			log.Printf("Warning: Failed to stop capture gracefully: %v", err)
 		}
 		close(done)
@@ -147,8 +142,13 @@ func main() {
 	}
 
 	// Stop capture
-	if err := capturer.StopCapture(); err != nil {
+	if err := capturer.Stop(); err != nil {
 		log.Printf("Warning: Failed to stop capture gracefully: %v", err)
+	}
+
+	// Get status
+	if status, err := capturer.Status(); err == nil {
+		log.Printf("Capture completed. Status: %+v", status)
 	}
 
 	// Get output files

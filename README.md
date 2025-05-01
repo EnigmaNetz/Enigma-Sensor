@@ -15,3 +15,27 @@
 4. Run a specific test: `go test -v -run TestPcapParser_ProcessFile ./internal/capture/...`
 
 Test files are located in their respective package directories. The main test data files are in the `test/` directory.
+
+## Tools
+
+### PCAP Analyzer
+The PCAP analyzer tool converts pcap/pcapng files to Zeek log format.
+
+1. Build the tool:
+```bash
+go build -o bin/pcap-analyzer ./cmd/pcap-analyzer
+```
+
+2. Run the analyzer:
+```bash
+./bin/pcap-analyzer -input <pcap-file> -output <output-dir>
+```
+
+Example:
+```bash
+./bin/pcap-analyzer -input test/package-capture.pcapng -output logs
+```
+
+This will generate:
+- logs/conn.log: Connection tracking in Zeek format
+- logs/dns.log: DNS queries and responses in Zeek format

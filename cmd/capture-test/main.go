@@ -63,6 +63,7 @@ func main() {
 	duration := flag.Duration("duration", parseDuration(os.Getenv("CAPTURE_DURATION"), 60*time.Second), "Duration to capture")
 	outputDir := flag.String("output", getEnvOrDefault("CAPTURE_OUTPUT_DIR", "captures"), "Directory to store capture files")
 	noTLS := flag.Bool("no-tls", os.Getenv("DISABLE_TLS") == "true", "Disable TLS for API connection (not recommended for production)")
+	local := flag.Bool("local", false, "Save logs locally without uploading to API server")
 
 	flag.Parse()
 
@@ -77,7 +78,9 @@ func main() {
 	log.Printf("Using interface: %s", *interface_)
 
 	if *apiKey == "" || strings.TrimSpace(*apiKey) == "" {
-		log.Fatal("API key is required. Set ENIGMA_API_KEY in .env file or use --api-key flag")
+		if !*local {
+			log.Fatal("API key is required unless --local flag is used. Set ENIGMA_API_KEY in .env file or use --api-key flag")
+		}
 	}
 
 	if *interface_ == "" {
@@ -151,6 +154,11 @@ func main() {
 	// Get output files
 	dnsPath := filepath.Join(*outputDir, "dns.xlsx")
 	connPath := filepath.Join(*outputDir, "conn.log")
+
+	if *local {
+		log.Printf("Logs saved locally at:\n  DNS Log: %s\n  Conn Log: %s", dnsPath, connPath)
+		return
+	}
 
 	// Upload logs
 	log.Println("Uploading logs to API server...")

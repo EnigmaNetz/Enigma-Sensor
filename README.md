@@ -1,175 +1,134 @@
 # Enigma Go Agent
 
-A cross-platform network capture agent that collects and processes network traffic data into standardized Zeek-format logs.
+A cross-platform network capture agent that collects, processes, and optionally uploads network traffic data in standardized Zeek-format logs.
 
-## Core Architecture
+---
 
-The agent follows a platform-agnostic design with platform-specific capture implementations:
+## Architecture Overview
 
-1. **Packet Capture Layer** (Platform-specific)
-   - Windows: Uses pktmon to capture traffic into ETL format, converts to PCAP
-   - Linux/macOS: Uses tcpdump to capture traffic directly to PCAP format
-   - Common interface ensures consistent behavior across platforms
+- **Platform-Agnostic Core:**
+  Unified agent logic with platform-specific capture implementations.
+- **Capture Layer:**
+  - **Windows:** Uses `pktmon` (ETL → PCAP).
+  - **Linux/macOS:** Uses `tcpdump` (direct PCAP).
+- **Processing Layer:**
+  - Converts PCAP to Zeek-style logs (`conn.xlsx`, `dns.xlsx`).
+  - Uses `gopacket` for analysis.
+- **API Integration:**
+  - Optional upload of processed logs to Enigma API.
 
-2. **Processing Layer** (Platform-agnostic)
-   - Takes PCAP/PCAPNG files as input
-   - Uses gopacket for packet analysis
-   - Processes into standardized Zeek-format logs:
-     - conn.xlsx: TCP/UDP connection tracking (IPv4/IPv6)
-     - dns.xlsx: DNS queries, responses, and metadata
+---
 
-## Project Structure
+## Directory Structure
 
 ```
 .
 ├── cmd/
-│   ├── capture-test/         # Test utility for capture and upload
-│   ├── enigma-agent/         # Main application entry point
-│   └── windows/
-│       └── pcap-analyzer/    # PCAP analysis CLI tool
+│   └── enigma-agent/         # Main application entry point
 ├── internal/
-│   ├── capture/
-│   │   ├── common/           # Common capture interfaces and types
-│   │   ├── windows/          # Windows-specific capture (pktmon)
-│   │   └── linux/           # Linux-specific capture (tcpdump)
-│   ├── api/
-│   │   └── publish/         # Protobuf API implementation
-│   └── processor/
-│       └── pcap/            # PCAP to Zeek format conversion
+│   ├── api/                  # API client and protobufs
+│   ├── capture/              # Capture logic (common, windows, linux)
+│   ├── config/               # Configuration utilities
+│   ├── logger/               # Logging utilities
+│   └── processor/            # PCAP processing and Zeek log generation
+├── captures/                 # Output directory for capture runs
+├── logs/                     # Log output (if enabled)
+├── config/                   # Configuration files
+├── .env                      # Environment configuration
+├── go.mod / go.sum           # Go dependencies
+└── README.md
 ```
 
-## Setup
+---
 
-1. Install Go 1.24+
-2. Copy .env.example to .env and configure:
-3. Build: `go build -o bin/enigma-agent ./cmd/enigma-agent`
-4. Run: `./bin/enigma-agent`
+## Quick Start
 
-### Testing Capture and Upload
+1. **Install Go 1.24+**
+2. **Configure Environment:**
+   - Copy `.env.example` to `.env` and edit as needed.
+3. **Build:**
+   ```sh
+   go build -o bin/enigma-agent ./cmd/enigma-agent
+   ```
+4. **Run:**
+   ```sh
+   ./bin/enigma-agent
+   ```
 
-To test packet capture and API upload functionality:
+---
 
-1. Ensure your .env is configured with valid ENIGMA_SERVER and ENIGMA_API_KEY
-2. Run the capture test `go run ./cmd/capture-test/main.go`:
-   This will:
-   - Capture packets for the configured duration
-   - Process them into Zeek format
-   - Upload to the configured API endpoint
-   - Display upload status and response
+## Configuration
 
-### Generating Local Log Files
+- All configuration is via environment variables (see `.env.example`).
+- Key variables:
+  - `CAPTURE_OUTPUT_DIR` (default: `./captures`)
+  - `CAPTURE_DURATION` (default: `60s`)
+  - `CAPTURE_INTERVAL` (default: same as duration)
+  - `ENIGMA_UPLOAD` (`true` to enable upload)
+  - `ENIGMA_SERVER`, `ENIGMA_API_KEY` (required for upload)
+  - `DISABLE_TLS` (`true` to disable TLS for API)
 
-To generate and review log files locally without uploading:
+---
 
-1. Run the capture test with local flag: `go run ./cmd/capture-test/main.go --local`
-   This will:
-   - Capture packets for the configured duration
-   - Process them into Zeek format
-   - Save files locally without uploading
-   - Display file locations for review
+## Capture & Processing Flow
 
-This will generate:
+1. **Initialization:**
+   Loads config, detects platform, prepares output directory.
+2. **Capture:**
+   Runs platform-specific capture, outputs PCAP.
+3. **Processing:**
+   Converts PCAP to Zeek-format logs (`conn.xlsx`, `dns.xlsx`).
+4. **Upload (Optional):**
+   If enabled, uploads logs to Enigma API.
 
-- logs/conn.xlsx: Connection tracking in TSV format
-- logs/dns.xlsx: DNS queries and responses in TSV format
+---
 
 ## Log Formats
 
-### Connection Log (conn.log)
+- **conn.xlsx:**
+  TCP/UDP connection tracking (see sample in codebase).
+- **dns.xlsx:**
+  DNS queries, responses, and metadata.
 
-TSV format with fields:
-```
-ts	uid	src_ip	src_port	dst_ip	dst_port	proto	duration	orig_bytes	conn_state
-2024-01-01T00:00:00Z	C123456	192.168.1.1	12345	192.168.1.2	80	tcp	1.5	1024	S0
-```
+All logs are in TSV format, suitable for Zeek-style analysis.
 
-Field descriptions:
+---
 
-- ts: Timestamp (ISO8601 format)
-- uid: Unique connection ID
-- src_ip: Source IP (v4/v6)
-- src_port: Source port
-- dst_ip: Destination IP (v4/v6)
-- dst_port: Destination port
-- proto: Protocol (tcp/udp)
-- duration: Connection duration in seconds
-- orig_bytes: Original bytes sent
-- conn_state: Connection state
+## Development & Testing
 
-### DNS Log (dns.log)
+- **Build:**
+  `go build -o bin/enigma-agent ./cmd/enigma-agent`
+- **Run all tests:**
+  `go test ./...`
+- **Run specific package tests:**
+  `go test -v ./internal/capture/...`
+- **Test data:**
+  Located in `test/` directory.
 
-TSV format with fields:
-```
-ts	uid	src_ip	src_port	dst_ip	dst_port	proto	trans_id	query	qclass	qtype	answers	ttls	rcode
-2024-01-01T00:00:00Z	D123456	192.168.1.1	53	8.8.8.8	53	udp	1234	example.com	1	A	1.2.3.4	300	0
-```
+---
 
-Field descriptions:
+## Platform Requirements
 
-- ts: Timestamp (ISO8601 format)
-- uid: Unique DNS ID
-- src_ip: Source IP
-- src_port: Source port
-- dst_ip: Destination IP
-- dst_port: Destination port
-- proto: Protocol
-- trans_id: Transaction ID
-- query: Query domain
-- qclass: Query class
-- qtype: Query type (A, AAAA, etc.)
-- answers: Answer records (comma-separated if multiple)
-- ttls: TTL values (comma-separated if multiple)
-- rcode: Response code
+- **Windows:**
+  - Admin privileges (for `pktmon`)
+  - Windows 10 1809+
+- **Linux/macOS:**
+  - Root privileges (for `tcpdump`)
+  - `tcpdump` installed
 
-## Capture Flow
+---
 
-1. **Initialization**
-   - Platform detection
-   - Configuration loading
-   - Appropriate capture implementation selection
+## Notes
 
-2. **Capture Cycle**
-   - Runs every 2 minutes (configurable)
-   - 30-second capture window (configurable)
-   - Platform-specific capture to PCAP
-   - Processing into Zeek format
-   - File cleanup and rotation (7-day retention by default)
+- Capture and processing intervals are configurable.
+- Output directories are timestamped for each run.
+- 7-day retention and file rotation are recommended (implement as needed).
+- For API upload, both server URL and API key are required.
 
-## Development
+---
 
-### Prerequisites
+## Contributing
 
-#### Windows
-
-- Administrator privileges (for pktmon)
-- Windows 10 1809 or later (pktmon requirement)
-
-#### Linux/macOS
-
-- Root privileges (for tcpdump)
-- tcpdump package installed (usually pre-installed on most distributions and macOS)
-
-### Building
-
-1. Install Go 1.24+: <https://go.dev/doc/install>
-2. Build main agent: `go build -o bin/enigma-agent ./cmd/enigma-agent`
-
-### Platform-Specific Requirements
-
-#### Windows
-
-- Administrator privileges (for pktmon)
-
-#### Linux/macOS
-
-- Root privileges (for tcpdump)
-- tcpdump package installed (usually pre-installed on most distributions and macOS)
-
-## Testing
-
-1. Run all tests: `go test ./...`
-2. Run tests with output: `go test -v ./...`
-3. Run specific package tests: `go test -v ./internal/capture/...`
-4. Run a specific test: `go test -v -run TestPcapParser_ProcessFile ./internal/processor/pcap/...`
-
-Test files are located in their respective package directories. The main test data files are in the `test/` directory.
+- Follow Go best practices and project style.
+- Update/add tests for all functional changes.
+- Keep documentation and code comments concise and relevant.

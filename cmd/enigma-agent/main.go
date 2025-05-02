@@ -11,6 +11,7 @@ import (
 
 	"github.com/joho/godotenv"
 
+	"EnigmaNetz/Enigma-Go-Agent/internal/api"
 	"EnigmaNetz/Enigma-Go-Agent/internal/capture"
 	"EnigmaNetz/Enigma-Go-Agent/internal/capture/common"
 	"EnigmaNetz/Enigma-Go-Agent/internal/processor"
@@ -70,6 +71,34 @@ func main() {
 		log.Fatalf("Processing failed: %v", err)
 	}
 	log.Printf("Processing complete. Conn XLSX: %s, DNS XLSX: %s, Metadata: %+v", result.ConnPath, result.DNSPath, result.Metadata)
+
+	// Optionally upload processed logs to Enigma API if enabled
+	uploadEnabled := os.Getenv("ENIGMA_UPLOAD")
+	if uploadEnabled == "true" {
+		server := os.Getenv("ENIGMA_SERVER")
+		apiKey := os.Getenv("ENIGMA_API_KEY")
+		insecure := os.Getenv("DISABLE_TLS") == "true"
+		if server == "" || apiKey == "" {
+			log.Printf("ENIGMA_SERVER and ENIGMA_API_KEY must be set to upload logs; skipping upload.")
+			return
+		}
+
+		// Import the LogUploader and LogFiles
+		uploader, err := api.NewLogUploader(server, apiKey, insecure)
+		if err != nil {
+			log.Printf("Failed to initialize LogUploader: %v", err)
+			return
+		}
+		uploadErr := uploader.UploadLogs(ctx, api.LogFiles{
+			DNSPath:  result.DNSPath,
+			ConnPath: result.ConnPath,
+		})
+		if uploadErr != nil {
+			log.Printf("Log upload failed: %v", uploadErr)
+		} else {
+			log.Printf("Log upload successful.")
+		}
+	}
 }
 
 // findLatestFile returns the most recently modified file with the given extension in dir

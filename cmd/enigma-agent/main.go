@@ -14,9 +14,14 @@ import (
 	"EnigmaNetz/Enigma-Go-Agent/internal/capture"
 	"EnigmaNetz/Enigma-Go-Agent/internal/capture/common"
 	"EnigmaNetz/Enigma-Go-Agent/internal/processor"
+	"EnigmaNetz/Enigma-Go-Agent/internal/version"
 )
 
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
+		fmt.Println(version.Version)
+		return
+	}
 	// Load config from config.json
 	cfg, err := config.LoadConfig("")
 	if err != nil {

@@ -44,8 +44,8 @@ A cross-platform network capture agent that collects, processes, and optionally 
 ## Quick Start
 
 1. **Install Go 1.24+**
-2. **Configure Environment:**
-   - Copy `.env.example` to `.env` and edit as needed.
+2. **Configure Agent:**
+   - Copy `config.example.json` to `config.json` and edit as needed (e.g., set your API key, adjust capture/output settings).
 3. **Build:**
    ```sh
    go build -o bin/enigma-agent ./cmd/enigma-agent
@@ -59,14 +59,15 @@ A cross-platform network capture agent that collects, processes, and optionally 
 
 ## Configuration
 
-- All configuration is via environment variables (see `.env.example`).
-- Key variables:
-  - `CAPTURE_OUTPUT_DIR` (default: `./captures`)
-  - `CAPTURE_DURATION` (default: `60s`)
-  - `CAPTURE_INTERVAL` (default: same as duration)
-  - `ENIGMA_UPLOAD` (`true` to enable upload)
-  - `ENIGMA_SERVER`, `ENIGMA_API_KEY` (required for upload)
-  - `DISABLE_TLS` (`true` to disable TLS for API)
+- All configuration is via `config.json` (see `config.example.json` for a template).
+- **Key fields:**
+  - `logging`: Log level, file path, and max size.
+  - `capture`: Output directory, interval, and window duration.
+  - `enigma_api`: API server, API key, upload toggle, TLS toggle.
+  - `zeek`: Path to Zeek binary (if needed).
+- **How to configure:**
+  1. Copy `config.example.json` to `config.json`.
+  2. Edit `config.json` to match your environment and secrets.
 
 ---
 
@@ -132,3 +133,5 @@ All logs are in TSV format, suitable for Zeek-style analysis.
 - Follow Go best practices and project style.
 - Update/add tests for all functional changes.
 - Keep documentation and code comments concise and relevant.
+
+- **Do not commit your real `config.json`** (it is gitignored). Use `config.example.json` as a safe template for sharing or onboarding.

@@ -9,8 +9,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/joho/godotenv"
-
+	"EnigmaNetz/Enigma-Go-Agent/config"
 	"EnigmaNetz/Enigma-Go-Agent/internal/api"
 	"EnigmaNetz/Enigma-Go-Agent/internal/capture"
 	"EnigmaNetz/Enigma-Go-Agent/internal/capture/common"
@@ -18,28 +17,22 @@ import (
 )
 
 func main() {
-	// Load environment variables from .env if present
-	_ = godotenv.Load()
-
-	// Parse required config from environment
-	outputDir := os.Getenv("CAPTURE_OUTPUT_DIR")
-	if outputDir == "" {
-		outputDir = "./captures"
-	}
-	windowStr := os.Getenv("CAPTURE_DURATION")
-	if windowStr == "" {
-		windowStr = "60s"
-	}
-	window, err := time.ParseDuration(windowStr)
+	// Load config from config.json
+	cfg, err := config.LoadConfig("")
 	if err != nil {
-		log.Fatalf("Invalid CAPTURE_DURATION: %v", err)
+		log.Fatalf("Failed to load config: %v", err)
 	}
-	interval := window // Default: run once
-	if intervalStr := os.Getenv("CAPTURE_INTERVAL"); intervalStr != "" {
-		if iv, err := time.ParseDuration(intervalStr); err == nil {
-			interval = iv
-		}
+
+	log.Printf("Loaded config: %+v", cfg)
+
+	if err := cfg.InitializeLogging(); err != nil {
+		log.Fatalf("Failed to initialize logging: %v", err)
 	}
+
+	// Prepare capture config
+	outputDir := cfg.Capture.OutputDir
+	window := time.Duration(cfg.Capture.WindowSeconds) * time.Second
+	// interval := time.Duration(cfg.Capture.IntervalSeconds) * time.Second // Removed
 
 	// Create a unique zeek_out_<timestamp> directory for this capture
 	timestamp := time.Now().UTC().Format("20060102T150405Z")
@@ -48,43 +41,50 @@ func main() {
 		log.Fatalf("Failed to create zeek_out dir: %v", err)
 	}
 
-	cfg := common.CaptureConfig{
-		CaptureWindow:   window,
-		CaptureInterval: interval,
-		OutputDir:       zeekOutDir,
+	capCfg := common.CaptureConfig{
+		CaptureWindow: window,
+		// Add Interface if/when supported in CaptureConfig
+		OutputDir: zeekOutDir,
 	}
 
-	// Remove context.WithTimeout and time.Sleep; let capture logic control duration
 	ctx := context.Background()
 
-	capturer := capture.NewCapturer(cfg)
-	pcapPath, err := capturer.Capture(ctx, cfg)
+	capturer := capture.NewCapturer(capCfg)
+	pcapPath, err := capturer.Capture(ctx, capCfg)
 	if err != nil {
 		log.Fatalf("Failed to capture: %v", err)
 	}
 	log.Printf("Captured file: %s", pcapPath)
 
+	// Ensure the PCAP file exists and use absolute path
+	absPCAPPath, err := filepath.Abs(pcapPath)
+	if err != nil {
+		log.Fatalf("Failed to get absolute path for PCAP: %v", err)
+	}
+	if _, err := os.Stat(absPCAPPath); err != nil {
+		log.Fatalf("PCAP file does not exist or is not accessible: %v", err)
+	}
+	log.Printf("Processing PCAP file at absolute path: %s", absPCAPPath)
+
 	// Process the capture file
 	processor := processor.NewProcessor()
-	result, err := processor.ProcessPCAP(pcapPath)
+	result, err := processor.ProcessPCAP(absPCAPPath)
 	if err != nil {
 		log.Fatalf("Processing failed: %v", err)
 	}
 	log.Printf("Processing complete. Conn XLSX: %s, DNS XLSX: %s, Metadata: %+v", result.ConnPath, result.DNSPath, result.Metadata)
 
 	// Optionally upload processed logs to Enigma API if enabled
-	uploadEnabled := os.Getenv("ENIGMA_UPLOAD")
-	if uploadEnabled == "true" {
-		server := os.Getenv("ENIGMA_SERVER")
-		apiKey := os.Getenv("ENIGMA_API_KEY")
-		insecure := os.Getenv("DISABLE_TLS") == "true"
+	if cfg.EnigmaAPI.Upload {
+		server := cfg.EnigmaAPI.Server
+		apiKey := cfg.EnigmaAPI.APIKey
+		// insecure := cfg.EnigmaAPI.DisableTLS // Removed
 		if server == "" || apiKey == "" {
-			log.Printf("ENIGMA_SERVER and ENIGMA_API_KEY must be set to upload logs; skipping upload.")
+			log.Printf("enigma_api.server and enigma_api.api_key must be set to upload logs; skipping upload.")
 			return
 		}
 
-		// Import the LogUploader and LogFiles
-		uploader, err := api.NewLogUploader(server, apiKey, insecure)
+		uploader, err := api.NewLogUploader(server, apiKey, false)
 		if err != nil {
 			log.Printf("Failed to initialize LogUploader: %v", err)
 			return

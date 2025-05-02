@@ -1,4 +1,4 @@
-.env
 bin/
 logs/
 captures/
+config.json

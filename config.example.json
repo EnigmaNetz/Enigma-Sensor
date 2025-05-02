@@ -1,0 +1,19 @@
+{
+  "logging": {
+    "level": "info",
+    "file": "logs/enigma-agent.log",
+    "max_size_mb": 100
+  },
+  "capture": {
+    "output_dir": "./captures",
+    "window_seconds": 60
+  },
+  "enigma_api": {
+    "server": "api.enigmaai.net:443",
+    "api_key": "REPLACE_WITH_YOUR_API_KEY",
+    "upload": false
+  },
+  "zeek": {
+    "path": ""
+  }
+}

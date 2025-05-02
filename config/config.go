@@ -25,11 +25,25 @@ type Config struct {
 	Capture struct {
 		// OutputDir is where capture files are stored
 		OutputDir string `json:"output_dir"`
-		// IntervalSeconds is how often to run captures
-		IntervalSeconds int `json:"interval_seconds"`
 		// WindowSeconds is how long each capture runs
 		WindowSeconds int `json:"window_seconds"`
 	} `json:"capture"`
+
+	// Enigma API configuration
+	EnigmaAPI struct {
+		// Server is the Enigma API server address
+		Server string `json:"server"`
+		// APIKey is the Enigma API key
+		APIKey string `json:"api_key"`
+		// Upload is whether to upload captured data to the Enigma API
+		Upload bool `json:"upload"`
+	} `json:"enigma_api"`
+
+	// Zeek configuration
+	Zeek struct {
+		// Path is the Zeek executable path
+		Path string `json:"path"`
+	} `json:"zeek"`
 }
 
 // LoadConfig loads configuration from a JSON file
@@ -58,12 +72,13 @@ func LoadConfig(configPath string) (*Config, error) {
 	if config.Logging.MaxSizeMB == 0 {
 		config.Logging.MaxSizeMB = 100 // 100MB default
 	}
-	if config.Capture.IntervalSeconds == 0 {
-		config.Capture.IntervalSeconds = 300 // 5 minutes default
+	if config.EnigmaAPI.Server == "" {
+		config.EnigmaAPI.Server = "api.enigmaai.net:443"
 	}
-	if config.Capture.WindowSeconds == 0 {
-		config.Capture.WindowSeconds = 60 // 1 minute default
+	if config.EnigmaAPI.Upload == false {
+		config.EnigmaAPI.Upload = false
 	}
+	// Zeek path can be empty by default
 
 	return &config, nil
 }

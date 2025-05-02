@@ -12,21 +12,14 @@ type CaptureConfig struct {
 	OutputDir       string        // Directory to store capture output
 }
 
-// Capturer defines the interface for platform-specific packet capture
-type Capturer interface {
-	// Start begins the capture process with the given configuration
-	Start(ctx context.Context, config CaptureConfig) error
-
-	// Stop gracefully stops the capture process
-	Stop() error
-
-	// Status returns the current capture status
-	Status() (CaptureStatus, error)
+// CaptureResult represents the result of a single capture operation
+type CaptureResult struct {
+	PCAPPath string                 // Path to the captured PCAP file
+	Metadata map[string]interface{} // Additional metadata about the capture
 }
 
-// CaptureStatus represents the current state of capture
-type CaptureStatus struct {
-	IsRunning   bool
-	LastCapture time.Time
-	Error       error
+// Capturer defines the interface for platform-specific packet capture
+// Capture runs a single capture operation and returns the output file path (or error)
+type Capturer interface {
+	Capture(ctx context.Context, config CaptureConfig) (string, error)
 }

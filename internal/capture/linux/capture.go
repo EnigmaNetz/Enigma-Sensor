@@ -1,8 +1,13 @@
+//go:build linux || darwin
+
 package linux
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"log"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"time"
@@ -11,60 +16,24 @@ import (
 )
 
 type LinuxCapturer struct {
-	cmd        *exec.Cmd
-	outputDir  string
-	lastStatus common.CaptureStatus
+	cmd       *exec.Cmd
+	outputDir string
 }
+
+var commandContext = exec.Command
 
 func NewLinuxCapturer() *LinuxCapturer {
-	return &LinuxCapturer{
-		lastStatus: common.CaptureStatus{
-			IsRunning: false,
-		},
-	}
+	return &LinuxCapturer{}
 }
 
-func (c *LinuxCapturer) Start(ctx context.Context, config common.CaptureConfig) error {
+// Capture runs a single tcpdump capture and returns the output file path or error
+func (c *LinuxCapturer) Capture(ctx context.Context, config common.CaptureConfig) (string, error) {
 	c.outputDir = config.OutputDir
-
-	// Start capture loop in background
-	go c.captureLoop(ctx, config)
-
-	return nil
+	return c.runCapture(ctx, config)
 }
 
-func (c *LinuxCapturer) Stop() error {
-	if c.cmd != nil && c.cmd.Process != nil {
-		if err := c.cmd.Process.Kill(); err != nil {
-			return fmt.Errorf("failed to stop tcpdump: %v", err)
-		}
-	}
-	c.lastStatus.IsRunning = false
-	return nil
-}
-
-func (c *LinuxCapturer) Status() (common.CaptureStatus, error) {
-	return c.lastStatus, nil
-}
-
-func (c *LinuxCapturer) captureLoop(ctx context.Context, config common.CaptureConfig) {
-	ticker := time.NewTicker(config.CaptureInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if err := c.runCapture(config); err != nil {
-				c.lastStatus.Error = err
-				continue
-			}
-		}
-	}
-}
-
-func (c *LinuxCapturer) runCapture(config common.CaptureConfig) error {
+// runCapture executes tcpdump and returns the output file path or error
+func (c *LinuxCapturer) runCapture(ctx context.Context, config common.CaptureConfig) (string, error) {
 	// Generate output filename with timestamp
 	timestamp := time.Now().Format("20060102_150405")
 	outputFile := filepath.Join(c.outputDir, fmt.Sprintf("capture_%s.pcap", timestamp))
@@ -79,18 +48,51 @@ func (c *LinuxCapturer) runCapture(config common.CaptureConfig) error {
 		"-n",      // Don't convert addresses
 		"-q",      // Quick output
 		"-s", "0", // Capture entire packet
-		"port 53", // Capture DNS traffic (port 53)
 	}
 
-	// Start tcpdump
-	c.cmd = exec.Command("tcpdump", args...)
-	c.lastStatus.IsRunning = true
-	c.lastStatus.LastCapture = time.Now()
+	log.Printf("[capture] Running tcpdump command: tcpdump %v", args)
 
-	// Run capture
-	if err := c.cmd.Run(); err != nil {
-		return fmt.Errorf("tcpdump capture failed: %v", err)
+	c.cmd = commandContext("tcpdump", args...)
+
+	// Capture stdout and stderr
+	stdoutPipe, _ := c.cmd.StdoutPipe()
+	stderrPipe, _ := c.cmd.StderrPipe()
+
+	if err := c.cmd.Start(); err != nil {
+		log.Printf("[capture] Failed to start tcpdump: %v", err)
+		return "", fmt.Errorf("tcpdump start failed: %v", err)
 	}
 
-	return nil
+	// Log stdout and stderr in goroutines
+	go func() {
+		scanner := bufio.NewScanner(stdoutPipe)
+		for scanner.Scan() {
+			log.Printf("[capture][tcpdump stdout] %s", scanner.Text())
+		}
+	}()
+	go func() {
+		scanner := bufio.NewScanner(stderrPipe)
+		for scanner.Scan() {
+			log.Printf("[capture][tcpdump stderr] %s", scanner.Text())
+		}
+	}()
+
+	err := c.cmd.Wait()
+	if err != nil {
+		log.Printf("[capture] tcpdump capture failed: %v", err)
+		return "", fmt.Errorf("tcpdump capture failed: %v", err)
+	}
+
+	// Log file size after capture
+	fileInfo, statErr := os.Stat(outputFile)
+	if statErr != nil {
+		log.Printf("[capture] Could not stat output file: %v", statErr)
+	} else {
+		log.Printf("[capture] Output file %s size: %d bytes", outputFile, fileInfo.Size())
+		if fileInfo.Size() == 0 {
+			log.Printf("[capture][warning] Output PCAP file is empty!")
+		}
+	}
+
+	return outputFile, nil
 }

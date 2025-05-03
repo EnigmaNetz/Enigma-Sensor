@@ -6,14 +6,12 @@ import (
 	"io"
 	"log"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"sort"
-	"sync"
-	"syscall"
 	"time"
 
 	"EnigmaNetz/Enigma-Go-Agent/config"
+	"EnigmaNetz/Enigma-Go-Agent/internal/agent"
 	"EnigmaNetz/Enigma-Go-Agent/internal/api"
 	"EnigmaNetz/Enigma-Go-Agent/internal/capture"
 	"EnigmaNetz/Enigma-Go-Agent/internal/capture/common"
@@ -79,16 +77,19 @@ func main() {
 
 	log.Printf("Loaded config: %+v", cfg)
 
-	// Prepare capture config
-	outputDir := cfg.Capture.OutputDir
-	window := time.Duration(cfg.Capture.WindowSeconds) * time.Second
-	// interval := time.Duration(cfg.Capture.IntervalSeconds) * time.Second // Removed
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	processor := processor.NewProcessor()
-	var uploader *api.LogUploader
+	// Prepare capturer, processor, uploader for agent.RunAgent
+	window := time.Duration(cfg.Capture.WindowSeconds) * time.Second
+	capCfg := common.CaptureConfig{
+		CaptureWindow: window,
+		OutputDir:     cfg.Capture.OutputDir, // Will be overridden per iteration
+	}
+	capturer := capture.NewCapturer(capCfg)
+	proc := processor.NewProcessor()
+
+	var uploader agent.Uploader
 	if cfg.EnigmaAPI.Upload {
 		server := cfg.EnigmaAPI.Server
 		apiKey := cfg.EnigmaAPI.APIKey
@@ -104,103 +105,9 @@ func main() {
 		}
 	}
 
-	loop := cfg.Capture.Loop
-	log.Printf("Agent loop mode: %v", loop)
-
-	pcapQueue := make(chan string, 4) // Buffer for up to 4 PCAPs
-	var wg sync.WaitGroup
-
-	// Processing worker goroutine
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for pcapPath := range pcapQueue {
-			absPCAPPath, err := filepath.Abs(pcapPath)
-			if err != nil {
-				log.Printf("[worker] Failed to get absolute path for PCAP: %v", err)
-				continue
-			}
-			if _, err := os.Stat(absPCAPPath); err != nil {
-				log.Printf("[worker] PCAP file does not exist or is not accessible: %v", err)
-				continue
-			}
-			log.Printf("[worker] Processing PCAP file at absolute path: %s", absPCAPPath)
-
-			result, err := processor.ProcessPCAP(absPCAPPath)
-			if err != nil {
-				log.Printf("[worker] Processing failed: %v", err)
-				continue
-			}
-			log.Printf("[worker] Processing complete. Conn XLSX: %s, DNS XLSX: %s, Metadata: %+v", result.ConnPath, result.DNSPath, result.Metadata)
-
-			if uploader != nil {
-				uploadErr := uploader.UploadLogs(ctx, api.LogFiles{
-					DNSPath:  result.DNSPath,
-					ConnPath: result.ConnPath,
-				})
-				if uploadErr != nil {
-					log.Printf("[worker] Log upload failed: %v", uploadErr)
-				} else {
-					log.Printf("[worker] Log upload successful.")
-				}
-			}
-		}
-	}()
-
-	// Handle Ctrl+C for graceful shutdown
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	stopped := false
-
-	for {
-		select {
-		case sig := <-sigCh:
-			log.Printf("Received signal %v, shutting down after current capture...", sig)
-			stopped = true
-			close(pcapQueue)
-			break
-		default:
-		}
-		if stopped {
-			break
-		}
-		// Create a unique zeek_out_<timestamp> directory for this capture
-		timestamp := time.Now().UTC().Format("20060102T150405Z")
-		zeekOutDir := filepath.Join(outputDir, "zeek_out_"+timestamp)
-		if err := os.MkdirAll(zeekOutDir, 0755); err != nil {
-			log.Fatalf("Failed to create zeek_out dir: %v", err)
-		}
-
-		capCfg := common.CaptureConfig{
-			CaptureWindow: window,
-			OutputDir:     zeekOutDir,
-		}
-
-		capturer := capture.NewCapturer(capCfg)
-		log.Printf("Starting capture iteration at %s", timestamp)
-		pcapPath, err := capturer.Capture(ctx, capCfg)
-		if err != nil {
-			log.Fatalf("Failed to capture: %v", err)
-		}
-		log.Printf("Captured file: %s", pcapPath)
-
-		select {
-		case pcapQueue <- pcapPath:
-			log.Printf("Enqueued PCAP for processing: %s", pcapPath)
-		default:
-			log.Printf("[warning] PCAP queue full, dropping capture: %s", pcapPath)
-		}
-
-		if !loop {
-			break
-		}
-		// Immediately start next capture (no sleep)
+	if err := agent.RunAgent(ctx, cfg, capturer, proc, uploader); err != nil {
+		log.Fatalf("Agent exited with error: %v", err)
 	}
-
-	// Wait for processing worker to finish
-	log.Printf("Waiting for processing worker to finish...")
-	wg.Wait()
-	log.Printf("Shutdown complete.")
 }
 
 // findLatestFile returns the most recently modified file with the given extension in dir

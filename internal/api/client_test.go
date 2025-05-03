@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -148,10 +149,11 @@ func TestLogUploader_UploadLogs(t *testing.T) {
 
 			// Create uploader with mock
 			uploader := &LogUploader{
-				client:     mock,
-				apiKey:     "test-key",
-				retryCount: 3,
-				retryDelay: time.Millisecond, // Short delay for tests
+				client:       mock,
+				apiKey:       "test-key",
+				retryCount:   3,
+				retryDelay:   time.Millisecond, // Short delay for tests
+				compressFunc: compressData,
 			}
 
 			// Test upload
@@ -186,9 +188,10 @@ func TestLogUploader_PrepareLogData(t *testing.T) {
 	require.NoError(t, os.WriteFile(connPath, connData, 0644))
 
 	uploader := &LogUploader{
-		apiKey:     "test-key",
-		retryCount: 3,
-		retryDelay: time.Second,
+		apiKey:       "test-key",
+		retryCount:   3,
+		retryDelay:   time.Second,
+		compressFunc: compressData,
 	}
 
 	// Test data preparation
@@ -214,4 +217,91 @@ func TestLogUploader_PrepareLogData(t *testing.T) {
 	connDecoded, err := base64DecodeAndDecompress(combined.Conn)
 	require.NoError(t, err)
 	assert.Equal(t, connData, connDecoded)
+}
+
+// TestUploadLogs_ReadFileError simulates a failure to read one of the log files and expects an error from UploadLogs.
+func TestUploadLogs_ReadFileError(t *testing.T) {
+	uploader := &LogUploader{
+		apiKey:       "test-key",
+		retryCount:   1,
+		retryDelay:   time.Millisecond,
+		compressFunc: compressData,
+	}
+	// Provide non-existent file paths
+	err := uploader.UploadLogs(context.Background(), LogFiles{
+		DNSPath:  "nonexistent_dns.log",
+		ConnPath: "nonexistent_conn.log",
+	})
+	assert.Error(t, err)
+}
+
+// TestUploadLogs_CompressError simulates a compression failure and expects an error from UploadLogs.
+func TestUploadLogs_CompressError(t *testing.T) {
+	uploader := &LogUploader{
+		apiKey:       "test-key",
+		retryCount:   1,
+		retryDelay:   time.Millisecond,
+		compressFunc: func(_ []byte) ([]byte, error) { return nil, fmt.Errorf("compress error") },
+	}
+	// Create temp files with valid data
+	tmpDir := t.TempDir()
+	dnsPath := filepath.Join(tmpDir, "dns.xlsx")
+	connPath := filepath.Join(tmpDir, "conn.log")
+	assert.NoError(t, os.WriteFile(dnsPath, []byte("dns"), 0644))
+	assert.NoError(t, os.WriteFile(connPath, []byte("conn"), 0644))
+	err := uploader.UploadLogs(context.Background(), LogFiles{
+		DNSPath:  dnsPath,
+		ConnPath: connPath,
+	})
+	assert.Error(t, err)
+}
+
+// TestUploadLogs_UploadNon200 simulates a non-200 status code from the upload and expects an error from UploadLogs.
+func TestUploadLogs_UploadNon200(t *testing.T) {
+	tmpDir := t.TempDir()
+	dnsPath := filepath.Join(tmpDir, "dns.xlsx")
+	connPath := filepath.Join(tmpDir, "conn.log")
+	assert.NoError(t, os.WriteFile(dnsPath, []byte("dns"), 0644))
+	assert.NoError(t, os.WriteFile(connPath, []byte("conn"), 0644))
+	mock := &mockPublishClient{
+		uploadResponses: []uploadResponse{{status: "fail", statusCode: 500, message: "server error", err: nil}},
+	}
+	uploader := &LogUploader{
+		client:       mock,
+		apiKey:       "test-key",
+		retryCount:   1,
+		retryDelay:   time.Millisecond,
+		compressFunc: compressData,
+	}
+	err := uploader.UploadLogs(context.Background(), LogFiles{
+		DNSPath:  dnsPath,
+		ConnPath: connPath,
+	})
+	assert.Error(t, err)
+}
+
+// TestUploadLogs_ContextCancelled simulates context cancellation before upload and expects an error from UploadLogs.
+func TestUploadLogs_ContextCancelled(t *testing.T) {
+	tmpDir := t.TempDir()
+	dnsPath := filepath.Join(tmpDir, "dns.xlsx")
+	connPath := filepath.Join(tmpDir, "conn.log")
+	assert.NoError(t, os.WriteFile(dnsPath, []byte("dns"), 0644))
+	assert.NoError(t, os.WriteFile(connPath, []byte("conn"), 0644))
+	mock := &mockPublishClient{
+		uploadResponses: []uploadResponse{{status: "success", statusCode: 200, message: "ok", err: nil}},
+	}
+	uploader := &LogUploader{
+		client:       mock,
+		apiKey:       "test-key",
+		retryCount:   1,
+		retryDelay:   time.Millisecond,
+		compressFunc: compressData,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := uploader.UploadLogs(ctx, LogFiles{
+		DNSPath:  dnsPath,
+		ConnPath: connPath,
+	})
+	assert.Error(t, err)
 }

@@ -25,10 +25,11 @@ type grpcClient interface {
 
 // LogUploader handles uploading logs to the gRPC server
 type LogUploader struct {
-	client     grpcClient
-	apiKey     string
-	retryCount int
-	retryDelay time.Duration
+	client       grpcClient
+	apiKey       string
+	retryCount   int
+	retryDelay   time.Duration
+	compressFunc func([]byte) ([]byte, error) // for DI/testing
 }
 
 // LogFiles contains paths to the log files to upload
@@ -75,10 +76,11 @@ func NewLogUploader(serverAddr string, apiKey string, insecure bool) (*LogUpload
 	}
 
 	return &LogUploader{
-		client:     &grpcClientImpl{client: pb.NewPublishServiceClient(conn)},
-		apiKey:     apiKey,
-		retryCount: 3,
-		retryDelay: 5 * time.Second,
+		client:       &grpcClientImpl{client: pb.NewPublishServiceClient(conn)},
+		apiKey:       apiKey,
+		retryCount:   3,
+		retryDelay:   5 * time.Second,
+		compressFunc: compressData,
 	}, nil
 }
 
@@ -103,6 +105,9 @@ func (c *grpcClientImpl) uploadExcelMethod(ctx context.Context, data []byte, emp
 
 // UploadLogs uploads the DNS and connection logs to the server
 func (u *LogUploader) UploadLogs(ctx context.Context, files LogFiles) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	// Read and compress log files
 	combinedData, err := u.prepareLogData(files)
 	if err != nil {
@@ -112,6 +117,9 @@ func (u *LogUploader) UploadLogs(ctx context.Context, files LogFiles) error {
 	// Upload with retries
 	var lastErr error
 	for i := 0; i < u.retryCount; i++ {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		if err := u.upload(ctx, combinedData); err != nil {
 			lastErr = err
 			time.Sleep(u.retryDelay)
@@ -138,13 +146,13 @@ func (u *LogUploader) prepareLogData(files LogFiles) ([]byte, error) {
 	}
 
 	// Compress DNS data
-	dnsCompressed, err := compressData(dnsData)
+	dnsCompressed, err := u.compressFunc(dnsData)
 	if err != nil {
 		return nil, fmt.Errorf("failed to compress DNS data: %v", err)
 	}
 
 	// Compress connection data
-	connCompressed, err := compressData(connData)
+	connCompressed, err := u.compressFunc(connData)
 	if err != nil {
 		return nil, fmt.Errorf("failed to compress connection data: %v", err)
 	}
@@ -162,7 +170,7 @@ func (u *LogUploader) prepareLogData(files LogFiles) ([]byte, error) {
 	}
 
 	// Compress the combined JSON
-	return compressData(jsonData)
+	return u.compressFunc(jsonData)
 }
 
 // upload sends the compressed data to the server

@@ -4,9 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
-
-	"EnigmaNetz/Enigma-Go-Agent/internal/logger"
 )
 
 // Config represents the application configuration
@@ -86,34 +83,4 @@ func LoadConfig(configPath string) (*Config, error) {
 	// Zeek path can be empty by default
 
 	return &config, nil
-}
-
-// InitializeLogging sets up logging based on config
-func (c *Config) InitializeLogging() error {
-	// Parse log level
-	level, err := logger.ParseLogLevel(c.Logging.Level)
-	if err != nil {
-		return fmt.Errorf("invalid log level: %v", err)
-	}
-
-	// Create log directory if file logging is enabled
-	if c.Logging.File != "" {
-		logDir := filepath.Dir(c.Logging.File)
-		if err := os.MkdirAll(logDir, 0755); err != nil {
-			return fmt.Errorf("failed to create log directory: %v", err)
-		}
-	}
-
-	// Initialize logger
-	logConfig := logger.Config{
-		LogLevel: level,
-		LogFile:  c.Logging.File,
-		MaxSize:  c.Logging.MaxSizeMB * 1024 * 1024, // Convert MB to bytes
-	}
-
-	if err := logger.Initialize(logConfig); err != nil {
-		return fmt.Errorf("failed to initialize logger: %v", err)
-	}
-
-	return nil
 }

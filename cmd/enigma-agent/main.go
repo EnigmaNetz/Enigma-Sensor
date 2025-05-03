@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -28,11 +29,20 @@ func main() {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	log.Printf("Loaded config: %+v", cfg)
-
-	if err := cfg.InitializeLogging(); err != nil {
-		log.Fatalf("Failed to initialize logging: %v", err)
+	// Set up standard logger to log to file if specified
+	if cfg.Logging.File != "" {
+		logDir := filepath.Dir(cfg.Logging.File)
+		if err := os.MkdirAll(logDir, 0755); err != nil {
+			log.Fatalf("Failed to create log directory: %v", err)
+		}
+		f, err := os.OpenFile(cfg.Logging.File, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+		if err != nil {
+			log.Fatalf("Failed to open log file: %v", err)
+		}
+		log.SetOutput(io.MultiWriter(os.Stdout, f))
 	}
+
+	log.Printf("Loaded config: %+v", cfg)
 
 	// Prepare capture config
 	outputDir := cfg.Capture.OutputDir

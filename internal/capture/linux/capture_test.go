@@ -23,6 +23,7 @@ func (m *mockCmd) Process() *os.Process { return nil }
 func (m *mockCmd) Start() error         { return mockRunError }
 func (m *mockCmd) Kill() error          { return mockRunError }
 
+// TestLinuxCapturer_Capture_Success verifies that the LinuxCapturer successfully captures data when the command executes without error.
 func TestLinuxCapturer_Capture_Success(t *testing.T) {
 	c := NewLinuxCapturer()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -47,6 +48,7 @@ func TestLinuxCapturer_Capture_Success(t *testing.T) {
 	}
 }
 
+// TestLinuxCapturer_Capture_Error verifies that the LinuxCapturer returns an error when the capture command fails to execute.
 func TestLinuxCapturer_Capture_Error(t *testing.T) {
 	c := NewLinuxCapturer()
 	mockRunError = errors.New("mock error")

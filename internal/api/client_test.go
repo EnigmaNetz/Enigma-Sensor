@@ -60,6 +60,10 @@ func (m *mockPublishClient) uploadExcelMethod(ctx context.Context, data []byte, 
 	return resp.status, resp.statusCode, resp.message, resp.err
 }
 
+// TestLogUploader_UploadLogs verifies the LogUploader's UploadLogs method for various scenarios:
+// - Successful upload
+// - Retry on failure and eventual success
+// - All retries fail and error is returned
 func TestLogUploader_UploadLogs(t *testing.T) {
 	// Create temporary test files
 	tmpDir := t.TempDir()
@@ -168,6 +172,7 @@ func TestLogUploader_UploadLogs(t *testing.T) {
 	}
 }
 
+// TestLogUploader_PrepareLogData verifies that log data is correctly prepared, compressed, and can be decompressed and validated.
 func TestLogUploader_PrepareLogData(t *testing.T) {
 	// Create temporary test files
 	tmpDir := t.TempDir()

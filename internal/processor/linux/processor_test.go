@@ -8,6 +8,7 @@ import (
 	"testing"
 )
 
+// TestProcessPCAP verifies that ProcessPCAP processes a valid PCAP file and produces non-empty XLSX log paths. Skips if the test PCAP file is not found.
 func TestProcessPCAP(t *testing.T) {
 	p := NewProcessor()
 
@@ -27,6 +28,7 @@ func TestProcessPCAP(t *testing.T) {
 	}
 }
 
+// TestZeekNotInstalled is a placeholder for testing behavior when Zeek is not installed. Requires refactor for true unit test.
 func TestZeekNotInstalled(t *testing.T) {
 	_ = NewProcessor()
 	// Temporarily set zeekBinary to a non-existent path (requires refactor to allow injection for true unit test)
@@ -34,12 +36,14 @@ func TestZeekNotInstalled(t *testing.T) {
 	// t.Skip("TODO: Refactor to allow zeekBinary injection for unit test.")
 }
 
+// TestMissingLogFiles is a placeholder for testing behavior when Zeek runs but does not produce expected log files. Requires mocking for full coverage.
 func TestMissingLogFiles(t *testing.T) {
 	_ = NewProcessor()
 	// Simulate Zeek running but not producing conn.log/dns.log (requires mocking exec.Command and file system)
 	// t.Skip("TODO: Mock exec.Command and file system for missing log files.")
 }
 
+// TestMetadataContent verifies that ProcessPCAP output includes expected metadata fields such as 'zeek_out_dir' and a valid 'timestamp'. Skips if the test PCAP file is not found.
 func TestMetadataContent(t *testing.T) {
 	p := NewProcessor()
 	pcapPath := "/tmp/test.pcap"

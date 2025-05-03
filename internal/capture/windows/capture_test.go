@@ -11,6 +11,7 @@ import (
 	"EnigmaNetz/Enigma-Go-Agent/internal/capture/common"
 )
 
+// TestWindowsCapturer_Capture_Success verifies that the WindowsCapturer successfully captures data when the command executes without error.
 func TestWindowsCapturer_Capture_Success(t *testing.T) {
 	c := NewWindowsCapturer()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -35,6 +36,7 @@ func TestWindowsCapturer_Capture_Success(t *testing.T) {
 	}
 }
 
+// TestWindowsCapturer_Capture_Error verifies that the WindowsCapturer returns an error when the capture command fails to execute.
 func TestWindowsCapturer_Capture_Error(t *testing.T) {
 	c := NewWindowsCapturer()
 	origCommandContext := commandContext

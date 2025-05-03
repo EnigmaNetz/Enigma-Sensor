@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"EnigmaNetz/Enigma-Go-Agent/config"
+	"EnigmaNetz/Enigma-Go-Agent/internal/agent"
 	"EnigmaNetz/Enigma-Go-Agent/internal/api"
 	"EnigmaNetz/Enigma-Go-Agent/internal/capture"
 	"EnigmaNetz/Enigma-Go-Agent/internal/capture/common"
@@ -76,15 +77,19 @@ func main() {
 
 	log.Printf("Loaded config: %+v", cfg)
 
-	// Prepare capture config
-	outputDir := cfg.Capture.OutputDir
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Prepare capturer, processor, uploader for agent.RunAgent
 	window := time.Duration(cfg.Capture.WindowSeconds) * time.Second
-	// interval := time.Duration(cfg.Capture.IntervalSeconds) * time.Second // Removed
+	capCfg := common.CaptureConfig{
+		CaptureWindow: window,
+		OutputDir:     cfg.Capture.OutputDir, // Will be overridden per iteration
+	}
+	capturer := capture.NewCapturer(capCfg)
+	proc := processor.NewProcessor()
 
-	ctx := context.Background()
-
-	processor := processor.NewProcessor()
-	var uploader *api.LogUploader
+	var uploader agent.Uploader
 	if cfg.EnigmaAPI.Upload {
 		server := cfg.EnigmaAPI.Server
 		apiKey := cfg.EnigmaAPI.APIKey
@@ -100,61 +105,8 @@ func main() {
 		}
 	}
 
-	loop := cfg.Capture.Loop
-	log.Printf("Agent loop mode: %v", loop)
-
-	for {
-		// Create a unique zeek_out_<timestamp> directory for this capture
-		timestamp := time.Now().UTC().Format("20060102T150405Z")
-		zeekOutDir := filepath.Join(outputDir, "zeek_out_"+timestamp)
-		if err := os.MkdirAll(zeekOutDir, 0755); err != nil {
-			log.Fatalf("Failed to create zeek_out dir: %v", err)
-		}
-
-		capCfg := common.CaptureConfig{
-			CaptureWindow: window,
-			OutputDir:     zeekOutDir,
-		}
-
-		capturer := capture.NewCapturer(capCfg)
-		log.Printf("Starting capture iteration at %s", timestamp)
-		pcapPath, err := capturer.Capture(ctx, capCfg)
-		if err != nil {
-			log.Fatalf("Failed to capture: %v", err)
-		}
-		log.Printf("Captured file: %s", pcapPath)
-
-		absPCAPPath, err := filepath.Abs(pcapPath)
-		if err != nil {
-			log.Fatalf("Failed to get absolute path for PCAP: %v", err)
-		}
-		if _, err := os.Stat(absPCAPPath); err != nil {
-			log.Fatalf("PCAP file does not exist or is not accessible: %v", err)
-		}
-		log.Printf("Processing PCAP file at absolute path: %s", absPCAPPath)
-
-		result, err := processor.ProcessPCAP(absPCAPPath)
-		if err != nil {
-			log.Fatalf("Processing failed: %v", err)
-		}
-		log.Printf("Processing complete. Conn XLSX: %s, DNS XLSX: %s, Metadata: %+v", result.ConnPath, result.DNSPath, result.Metadata)
-
-		if uploader != nil {
-			uploadErr := uploader.UploadLogs(ctx, api.LogFiles{
-				DNSPath:  result.DNSPath,
-				ConnPath: result.ConnPath,
-			})
-			if uploadErr != nil {
-				log.Printf("Log upload failed: %v", uploadErr)
-			} else {
-				log.Printf("Log upload successful.")
-			}
-		}
-
-		if !loop {
-			break
-		}
-		// Immediately start next capture (no sleep)
+	if err := agent.RunAgent(ctx, cfg, capturer, proc, uploader); err != nil {
+		log.Fatalf("Agent exited with error: %v", err)
 	}
 }
 

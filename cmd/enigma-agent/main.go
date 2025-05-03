@@ -18,7 +18,39 @@ import (
 	"EnigmaNetz/Enigma-Go-Agent/internal/version"
 )
 
+func printHelp() {
+	fmt.Print(`Enigma Agent - Network Capture & Processing Tool
+
+Usage: enigma-agent [--version|-v] [--help|-h]
+
+Runs a network capture and processing session using config.json.
+
+Options:
+  --version, -v   Print version and exit
+  --help, -h      Show this help message and exit
+
+Configuration:
+  The agent loads its configuration from config.json in the working directory by default.
+  You can customize logging, capture, and Enigma API settings in this file.
+  See config.example.json for a template and documentation of all options.
+
+Example:
+  enigma-agent
+    Runs a single capture and processing session using config.json.
+
+  enigma-agent --help
+    Shows this help message.
+
+  enigma-agent --version
+    Prints the agent version.
+`)
+}
+
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "--help" || os.Args[1] == "-h") {
+		printHelp()
+		return
+	}
 	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
 		fmt.Println(version.Version)
 		return

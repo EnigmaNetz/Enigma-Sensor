@@ -37,20 +37,3 @@ jobs:
 
     - name: Run tests
       run: go test -v -race ./...
-
-    - name: Run tests with coverage
-      run: |
-        mkdir -p coverage
-        go test -v -race -coverprofile=coverage/coverage.out ./...
-
-    - name: Remove publish proto files from coverage
-      run: grep -v 'internal/api/publish/' coverage/coverage.out > coverage/coverage.filtered.out && mv coverage/coverage.filtered.out coverage/coverage.out
-
-    - name: Show coverage summary
-      run: go tool cover -func=coverage/coverage.out
-
-    - name: Upload coverage report
-      uses: actions/upload-artifact@v4
-      with:
-        name: coverage-report-${{ matrix.os }}
-        path: coverage/coverage.out

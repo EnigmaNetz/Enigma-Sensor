@@ -28,9 +28,10 @@ jobs:
           cache: true
 
       - name: Build binary
+        shell: bash
         run: |
           mkdir -p bin
-          VERSION=${{ steps.get_version.outputs.version }}
+          VERSION="${{ steps.get_version.outputs.version }}"
           if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
             GOOS=linux GOARCH=amd64 go build -o bin/enigma-agent-linux-amd64-${VERSION} ./cmd/enigma-agent
           elif [ "${{ matrix.os }}" = "macos-latest" ]; then
@@ -38,7 +39,6 @@ jobs:
           elif [ "${{ matrix.os }}" = "windows-latest" ]; then
             GOOS=windows GOARCH=amd64 go build -o bin/enigma-agent-windows-amd64-${VERSION}.exe ./cmd/enigma-agent
           fi
-        shell: bash
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4

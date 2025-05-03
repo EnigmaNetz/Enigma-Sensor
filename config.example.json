@@ -6,7 +6,8 @@
   },
   "capture": {
     "output_dir": "./captures",
-    "window_seconds": 60
+    "window_seconds": 60,
+    "loop": false
   },
   "enigma_api": {
     "server": "api.enigmaai.net:443",

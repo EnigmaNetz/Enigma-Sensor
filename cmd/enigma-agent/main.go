@@ -39,70 +39,80 @@ func main() {
 	window := time.Duration(cfg.Capture.WindowSeconds) * time.Second
 	// interval := time.Duration(cfg.Capture.IntervalSeconds) * time.Second // Removed
 
-	// Create a unique zeek_out_<timestamp> directory for this capture
-	timestamp := time.Now().UTC().Format("20060102T150405Z")
-	zeekOutDir := filepath.Join(outputDir, "zeek_out_"+timestamp)
-	if err := os.MkdirAll(zeekOutDir, 0755); err != nil {
-		log.Fatalf("Failed to create zeek_out dir: %v", err)
-	}
-
-	capCfg := common.CaptureConfig{
-		CaptureWindow: window,
-		// Add Interface if/when supported in CaptureConfig
-		OutputDir: zeekOutDir,
-	}
-
 	ctx := context.Background()
 
-	capturer := capture.NewCapturer(capCfg)
-	pcapPath, err := capturer.Capture(ctx, capCfg)
-	if err != nil {
-		log.Fatalf("Failed to capture: %v", err)
-	}
-	log.Printf("Captured file: %s", pcapPath)
-
-	// Ensure the PCAP file exists and use absolute path
-	absPCAPPath, err := filepath.Abs(pcapPath)
-	if err != nil {
-		log.Fatalf("Failed to get absolute path for PCAP: %v", err)
-	}
-	if _, err := os.Stat(absPCAPPath); err != nil {
-		log.Fatalf("PCAP file does not exist or is not accessible: %v", err)
-	}
-	log.Printf("Processing PCAP file at absolute path: %s", absPCAPPath)
-
-	// Process the capture file
 	processor := processor.NewProcessor()
-	result, err := processor.ProcessPCAP(absPCAPPath)
-	if err != nil {
-		log.Fatalf("Processing failed: %v", err)
-	}
-	log.Printf("Processing complete. Conn XLSX: %s, DNS XLSX: %s, Metadata: %+v", result.ConnPath, result.DNSPath, result.Metadata)
-
-	// Optionally upload processed logs to Enigma API if enabled
+	var uploader *api.LogUploader
 	if cfg.EnigmaAPI.Upload {
 		server := cfg.EnigmaAPI.Server
 		apiKey := cfg.EnigmaAPI.APIKey
-		// insecure := cfg.EnigmaAPI.DisableTLS // Removed
 		if server == "" || apiKey == "" {
 			log.Printf("enigma_api.server and enigma_api.api_key must be set to upload logs; skipping upload.")
-			return
+		} else {
+			u, err := api.NewLogUploader(server, apiKey, false)
+			if err != nil {
+				log.Printf("Failed to initialize LogUploader: %v", err)
+			} else {
+				uploader = u
+			}
+		}
+	}
+
+	loop := cfg.Capture.Loop
+	log.Printf("Agent loop mode: %v", loop)
+
+	for {
+		// Create a unique zeek_out_<timestamp> directory for this capture
+		timestamp := time.Now().UTC().Format("20060102T150405Z")
+		zeekOutDir := filepath.Join(outputDir, "zeek_out_"+timestamp)
+		if err := os.MkdirAll(zeekOutDir, 0755); err != nil {
+			log.Fatalf("Failed to create zeek_out dir: %v", err)
 		}
 
-		uploader, err := api.NewLogUploader(server, apiKey, false)
+		capCfg := common.CaptureConfig{
+			CaptureWindow: window,
+			OutputDir:     zeekOutDir,
+		}
+
+		capturer := capture.NewCapturer(capCfg)
+		log.Printf("Starting capture iteration at %s", timestamp)
+		pcapPath, err := capturer.Capture(ctx, capCfg)
 		if err != nil {
-			log.Printf("Failed to initialize LogUploader: %v", err)
-			return
+			log.Fatalf("Failed to capture: %v", err)
 		}
-		uploadErr := uploader.UploadLogs(ctx, api.LogFiles{
-			DNSPath:  result.DNSPath,
-			ConnPath: result.ConnPath,
-		})
-		if uploadErr != nil {
-			log.Printf("Log upload failed: %v", uploadErr)
-		} else {
-			log.Printf("Log upload successful.")
+		log.Printf("Captured file: %s", pcapPath)
+
+		absPCAPPath, err := filepath.Abs(pcapPath)
+		if err != nil {
+			log.Fatalf("Failed to get absolute path for PCAP: %v", err)
 		}
+		if _, err := os.Stat(absPCAPPath); err != nil {
+			log.Fatalf("PCAP file does not exist or is not accessible: %v", err)
+		}
+		log.Printf("Processing PCAP file at absolute path: %s", absPCAPPath)
+
+		result, err := processor.ProcessPCAP(absPCAPPath)
+		if err != nil {
+			log.Fatalf("Processing failed: %v", err)
+		}
+		log.Printf("Processing complete. Conn XLSX: %s, DNS XLSX: %s, Metadata: %+v", result.ConnPath, result.DNSPath, result.Metadata)
+
+		if uploader != nil {
+			uploadErr := uploader.UploadLogs(ctx, api.LogFiles{
+				DNSPath:  result.DNSPath,
+				ConnPath: result.ConnPath,
+			})
+			if uploadErr != nil {
+				log.Printf("Log upload failed: %v", uploadErr)
+			} else {
+				log.Printf("Log upload successful.")
+			}
+		}
+
+		if !loop {
+			break
+		}
+		// Immediately start next capture (no sleep)
 	}
 }
 

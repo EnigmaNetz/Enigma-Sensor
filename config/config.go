@@ -27,6 +27,8 @@ type Config struct {
 		OutputDir string `json:"output_dir"`
 		// WindowSeconds is how long each capture runs
 		WindowSeconds int `json:"window_seconds"`
+		// Loop determines if the agent should run in a continuous loop
+		Loop bool `json:"loop"`
 	} `json:"capture"`
 
 	// Enigma API configuration
@@ -77,6 +79,9 @@ func LoadConfig(configPath string) (*Config, error) {
 	}
 	if config.EnigmaAPI.Upload == false {
 		config.EnigmaAPI.Upload = false
+	}
+	if config.Capture.Loop != true {
+		config.Capture.Loop = false
 	}
 	// Zeek path can be empty by default
 

@@ -26,20 +26,31 @@ jobs:
     - name: Install dependencies
       run: go mod download
 
+    - name: Remove stray .out file (Windows workaround)
+      if: runner.os == 'Windows'
+      run: if exist .out del .out
+      shell: cmd
+
+    - name: Remove stray .out file (Unix workaround)
+      if: runner.os != 'Windows'
+      run: rm -f .out
+
     - name: Run tests
       run: go test -v -race ./...
 
     - name: Run tests with coverage
-      run: go test -v -race -coverprofile=coverage.out ./...
+      run: |
+        mkdir -p coverage
+        go test -v -race -coverprofile=coverage/coverage.out ./...
 
     - name: Remove publish proto files from coverage
-      run: grep -v 'internal/api/publish/' coverage.out > coverage.filtered.out && mv coverage.filtered.out coverage.out
+      run: grep -v 'internal/api/publish/' coverage/coverage.out > coverage/coverage.filtered.out && mv coverage/coverage.filtered.out coverage/coverage.out
 
     - name: Show coverage summary
-      run: go tool cover -func=coverage.out
+      run: go tool cover -func=coverage/coverage.out
 
     - name: Upload coverage report
       uses: actions/upload-artifact@v4
       with:
         name: coverage-report-${{ matrix.os }}
-        path: coverage.out
+        path: coverage/coverage.out

@@ -33,7 +33,8 @@ type Uploader interface {
 }
 
 // RunAgent orchestrates capture, processing, and upload with graceful shutdown
-func RunAgent(ctx context.Context, cfg *config.Config, capturer Capturer, processor Processor, uploader Uploader) error {
+// If disableSignals is true, signal handling is skipped (for tests)
+func RunAgent(ctx context.Context, cfg *config.Config, capturer Capturer, processor Processor, uploader Uploader, disableSignals ...bool) error {
 	outputDir := cfg.Capture.OutputDir
 	window := time.Duration(cfg.Capture.WindowSeconds) * time.Second
 	loop := cfg.Capture.Loop
@@ -76,28 +77,49 @@ func RunAgent(ctx context.Context, cfg *config.Config, capturer Capturer, proces
 				}
 			}
 		}
+		log.Printf("[worker] Exiting worker goroutine")
 	}()
 
-	// Handle Ctrl+C for graceful shutdown
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	stopped := false
+	// Optionally handle Ctrl+C for graceful shutdown
+	doSignals := true
+	if len(disableSignals) > 0 && disableSignals[0] {
+		doSignals = false
+	}
+	var sigCh chan os.Signal
+	if doSignals {
+		sigCh = make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	}
+
+	var once sync.Once
+	closeQueue := func() { once.Do(func() { close(pcapQueue) }) }
+
+	defer func() {
+		closeQueue()
+		wg.Wait()
+	}()
 
 	for {
 		select {
-		case sig := <-sigCh:
-			log.Printf("Received signal %v, shutting down after current capture...", sig)
-			stopped = true
-			close(pcapQueue)
-			break
+		case <-ctx.Done():
+			log.Printf("Context canceled, shutting down after current capture...")
+			closeQueue()
+			return nil
 		default:
-		}
-		if stopped {
-			break
+			if doSignals {
+				select {
+				case sig := <-sigCh:
+					log.Printf("Received signal %v, shutting down after current capture...", sig)
+					closeQueue()
+					return nil
+				default:
+				}
+			}
 		}
 		timestamp := time.Now().UTC().Format("20060102T150405Z")
 		zeekOutDir := filepath.Join(outputDir, "zeek_out_"+timestamp)
 		if err := os.MkdirAll(zeekOutDir, 0755); err != nil {
+			closeQueue()
 			return err
 		}
 		capCfg := common.CaptureConfig{
@@ -107,12 +129,17 @@ func RunAgent(ctx context.Context, cfg *config.Config, capturer Capturer, proces
 		log.Printf("Starting capture iteration at %s", timestamp)
 		pcapPath, err := capturer.Capture(ctx, capCfg)
 		if err != nil {
+			closeQueue()
 			return err
 		}
 		log.Printf("Captured file: %s", pcapPath)
 		select {
 		case pcapQueue <- pcapPath:
 			log.Printf("Enqueued PCAP for processing: %s", pcapPath)
+		case <-ctx.Done():
+			log.Printf("Context canceled while enqueueing, exiting loop")
+			closeQueue()
+			return nil
 		default:
 			log.Printf("[warning] PCAP queue full, dropping capture: %s", pcapPath)
 		}
@@ -121,7 +148,7 @@ func RunAgent(ctx context.Context, cfg *config.Config, capturer Capturer, proces
 		}
 	}
 	log.Printf("Waiting for processing worker to finish...")
-	wg.Wait()
+	// Wait handled by defer
 	log.Printf("Shutdown complete.")
 	return nil
 }

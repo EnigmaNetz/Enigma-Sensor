@@ -103,6 +103,10 @@ func TestRunAgent_SingleIteration_Success(t *testing.T) {
 	if capCalls != 1 || procCalls != 1 || upCalls != 1 {
 		t.Errorf("Expected 1 call each, got: cap=%d proc=%d up=%d", capCalls, procCalls, upCalls)
 	}
+	// Check that the capture file was deleted
+	if _, err := os.Stat("/tmp/fake.pcap"); !os.IsNotExist(err) {
+		t.Errorf("Expected capture file to be deleted, but it still exists or another error occurred: %v", err)
+	}
 	t.Log("TestRunAgent_SingleIteration_Success end reached")
 }
 

@@ -76,6 +76,29 @@ func RunAgent(ctx context.Context, cfg *config.Config, capturer Capturer, proces
 					log.Printf("[worker] Log upload successful.")
 				}
 			}
+			// Delete the capture file after processing and upload attempt
+			if err := os.Remove(absPCAPPath); err != nil {
+				log.Printf("[worker] Failed to delete processed PCAP file %s: %v", absPCAPPath, err)
+			} else {
+				log.Printf("[worker] Deleted processed PCAP file: %s", absPCAPPath)
+			}
+			// Clean up any other .pcap files in the output directory
+			dir := filepath.Dir(absPCAPPath)
+			entries, err := os.ReadDir(dir)
+			if err == nil {
+				for _, entry := range entries {
+					if !entry.IsDir() && filepath.Ext(entry.Name()) == ".pcap" && entry.Name() != filepath.Base(absPCAPPath) {
+						orphanPath := filepath.Join(dir, entry.Name())
+						if err := os.Remove(orphanPath); err != nil {
+							log.Printf("[worker] Failed to delete orphaned PCAP file %s: %v", orphanPath, err)
+						} else {
+							log.Printf("[worker] Deleted orphaned PCAP file: %s", orphanPath)
+						}
+					}
+				}
+			} else {
+				log.Printf("[worker] Failed to scan directory for orphaned PCAPs: %v", err)
+			}
 		}
 		log.Printf("[worker] Exiting worker goroutine")
 	}()

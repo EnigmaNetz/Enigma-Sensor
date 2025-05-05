@@ -40,7 +40,9 @@ jobs:
             GOOS=windows GOARCH=amd64 go build -o bin/enigma-agent-windows-amd64-${VERSION}.exe ./cmd/enigma-agent
           fi
 
+      # Only for windows-latest: upload binary before renaming for installer
       - name: Upload binary artifact
+        if: matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
           name: enigma-agent-${{ matrix.os }}-${{ steps.get_version.outputs.version }}
@@ -48,9 +50,48 @@ jobs:
             bin/enigma-agent-*-${{ steps.get_version.outputs.version }}*
 
       - name: Upload binaries to GitHub Release
+        if: matrix.os == 'windows-latest' && startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
         with:
           files: bin/enigma-agent-*-${{ steps.get_version.outputs.version }}*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Only for windows-latest: install Inno Setup, build installer, upload artifact
+      - name: Install Inno Setup
+        if: matrix.os == 'windows-latest'
+        run: choco install innosetup --no-progress
+        shell: powershell
+
+      - name: Rename binary for installer
+        if: matrix.os == 'windows-latest'
+        run: |
+          Rename-Item -Path bin/enigma-agent-windows-amd64-${{ steps.get_version.outputs.version }}.exe -NewName enigma-agent-windows-amd64.exe
+        shell: powershell
+
+      - name: Build Windows Installer
+        if: matrix.os == 'windows-latest'
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" enigma-agent-installer.iss
+        shell: powershell
+
+      - name: Rename installer
+        if: matrix.os == 'windows-latest'
+        run: |
+          Rename-Item -Path bin/enigma-agent-installer.exe -NewName enigma-agent-installer-${{ steps.get_version.outputs.version }}.exe
+        shell: powershell
+
+      - name: Upload installer artifact
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: enigma-agent-installer-${{ steps.get_version.outputs.version }}
+          path: enigma-agent-installer-${{ steps.get_version.outputs.version }}.exe
+
+      - name: Upload installer to GitHub Release
+        if: matrix.os == 'windows-latest'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: enigma-agent-installer-${{ steps.get_version.outputs.version }}.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

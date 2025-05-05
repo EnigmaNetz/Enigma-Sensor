@@ -135,3 +135,30 @@ All logs are in TSV format, suitable for Zeek-style analysis.
 - Keep documentation and code comments concise and relevant.
 
 - **Do not commit your real `config.json`** (it is gitignored). Use `config.example.json` as a safe template for sharing or onboarding.
+
+## Windows Installer (Service Mode)
+
+The Windows installer sets up Enigma Agent as a Windows service using NSSM with the following characteristics:
+
+- **Service Name:** EnigmaAgent
+- **Account:** LocalSystem (runs with admin privileges)
+- **Startup:** Automatic (runs on boot)
+- **Log Location:** `C:\ProgramData\EnigmaAgent\logs\enigma-agent.log`
+- **No Start Menu shortcut** is created.
+- **No advanced options** are shown during install; only API key and API host are prompted (host defaults to `https://enigmaai.net/`).
+- **No user password is required or prompted.**
+- The service is always run as LocalSystem.
+- **Uninstalling** will stop and remove the service.
+
+### To build the installer:
+
+1. Download [NSSM](https://nssm.cc/download) and place `nssm.exe` in your `bin/` directory.
+2. Build the agent executable for Windows (already present as `bin/enigma-agent-windows-amd64.exe`).
+3. Open `enigma-agent-installer.iss` in Inno Setup and click 'Compile'.
+4. The installer (`enigma-agent-installer.exe`) will be created in the output directory.
+
+### Troubleshooting
+
+- The installer uses `WorkingDir: {app}` for all NSSM commands, so only the executable filename is used (not the full path). This avoids issues with spaces in the install path.
+- All paths passed to NSSM are properly quoted with double quotes. Do **not** use single or triple quotes in the .iss file.
+- If the service fails to start, ensure that `enigma-agent-windows-amd64.exe` exists in the install directory and that you have admin rights.

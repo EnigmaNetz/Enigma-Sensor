@@ -154,7 +154,7 @@ The Windows installer sets up Enigma Agent as a Windows service using NSSM with 
 
 1. Download [NSSM](https://nssm.cc/download) and place `nssm.exe` in your `bin/` directory.
 2. Build the agent executable for Windows (already present as `bin/enigma-agent-windows-amd64.exe`).
-3. Open `enigma-agent-installer.iss` in Inno Setup and click 'Compile'.
+3. Open `installer/windows/enigma-agent-installer.iss` in Inno Setup and click 'Compile'.
 4. The installer (`enigma-agent-installer.exe`) will be created in the output directory.
 
 ### Troubleshooting

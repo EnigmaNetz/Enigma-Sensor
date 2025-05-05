@@ -72,7 +72,7 @@ jobs:
       - name: Build Windows Installer
         if: matrix.os == 'windows-latest'
         run: |
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" enigma-agent-installer.iss
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer/windows/enigma-agent-installer.iss
         shell: powershell
 
       - name: Rename installer

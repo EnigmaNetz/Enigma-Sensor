@@ -6,8 +6,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"log"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"time"
@@ -50,48 +48,36 @@ func (c *LinuxCapturer) runCapture(ctx context.Context, config common.CaptureCon
 		"-s", "0", // Capture entire packet
 	}
 
-	log.Printf("[capture] Running tcpdump command: tcpdump %v", args)
-
 	c.cmd = commandContext("tcpdump", args...)
 
-	// Capture stdout and stderr
+	// Capture stdout and stderr (must be before Start)
 	stdoutPipe, _ := c.cmd.StdoutPipe()
 	stderrPipe, _ := c.cmd.StderrPipe()
 
+	// Start the process
 	if err := c.cmd.Start(); err != nil {
-		log.Printf("[capture] Failed to start tcpdump: %v", err)
 		return "", fmt.Errorf("tcpdump start failed: %v", err)
 	}
 
-	// Log stdout and stderr in goroutines
-	go func() {
-		scanner := bufio.NewScanner(stdoutPipe)
-		for scanner.Scan() {
-			log.Printf("[capture][tcpdump stdout] %s", scanner.Text())
-		}
-	}()
-	go func() {
-		scanner := bufio.NewScanner(stderrPipe)
-		for scanner.Scan() {
-			log.Printf("[capture][tcpdump stderr] %s", scanner.Text())
-		}
-	}()
+	// Log stdout and stderr in goroutines if pipes are valid
+	if stdoutPipe != nil {
+		go func() {
+			scanner := bufio.NewScanner(stdoutPipe)
+			for scanner.Scan() {
+			}
+		}()
+	}
+	if stderrPipe != nil {
+		go func() {
+			scanner := bufio.NewScanner(stderrPipe)
+			for scanner.Scan() {
+			}
+		}()
+	}
 
 	err := c.cmd.Wait()
 	if err != nil {
-		log.Printf("[capture] tcpdump capture failed: %v", err)
 		return "", fmt.Errorf("tcpdump capture failed: %v", err)
-	}
-
-	// Log file size after capture
-	fileInfo, statErr := os.Stat(outputFile)
-	if statErr != nil {
-		log.Printf("[capture] Could not stat output file: %v", statErr)
-	} else {
-		log.Printf("[capture] Output file %s size: %d bytes", outputFile, fileInfo.Size())
-		if fileInfo.Size() == 0 {
-			log.Printf("[capture][warning] Output PCAP file is empty!")
-		}
 	}
 
 	return outputFile, nil

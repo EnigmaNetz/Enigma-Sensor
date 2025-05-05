@@ -65,6 +65,7 @@ A cross-platform network capture agent that collects, processes, and optionally 
   - `capture`: Output directory, interval, and window duration.
   - `enigma_api`: API server, API key, upload toggle, TLS toggle.
   - `zeek`: Path to Zeek binary (if needed).
+  - `log_retention_days`: Number of days to keep log files. Logs older than this are deleted on startup. Default: 1
 - **How to configure:**
   1. Copy `config.example.json` to `config.json`.
   2. Edit `config.json` to match your environment and secrets.

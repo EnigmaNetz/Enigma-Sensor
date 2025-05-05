@@ -2,7 +2,8 @@
   "logging": {
     "level": "info",
     "file": "logs/enigma-agent.log",
-    "max_size_mb": 100
+    "max_size_mb": 100,
+    "log_retention_days": 1
   },
   "capture": {
     "output_dir": "./captures",

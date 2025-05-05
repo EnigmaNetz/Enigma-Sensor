@@ -72,10 +72,16 @@ func minimalConfig(loop bool) *config.Config {
 			Loop:          loop,
 		},
 		Logging: struct {
-			Level     string `json:"level"`
-			File      string `json:"file"`
-			MaxSizeMB int64  `json:"max_size_mb"`
-		}{},
+			Level            string `json:"level"`
+			File             string `json:"file"`
+			MaxSizeMB        int64  `json:"max_size_mb"`
+			LogRetentionDays int    `json:"log_retention_days"`
+		}{
+			Level:            "info",
+			File:             "",
+			MaxSizeMB:        100,
+			LogRetentionDays: 1,
+		},
 		EnigmaAPI: struct {
 			Server string `json:"server"`
 			APIKey string `json:"api_key"`

@@ -122,7 +122,29 @@ func RunAgent(ctx context.Context, cfg *config.Config, capturer Capturer, proces
 		wg.Wait()
 	}()
 
+	// cleanOldZeekOutFolders deletes zeek_out_* folders older than retentionDays in the given outputDir.
+	cleanOldZeekOutFolders := func(outputDir string, retentionDays int) {
+		if outputDir == "" {
+			return
+		}
+		entries, err := os.ReadDir(outputDir)
+		if err == nil {
+			cutoff := time.Now().AddDate(0, 0, -retentionDays)
+			for _, entry := range entries {
+				if entry.IsDir() && len(entry.Name()) > 9 && entry.Name()[:9] == "zeek_out_" {
+					fullPath := filepath.Join(outputDir, entry.Name())
+					info, err := os.Stat(fullPath)
+					if err == nil && info.ModTime().Before(cutoff) {
+						_ = os.RemoveAll(fullPath)
+					}
+				}
+			}
+		}
+	}
+
 	for {
+		// Clean up old zeek_out_* folders every iteration
+		cleanOldZeekOutFolders(cfg.Capture.OutputDir, cfg.Logging.LogRetentionDays)
 		select {
 		case <-ctx.Done():
 			log.Printf("Context canceled, shutting down after current capture...")

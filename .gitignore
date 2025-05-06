@@ -1,6 +1,8 @@
 bin/
+!bin/nssm.exe
 logs/
 captures/
 config.json
 coverage.out
 .out
+Output/

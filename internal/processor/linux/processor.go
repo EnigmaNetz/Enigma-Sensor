@@ -4,7 +4,6 @@ package linux
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -85,50 +84,13 @@ func NewProcessorWithDeps(fs FS, cmdRunner CmdRunner, zeekPath string) *Processo
 
 // ProcessPCAP runs Zeek on the given PCAP, converts logs to XLSX, and returns their paths
 func (p *Processor) ProcessPCAP(pcapPath string) (types.ProcessedData, error) {
-	outDir := os.Getenv("CAPTURE_OUTPUT_DIR")
-	if outDir == "" {
-		outDir = "./captures"
-	}
-	if err := p.fs.MkdirAll(outDir, 0755); err != nil {
-		log.Printf("[processor] Failed to create output dir: %v", err)
-		return types.ProcessedData{}, fmt.Errorf("failed to create output dir: %w", err)
-	}
-	log.Printf("[processor] Output directory: %s", outDir)
+	// Use the directory containing the PCAP as the run directory
+	runDir := filepath.Dir(pcapPath)
+	log.Printf("[processor] Run directory: %s", runDir)
 
-	timestamp := time.Now().UTC().Format("20060102T150405Z")
-	runDir := filepath.Join(outDir, "zeek_out_"+timestamp)
-	if err := p.fs.MkdirAll(runDir, 0755); err != nil {
-		log.Printf("[processor] Failed to create run dir: %v", err)
-		return types.ProcessedData{}, fmt.Errorf("failed to create run dir: %w", err)
-	}
-	log.Printf("[processor] Run directory created: %s", runDir)
-
-	pcapBase := filepath.Base(pcapPath)
-	pcapDest := filepath.Join(runDir, pcapBase)
-	if absSrc, _ := filepath.Abs(pcapPath); absSrc != pcapDest {
-		srcFile, err := p.fs.Open(pcapPath)
-		if err != nil {
-			log.Printf("[processor] Failed to open source PCAP: %v", err)
-			return types.ProcessedData{}, fmt.Errorf("failed to open source PCAP: %w", err)
-		}
-		defer srcFile.Close()
-		dstFile, err := p.fs.Create(pcapDest)
-		if err != nil {
-			log.Printf("[processor] Failed to create destination PCAP: %v", err)
-			return types.ProcessedData{}, fmt.Errorf("failed to create destination PCAP: %w", err)
-		}
-		defer dstFile.Close()
-		if _, err := io.Copy(dstFile, srcFile); err != nil {
-			log.Printf("[processor] Failed to copy PCAP: %v", err)
-			return types.ProcessedData{}, fmt.Errorf("failed to copy PCAP: %w", err)
-		}
-		log.Printf("[processor] Copied PCAP to %s", pcapDest)
-	} else {
-		log.Printf("[processor] PCAP already in run directory: %s", pcapDest)
-	}
-
-	log.Printf("[processor] Running Zeek: %s -r %s Log::default_logdir=%s -C", p.zeekPath, pcapDest, runDir)
-	cmd := p.cmdRunner.Command(p.zeekPath, "-r", pcapDest, fmt.Sprintf("Log::default_logdir=%s", runDir), "-C")
+	// Run Zeek directly on the provided PCAP
+	log.Printf("[processor] Running Zeek: %s -r %s Log::default_logdir=%s -C", p.zeekPath, pcapPath, runDir)
+	cmd := p.cmdRunner.Command(p.zeekPath, "-r", pcapPath, fmt.Sprintf("Log::default_logdir=%s", runDir), "-C")
 	cmdStdout, ok := cmd.(*realCmd)
 	if ok {
 		cmdStdout.cmd.Stdout = os.Stdout
@@ -160,8 +122,8 @@ func (p *Processor) ProcessPCAP(pcapPath string) (types.ProcessedData, error) {
 
 	metadata := map[string]interface{}{
 		"zeek_out_dir": runDir,
-		"timestamp":    timestamp,
-		"pcap_path":    pcapDest,
+		"timestamp":    time.Now().UTC().Format("20060102T150405Z"),
+		"pcap_path":    pcapPath,
 	}
 	log.Printf("[processor] Returning results: conn.xlsx=%s, dns.xlsx=%s, metadata=%v", paths["conn.log"], paths["dns.log"], metadata)
 

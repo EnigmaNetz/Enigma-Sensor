@@ -5,7 +5,10 @@ package windows
 import (
 	"context"
 	"fmt"
+	"log"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 
 	"EnigmaNetz/Enigma-Go-Agent/internal/capture/common"
@@ -25,6 +28,15 @@ func NewWindowsCapturer() *WindowsCapturer {
 // Capture runs a single pktmon capture and returns the output file path or error
 func (c *WindowsCapturer) Capture(ctx context.Context, config common.CaptureConfig) (string, error) {
 	c.outputDir = config.OutputDir
+	// Clean output directory of .etl files before capture
+	entries, err := os.ReadDir(c.outputDir)
+	if err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() && filepath.Ext(entry.Name()) == ".etl" {
+				os.Remove(c.outputDir + "/" + entry.Name())
+			}
+		}
+	}
 	return c.runCapture(ctx, config)
 }
 
@@ -35,6 +47,7 @@ func (c *WindowsCapturer) runCapture(ctx context.Context, config common.CaptureC
 	outputFile := fmt.Sprintf("%s/capture_%s.etl", c.outputDir, timestamp)
 
 	// Start pktmon capture
+	log.Printf("[capture] Running pktmon command: pktmon start --capture --file %s", outputFile)
 	c.cmd = commandContext("pktmon", "start", "--capture", "--file", outputFile)
 
 	if err := c.cmd.Start(); err != nil {

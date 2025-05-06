@@ -16,6 +16,8 @@ type Config struct {
 		File string `json:"file"`
 		// MaxSizeMB is the maximum size of log file before rotation
 		MaxSizeMB int64 `json:"max_size_mb"`
+		// LogRetentionDays is the number of days to keep log files
+		LogRetentionDays int `json:"log_retention_days"`
 	} `json:"logging"`
 
 	// Capture configuration
@@ -70,6 +72,9 @@ func LoadConfig(configPath string) (*Config, error) {
 	}
 	if config.Logging.MaxSizeMB == 0 {
 		config.Logging.MaxSizeMB = 100 // 100MB default
+	}
+	if config.Logging.LogRetentionDays == 0 {
+		config.Logging.LogRetentionDays = 1 // 1 day default
 	}
 	if config.EnigmaAPI.Server == "" {
 		config.EnigmaAPI.Server = "api.enigmaai.net:443"

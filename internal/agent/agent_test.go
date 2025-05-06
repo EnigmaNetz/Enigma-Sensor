@@ -72,10 +72,16 @@ func minimalConfig(loop bool) *config.Config {
 			Loop:          loop,
 		},
 		Logging: struct {
-			Level     string `json:"level"`
-			File      string `json:"file"`
-			MaxSizeMB int64  `json:"max_size_mb"`
-		}{},
+			Level            string `json:"level"`
+			File             string `json:"file"`
+			MaxSizeMB        int64  `json:"max_size_mb"`
+			LogRetentionDays int    `json:"log_retention_days"`
+		}{
+			Level:            "info",
+			File:             "",
+			MaxSizeMB:        100,
+			LogRetentionDays: 1,
+		},
 		EnigmaAPI: struct {
 			Server string `json:"server"`
 			APIKey string `json:"api_key"`
@@ -102,6 +108,10 @@ func TestRunAgent_SingleIteration_Success(t *testing.T) {
 	}
 	if capCalls != 1 || procCalls != 1 || upCalls != 1 {
 		t.Errorf("Expected 1 call each, got: cap=%d proc=%d up=%d", capCalls, procCalls, upCalls)
+	}
+	// Check that the capture file was deleted
+	if _, err := os.Stat("/tmp/fake.pcap"); !os.IsNotExist(err) {
+		t.Errorf("Expected capture file to be deleted, but it still exists or another error occurred: %v", err)
 	}
 	t.Log("TestRunAgent_SingleIteration_Success end reached")
 }

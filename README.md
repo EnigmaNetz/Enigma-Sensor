@@ -54,6 +54,7 @@ A cross-platform network capture agent that collects, processes, and optionally 
    ```sh
    ./bin/enigma-agent
    ```
+   - On Windows, Zeek for Windows will be auto-extracted to `zeek-windows/` on first run. No manual setup required.
 
 ---
 
@@ -114,6 +115,7 @@ All logs are in TSV format, suitable for Zeek-style analysis.
 - **Windows:**
   - Admin privileges (for `pktmon`)
   - Windows 10 1809+
+  - Zeek for Windows is auto-extracted from `internal/processor/windows/zeek-windows.zip` to `zeek-windows/` on first run. No manual setup required.
 - **Linux/macOS:**
   - Root privileges (for `tcpdump`)
   - `tcpdump` installed

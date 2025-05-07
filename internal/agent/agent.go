@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -14,6 +15,7 @@ import (
 	"EnigmaNetz/Enigma-Go-Agent/internal/api"
 	"EnigmaNetz/Enigma-Go-Agent/internal/capture/common"
 	types "EnigmaNetz/Enigma-Go-Agent/internal/processor/common"
+	"archive/zip"
 )
 
 // Capturer abstracts the capture logic
@@ -32,9 +34,70 @@ type Uploader interface {
 	UploadLogs(ctx context.Context, files api.LogFiles) error
 }
 
+// ensureZeekWindows extracts Zeek for Windows, always overwriting the directory to ensure the latest version is used
+func ensureZeekWindows() error {
+	zeekDir := "zeek-windows"
+	zipPath := "internal/processor/windows/zeek-runtime-win64.zip"
+	// Remove the existing directory if it exists
+	if _, err := os.Stat(zeekDir); err == nil {
+		if err := os.RemoveAll(zeekDir); err != nil {
+			return err
+		}
+	}
+	if err := os.MkdirAll(zeekDir, 0755); err != nil {
+		return err
+	}
+	zipFile, err := os.Open(zipPath)
+	if err != nil {
+		return err
+	}
+	defer zipFile.Close()
+	stat, err := zipFile.Stat()
+	if err != nil {
+		return err
+	}
+	zr, err := zip.NewReader(zipFile, stat.Size())
+	if err != nil {
+		return err
+	}
+	for _, f := range zr.File {
+		fpath := filepath.Join(zeekDir, f.Name)
+		if f.FileInfo().IsDir() {
+			if err := os.MkdirAll(fpath, f.Mode()); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(fpath), 0755); err != nil {
+			return err
+		}
+		outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+		if err != nil {
+			return err
+		}
+		rc, err := f.Open()
+		if err != nil {
+			outFile.Close()
+			return err
+		}
+		_, err = io.Copy(outFile, rc)
+		outFile.Close()
+		rc.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // RunAgent orchestrates capture, processing, and upload with graceful shutdown
 // If disableSignals is true, signal handling is skipped (for tests)
 func RunAgent(ctx context.Context, cfg *config.Config, capturer Capturer, processor Processor, uploader Uploader, disableSignals ...bool) error {
+	// Ensure Zeek for Windows is available
+	if err := ensureZeekWindows(); err != nil {
+		return err
+	}
+
 	outputDir := cfg.Capture.OutputDir
 	window := time.Duration(cfg.Capture.WindowSeconds) * time.Second
 	loop := cfg.Capture.Loop

@@ -3,6 +3,7 @@
 package windows
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log"
@@ -44,11 +45,11 @@ func (c *WindowsCapturer) Capture(ctx context.Context, config common.CaptureConf
 func (c *WindowsCapturer) runCapture(ctx context.Context, config common.CaptureConfig) (string, error) {
 	// Generate output filename with timestamp
 	timestamp := time.Now().Format("20060102_150405")
-	outputFile := fmt.Sprintf("%s/capture_%s.etl", c.outputDir, timestamp)
+	etlFile := fmt.Sprintf("%s/capture_%s.etl", c.outputDir, timestamp)
 
 	// Start pktmon capture
-	log.Printf("[capture] Running pktmon command: pktmon start --capture --file %s", outputFile)
-	c.cmd = commandContext("pktmon", "start", "--capture", "--file", outputFile)
+	log.Printf("[capture] Running pktmon command: pktmon start --capture --file %s", etlFile)
+	c.cmd = commandContext("pktmon", "start", "--capture", "--file", etlFile)
 
 	if err := c.cmd.Start(); err != nil {
 		return "", fmt.Errorf("failed to start pktmon: %v", err)

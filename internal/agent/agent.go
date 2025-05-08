@@ -90,6 +90,15 @@ func ensureZeekWindows() error {
 	return nil
 }
 
+// deletePCAPFile deletes the given PCAP file and logs the result.
+func deletePCAPFile(pcapPath string) {
+	if err := os.Remove(pcapPath); err != nil {
+		log.Printf("[worker] Failed to delete processed PCAP file %s: %v", pcapPath, err)
+	} else {
+		log.Printf("[worker] Deleted processed PCAP file: %s", pcapPath)
+	}
+}
+
 // RunAgent orchestrates capture, processing, and upload with graceful shutdown
 // If disableSignals is true, signal handling is skipped (for tests)
 func RunAgent(ctx context.Context, cfg *config.Config, capturer Capturer, processor Processor, uploader Uploader, disableSignals ...bool) error {
@@ -124,6 +133,7 @@ func RunAgent(ctx context.Context, cfg *config.Config, capturer Capturer, proces
 			result, err := processor.ProcessPCAP(absPCAPPath)
 			if err != nil {
 				log.Printf("[worker] Processing failed: %v", err)
+				// Do not delete the PCAP file on processing error
 				continue
 			}
 			log.Printf("[worker] Processing complete. Conn XLSX: %s, DNS XLSX: %s, Metadata: %+v", result.ConnPath, result.DNSPath, result.Metadata)
@@ -139,12 +149,8 @@ func RunAgent(ctx context.Context, cfg *config.Config, capturer Capturer, proces
 					log.Printf("[worker] Log upload successful.")
 				}
 			}
-			// Delete the capture file after processing and upload attempt
-			if err := os.Remove(absPCAPPath); err != nil {
-				log.Printf("[worker] Failed to delete processed PCAP file %s: %v", absPCAPPath, err)
-			} else {
-				log.Printf("[worker] Deleted processed PCAP file: %s", absPCAPPath)
-			}
+			// Only delete the capture file after successful processing and upload attempt
+			deletePCAPFile(absPCAPPath)
 			// Clean up any other .pcap files in the output directory
 			dir := filepath.Dir(absPCAPPath)
 			entries, err := os.ReadDir(dir)

@@ -78,7 +78,7 @@ jobs:
       - name: Rename installer
         if: matrix.os == 'windows-latest'
         run: |
-          Rename-Item -Path bin/enigma-agent-installer.exe -NewName enigma-agent-installer-${{ steps.get_version.outputs.version }}.exe
+          Rename-Item -Path installer/windows/Output/enigma-agent-installer.exe -NewName enigma-agent-installer-${{ steps.get_version.outputs.version }}.exe
         shell: powershell
 
       - name: Upload installer artifact
@@ -86,12 +86,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: enigma-agent-installer-${{ steps.get_version.outputs.version }}
-          path: enigma-agent-installer-${{ steps.get_version.outputs.version }}.exe
+          path: installer/windows/Output/enigma-agent-installer-${{ steps.get_version.outputs.version }}.exe
 
       - name: Upload installer to GitHub Release
         if: matrix.os == 'windows-latest'
         uses: softprops/action-gh-release@v2
         with:
-          files: enigma-agent-installer-${{ steps.get_version.outputs.version }}.exe
+          files: installer/windows/Output/enigma-agent-installer-${{ steps.get_version.outputs.version }}.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

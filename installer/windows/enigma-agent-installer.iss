@@ -12,9 +12,9 @@ SolidCompression=yes
 PrivilegesRequired=admin
 
 [Files]
-Source: "bin\enigma-agent-windows-amd64.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "bin\nssm.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "installer\windows\zeek-runtime-win64.zip"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\\..\\bin\\enigma-agent-windows-amd64.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\\..\\bin\\nssm.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "zeek-runtime-win64.zip"; DestDir: "{app}"; Flags: ignoreversion
 
 [Dirs]
 Name: "C:\ProgramData\EnigmaAgent\logs"; Flags: uninsalwaysuninstall
@@ -26,8 +26,6 @@ var
   ApiKeyPage, ApiHostPage: TInputQueryWizardPage;
   LoggingLevel, LoggingFile, LoggingMaxSize: String;
   CaptureOutputDir, CaptureWindowSeconds: String;
-  EnigmaApiUpload: Boolean;
-  ZeekPath: String;
 
 procedure InitializeWizard;
 begin
@@ -43,8 +41,6 @@ begin
   LoggingMaxSize := '100';
   CaptureOutputDir := './captures';
   CaptureWindowSeconds := '60';
-  EnigmaApiUpload := False;
-  ZeekPath := '';
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -54,14 +50,6 @@ begin
     Result := ApiKeyPage.Values[0] <> ''
   else if CurPageID = ApiHostPage.ID then
     Result := ApiHostPage.Values[0] <> '';
-end;
-
-function GetUploadValue(): String;
-begin
-  if EnigmaApiUpload then
-    Result := 'true'
-  else
-    Result := 'false';
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -84,10 +72,7 @@ begin
       '  "enigma_api": {' + #13#10 +
       '    "server": "' + ApiHostPage.Values[0] + '",' + #13#10 +
       '    "api_key": "' + ApiKeyPage.Values[0] + '",' + #13#10 +
-      '    "upload": ' + GetUploadValue() + #13#10 +
-      '  },' + #13#10 +
-      '  "zeek": {' + #13#10 +
-      '    "path": "' + ZeekPath + '"' + #13#10 +
+      '    "upload": true' + #13#10 +
       '  }' + #13#10 +
       '}',
       False

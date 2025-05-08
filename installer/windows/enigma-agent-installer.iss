@@ -14,6 +14,7 @@ PrivilegesRequired=admin
 [Files]
 Source: "bin\enigma-agent-windows-amd64.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "bin\nssm.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "internal\processor\windows\zeek-runtime-win64.zip"; DestDir: "{app}"; Flags: ignoreversion
 
 [Dirs]
 Name: "C:\ProgramData\EnigmaAgent\logs"; Flags: uninsalwaysuninstall

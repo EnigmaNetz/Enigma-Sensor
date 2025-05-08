@@ -26,35 +26,43 @@ var
   ApiKeyPage, ApiHostPage: TInputQueryWizardPage;
   LoggingLevel, LoggingFile, LoggingMaxSize: String;
   CaptureOutputDir, CaptureWindowSeconds: String;
+  ConfigExists: Boolean;
 
 procedure InitializeWizard;
 begin
-  ApiKeyPage := CreateInputQueryPage(wpSelectDir, 'API Key', 'Enter your Enigma API Key', 'This is required.');
-  ApiKeyPage.Add('API Key:', False);
+  ConfigExists := FileExists('C:\\ProgramData\\EnigmaAgent\\config.json');
+  if not ConfigExists then
+  begin
+    ApiKeyPage := CreateInputQueryPage(wpSelectDir, 'API Key', 'Enter your Enigma API Key', 'This is required.');
+    ApiKeyPage.Add('API Key:', False);
 
-  ApiHostPage := CreateInputQueryPage(ApiKeyPage.ID, 'API Host', 'Enter your Enigma API Host', 'This is required.');
-  ApiHostPage.Add('API Host:', False);
-  ApiHostPage.Values[0] := 'enigmaai.net:443';
+    ApiHostPage := CreateInputQueryPage(ApiKeyPage.ID, 'API Host', 'Enter your Enigma API Host', 'This is required.');
+    ApiHostPage.Add('API Host:', False);
+    ApiHostPage.Values[0] := 'enigmaai.net:443';
 
-  LoggingLevel := 'info';
-  LoggingFile := 'logs/enigma-agent.log';
-  LoggingMaxSize := '100';
-  CaptureOutputDir := './captures';
-  CaptureWindowSeconds := '60';
+    LoggingLevel := 'info';
+    LoggingFile := 'logs/enigma-agent.log';
+    LoggingMaxSize := '100';
+    CaptureOutputDir := './captures';
+    CaptureWindowSeconds := '60';
+  end;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
 begin
   Result := True;
-  if CurPageID = ApiKeyPage.ID then
-    Result := ApiKeyPage.Values[0] <> ''
-  else if CurPageID = ApiHostPage.ID then
-    Result := ApiHostPage.Values[0] <> '';
+  if not ConfigExists then
+  begin
+    if CurPageID = ApiKeyPage.ID then
+      Result := ApiKeyPage.Values[0] <> ''
+    else if CurPageID = ApiHostPage.ID then
+      Result := ApiHostPage.Values[0] <> '';
+  end;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  if CurStep = ssPostInstall then
+  if (CurStep = ssPostInstall) and (not ConfigExists) then
   begin
     SaveStringToFile(
       'C:\\ProgramData\\EnigmaAgent\\config.json',

@@ -101,7 +101,7 @@ func TestRunAgent_SingleIteration_Success(t *testing.T) {
 		&mockCapturer{calls: &capCalls},
 		&mockProcessor{calls: &procCalls},
 		&mockUploader{calls: &upCalls},
-		true,
+		true, true,
 	)
 	if err != nil {
 		t.Fatalf("RunAgent failed: %v", err)
@@ -126,7 +126,7 @@ func TestRunAgent_CaptureError(t *testing.T) {
 		&mockCapturer{calls: &capCalls, fail: true},
 		&mockProcessor{calls: new(int32)},
 		&mockUploader{calls: new(int32)},
-		true,
+		true, true,
 	)
 	if err == nil {
 		t.Error("Expected error from failed capture, got nil")
@@ -144,7 +144,7 @@ func TestRunAgent_ProcessorError(t *testing.T) {
 		&mockCapturer{calls: &capCalls},
 		&mockProcessor{calls: &procCalls, fail: true},
 		&mockUploader{calls: new(int32)},
-		true,
+		true, true,
 	)
 	if err != nil {
 		t.Fatalf("RunAgent should not fail on processor error, got: %v", err)
@@ -167,7 +167,7 @@ func TestRunAgent_QueueFull(t *testing.T) {
 		&mockCapturer{calls: &capCalls},
 		&mockProcessor{calls: &procCalls},
 		&mockUploader{calls: new(int32)},
-		true,
+		true, true,
 	)
 	if err != nil {
 		t.Fatalf("RunAgent failed: %v", err)

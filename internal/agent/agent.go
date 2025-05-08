@@ -101,10 +101,21 @@ func deletePCAPFile(pcapPath string) {
 
 // RunAgent orchestrates capture, processing, and upload with graceful shutdown
 // If disableSignals is true, signal handling is skipped (for tests)
-func RunAgent(ctx context.Context, cfg *config.Config, capturer Capturer, processor Processor, uploader Uploader, disableSignals ...bool) error {
+// If skipEnsureZeek is true, ensureZeekWindows is not called (for tests)
+func RunAgent(ctx context.Context, cfg *config.Config, capturer Capturer, processor Processor, uploader Uploader, disableSignalsAndSkipZeek ...bool) error {
+	skipEnsureZeek := false
+	disableSignals := false
+	if len(disableSignalsAndSkipZeek) > 0 {
+		disableSignals = disableSignalsAndSkipZeek[0]
+	}
+	if len(disableSignalsAndSkipZeek) > 1 {
+		skipEnsureZeek = disableSignalsAndSkipZeek[1]
+	}
 	// Ensure Zeek for Windows is available
-	if err := ensureZeekWindows(); err != nil {
-		return err
+	if !skipEnsureZeek {
+		if err := ensureZeekWindows(); err != nil {
+			return err
+		}
 	}
 
 	outputDir := cfg.Capture.OutputDir
@@ -174,7 +185,7 @@ func RunAgent(ctx context.Context, cfg *config.Config, capturer Capturer, proces
 
 	// Optionally handle Ctrl+C for graceful shutdown
 	doSignals := true
-	if len(disableSignals) > 0 && disableSignals[0] {
+	if disableSignals {
 		doSignals = false
 	}
 	var sigCh chan os.Signal

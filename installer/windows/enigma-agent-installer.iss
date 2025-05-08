@@ -61,7 +61,14 @@ begin
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ExitCode: Integer;
 begin
+  if CurStep = ssInstall then
+  begin
+    if FileExists(ExpandConstant('{app}\nssm.exe')) then
+      Exec(ExpandConstant('{app}\nssm.exe'), 'stop EnigmaAgent', ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ExitCode);
+  end;
   if (CurStep = ssPostInstall) and (not ConfigExists) then
   begin
     SaveStringToFile(
@@ -86,6 +93,11 @@ begin
       False
     );
   end;
+end;
+
+function InitializeSetup(): Boolean;
+begin
+  Result := True;
 end;
 
 [Run]

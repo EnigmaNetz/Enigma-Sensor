@@ -27,6 +27,9 @@ func (m *mockCapturer) Capture(ctx context.Context, cfg common.CaptureConfig) (s
 	// Create the fake file so the worker can stat it
 	f, _ := os.Create("/tmp/fake.pcap")
 	f.Close()
+	// Also create a fake .etl file to test deletion
+	etl, _ := os.Create("/tmp/fake.etl")
+	etl.Close()
 	return "/tmp/fake.pcap", nil
 }
 
@@ -112,6 +115,10 @@ func TestRunAgent_SingleIteration_Success(t *testing.T) {
 	// Check that the capture file was deleted
 	if _, err := os.Stat("/tmp/fake.pcap"); !os.IsNotExist(err) {
 		t.Errorf("Expected capture file to be deleted, but it still exists or another error occurred: %v", err)
+	}
+	// Check that the corresponding .etl file was deleted
+	if _, err := os.Stat("/tmp/fake.etl"); !os.IsNotExist(err) {
+		t.Errorf("Expected ETL file to be deleted, but it still exists or another error occurred: %v", err)
 	}
 	t.Log("TestRunAgent_SingleIteration_Success end reached")
 }

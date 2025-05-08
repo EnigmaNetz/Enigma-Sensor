@@ -97,6 +97,16 @@ func deletePCAPFile(pcapPath string) {
 	} else {
 		log.Printf("[worker] Deleted processed PCAP file: %s", pcapPath)
 	}
+
+	// Also try to delete a corresponding .etl file if it exists (Windows)
+	etlPath := pcapPath[:len(pcapPath)-len(filepath.Ext(pcapPath))] + ".etl"
+	if _, err := os.Stat(etlPath); err == nil {
+		if err := os.Remove(etlPath); err != nil {
+			log.Printf("[worker] Failed to delete corresponding ETL file %s: %v", etlPath, err)
+		} else {
+			log.Printf("[worker] Deleted corresponding ETL file: %s", etlPath)
+		}
+	}
 }
 
 // RunAgent orchestrates capture, processing, and upload with graceful shutdown
@@ -162,22 +172,25 @@ func RunAgent(ctx context.Context, cfg *config.Config, capturer Capturer, proces
 			}
 			// Only delete the capture file after successful processing and upload attempt
 			deletePCAPFile(absPCAPPath)
-			// Clean up any other .pcap files in the output directory
+			// Clean up any other .pcap and .etl files in the output directory
 			dir := filepath.Dir(absPCAPPath)
 			entries, err := os.ReadDir(dir)
 			if err == nil {
 				for _, entry := range entries {
-					if !entry.IsDir() && filepath.Ext(entry.Name()) == ".pcap" && entry.Name() != filepath.Base(absPCAPPath) {
-						orphanPath := filepath.Join(dir, entry.Name())
-						if err := os.Remove(orphanPath); err != nil {
-							log.Printf("[worker] Failed to delete orphaned PCAP file %s: %v", orphanPath, err)
-						} else {
-							log.Printf("[worker] Deleted orphaned PCAP file: %s", orphanPath)
+					if !entry.IsDir() {
+						ext := filepath.Ext(entry.Name())
+						if (ext == ".pcap" || ext == ".etl") && entry.Name() != filepath.Base(absPCAPPath) {
+							orphanPath := filepath.Join(dir, entry.Name())
+							if err := os.Remove(orphanPath); err != nil {
+								log.Printf("[worker] Failed to delete orphaned file %s: %v", orphanPath, err)
+							} else {
+								log.Printf("[worker] Deleted orphaned file: %s", orphanPath)
+							}
 						}
 					}
 				}
 			} else {
-				log.Printf("[worker] Failed to scan directory for orphaned PCAPs: %v", err)
+				log.Printf("[worker] Failed to scan directory for orphaned files: %v", err)
 			}
 		}
 		log.Printf("[worker] Exiting worker goroutine")

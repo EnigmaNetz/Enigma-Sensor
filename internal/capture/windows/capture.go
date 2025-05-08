@@ -64,5 +64,39 @@ func (c *WindowsCapturer) runCapture(ctx context.Context, config common.CaptureC
 		return "", fmt.Errorf("failed to stop pktmon: %v", err)
 	}
 
-	return outputFile, nil
+	// Detect available pktmon conversion subcommand
+	subcommand, err := detectPktmonConversionSubcommand()
+	if err != nil {
+		return "", err
+	}
+
+	// Convert ETL to PCAPNG
+	pcapngFile := fmt.Sprintf("%s/capture_%s.pcapng", c.outputDir, timestamp)
+	log.Printf("[capture] Running conversion: pktmon %s %s -o %s", subcommand, etlFile, pcapngFile)
+	convertCmd := commandContext("pktmon", subcommand, etlFile, "-o", pcapngFile)
+	var outBuf, errBuf bytes.Buffer
+	convertCmd.Stdout = &outBuf
+	convertCmd.Stderr = &errBuf
+	if err := convertCmd.Run(); err != nil {
+		log.Printf("[capture] pktmon %s stdout: %s", subcommand, outBuf.String())
+		log.Printf("[capture] pktmon %s stderr: %s", subcommand, errBuf.String())
+		return "", fmt.Errorf("failed to convert ETL to PCAPNG: %v", err)
+	}
+
+	return pcapngFile, nil
+}
+
+// detectPktmonConversionSubcommand checks which pktmon conversion subcommand is available.
+func detectPktmonConversionSubcommand() (string, error) {
+	// Try etl2pcapng first
+	cmd := exec.Command("pktmon", "etl2pcapng", "/?")
+	if err := cmd.Run(); err == nil {
+		return "etl2pcapng", nil
+	}
+	// Fallback to etl2pcap
+	cmd = exec.Command("pktmon", "etl2pcap", "/?")
+	if err := cmd.Run(); err == nil {
+		return "etl2pcap", nil
+	}
+	return "", fmt.Errorf("neither 'etl2pcapng' nor 'etl2pcap' subcommands are available in pktmon; please update Windows or pktmon")
 }

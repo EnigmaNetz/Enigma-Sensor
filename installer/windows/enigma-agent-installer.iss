@@ -34,7 +34,7 @@ begin
 
   ApiHostPage := CreateInputQueryPage(ApiKeyPage.ID, 'API Host', 'Enter your Enigma API Host', 'This is required.');
   ApiHostPage.Add('API Host:', False);
-  ApiHostPage.Values[0] := 'https://enigmaai.net/';
+  ApiHostPage.Values[0] := 'enigmaai.net:443';
 
   LoggingLevel := 'info';
   LoggingFile := 'logs/enigma-agent.log';
@@ -57,11 +57,11 @@ begin
   if CurStep = ssPostInstall then
   begin
     SaveStringToFile(
-      ExpandConstant('{app}\config.json'),
+      'C:\\ProgramData\\EnigmaAgent\\config.json',
       '{' + #13#10 +
       '  "logging": {' + #13#10 +
       '    "level": "' + LoggingLevel + '",' + #13#10 +
-      '    "file": "' + LoggingFile + '",' + #13#10 +
+      '    "file": "logs/enigma-agent.log",' + #13#10 +
       '    "max_size_mb": ' + LoggingMaxSize + #13#10 +
       '  },' + #13#10 +
       '  "capture": {' + #13#10 +

@@ -37,18 +37,16 @@ type Uploader interface {
 // ensureZeekWindows extracts Zeek for Windows, always overwriting the directory to ensure the latest version is used
 func ensureZeekWindows() error {
 	zeekDir := "zeek-windows"
-	zipPath := "internal/processor/windows/zeek-runtime-win64.zip"
-	// Remove the existing directory if it exists
-	if _, err := os.Stat(zeekDir); err == nil {
-		if err := os.RemoveAll(zeekDir); err != nil {
-			return err
+	zipPaths := []string{"zeek-runtime-win64.zip", "installer/windows/zeek-runtime-win64.zip"}
+	var zipFile *os.File
+	var err error
+	for _, path := range zipPaths {
+		zipFile, err = os.Open(path)
+		if err == nil {
+			break
 		}
 	}
-	if err := os.MkdirAll(zeekDir, 0755); err != nil {
-		return err
-	}
-	zipFile, err := os.Open(zipPath)
-	if err != nil {
+	if zipFile == nil {
 		return err
 	}
 	defer zipFile.Close()
@@ -73,6 +71,7 @@ func ensureZeekWindows() error {
 		}
 		outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
 		if err != nil {
+			outFile.Close()
 			return err
 		}
 		rc, err := f.Open()

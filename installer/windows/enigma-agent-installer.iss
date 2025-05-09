@@ -12,8 +12,9 @@ SolidCompression=yes
 PrivilegesRequired=admin
 
 [Files]
-Source: "bin\enigma-agent-windows-amd64.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "bin\nssm.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\\..\\bin\\enigma-agent-windows-amd64.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\\..\\bin\\nssm.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "zeek-runtime-win64.zip"; DestDir: "{app}"; Flags: ignoreversion
 
 [Dirs]
 Name: "C:\ProgramData\EnigmaAgent\logs"; Flags: uninsalwaysuninstall
@@ -25,8 +26,6 @@ var
   ApiKeyPage, ApiHostPage: TInputQueryWizardPage;
   LoggingLevel, LoggingFile, LoggingMaxSize: String;
   CaptureOutputDir, CaptureWindowSeconds: String;
-  EnigmaApiUpload: Boolean;
-  ZeekPath: String;
 
 procedure InitializeWizard;
 begin
@@ -35,15 +34,13 @@ begin
 
   ApiHostPage := CreateInputQueryPage(ApiKeyPage.ID, 'API Host', 'Enter your Enigma API Host', 'This is required.');
   ApiHostPage.Add('API Host:', False);
-  ApiHostPage.Values[0] := 'https://enigmaai.net/';
+  ApiHostPage.Values[0] := 'enigmaai.net:443';
 
   LoggingLevel := 'info';
   LoggingFile := 'logs/enigma-agent.log';
   LoggingMaxSize := '100';
   CaptureOutputDir := './captures';
   CaptureWindowSeconds := '60';
-  EnigmaApiUpload := False;
-  ZeekPath := '';
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -55,24 +52,16 @@ begin
     Result := ApiHostPage.Values[0] <> '';
 end;
 
-function GetUploadValue(): String;
-begin
-  if EnigmaApiUpload then
-    Result := 'true'
-  else
-    Result := 'false';
-end;
-
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
   begin
     SaveStringToFile(
-      ExpandConstant('{app}\config.json'),
+      'C:\\ProgramData\\EnigmaAgent\\config.json',
       '{' + #13#10 +
       '  "logging": {' + #13#10 +
       '    "level": "' + LoggingLevel + '",' + #13#10 +
-      '    "file": "' + LoggingFile + '",' + #13#10 +
+      '    "file": "logs/enigma-agent.log",' + #13#10 +
       '    "max_size_mb": ' + LoggingMaxSize + #13#10 +
       '  },' + #13#10 +
       '  "capture": {' + #13#10 +
@@ -83,10 +72,7 @@ begin
       '  "enigma_api": {' + #13#10 +
       '    "server": "' + ApiHostPage.Values[0] + '",' + #13#10 +
       '    "api_key": "' + ApiKeyPage.Values[0] + '",' + #13#10 +
-      '    "upload": ' + GetUploadValue() + #13#10 +
-      '  },' + #13#10 +
-      '  "zeek": {' + #13#10 +
-      '    "path": "' + ZeekPath + '"' + #13#10 +
+      '    "upload": true' + #13#10 +
       '  }' + #13#10 +
       '}',
       False

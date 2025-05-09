@@ -54,34 +54,38 @@ A cross-platform network capture agent that collects, processes, and optionally 
    ```sh
    ./bin/enigma-agent
    ```
+   - On Windows, Zeek for Windows will be auto-extracted from `installer/windows/zeek-runtime-win64.zip` to `zeek-windows/` on first run. No manual setup required. The installer always overwrites the Zeek directory with the bundled version.
 
 ---
 
 ## Configuration
 
-- All configuration is via `config.json` (see `config.example.json` for a template).
+- All configuration is via `config.json`.
+- **On Windows, the installer writes config to:** `C:\ProgramData\EnigmaAgent\config.json` (this is always used if present).
 - **Key fields:**
   - `logging`: Log level, file path, and max size.
   - `capture`: Output directory, interval, and window duration.
-  - `enigma_api`: API server, API key, upload toggle, TLS toggle.
-  - `zeek`: Path to Zeek binary (if needed).
+  - `enigma_api`: API server, API key, upload toggle (always enabled).
   - `log_retention_days`: Number of days to keep log files. Logs older than this are deleted on startup. Default: 1
 - **How to configure:**
-  1. Copy `config.example.json` to `config.json`.
-  2. Edit `config.json` to match your environment and secrets.
+  1. On Windows, edit `C:\ProgramData\EnigmaAgent\config.json` after install if needed.
+  2. On Linux/macOS, copy `config.example.json` to `config.json` and edit as needed.
 
 ---
 
 ## Capture & Processing Flow
 
 1. **Initialization:**
-   Loads config, detects platform, prepares output directory.
+   Loads config (Windows: `C:\ProgramData\EnigmaAgent\config.json` if present, else `config.json`). Detects platform, prepares output directory.
 2. **Capture:**
-   Runs platform-specific capture, outputs PCAP.
+   - **Windows:** Runs `pktmon` to produce `.etl` and then converts to `.pcapng`. Both files are cleaned up after processing.
+   - **Linux/macOS:** Runs `tcpdump` to produce `.pcap`.
 3. **Processing:**
-   Converts PCAP to Zeek-format logs (`conn.xlsx`, `dns.xlsx`).
-4. **Upload (Optional):**
-   If enabled, uploads logs to Enigma API.
+   Converts PCAP/PCAPNG to Zeek-format logs (`conn.xlsx`, `dns.xlsx`).
+4. **Upload (Always Enabled):**
+   Uploads logs to Enigma API if configured.
+5. **Cleanup:**
+   All processed capture files (`.pcap`, `.pcapng`, `.etl`) are deleted after successful processing and upload.
 
 ---
 
@@ -114,6 +118,8 @@ All logs are in TSV format, suitable for Zeek-style analysis.
 - **Windows:**
   - Admin privileges (for `pktmon`)
   - Windows 10 1809+
+  - Zeek for Windows is always extracted from `installer/windows/zeek-runtime-win64.zip` to `zeek-windows/` on first run and on every agent start. No manual setup required.
+  - Config is always loaded from `C:\ProgramData\EnigmaAgent\config.json` if present.
 - **Linux/macOS:**
   - Root privileges (for `tcpdump`)
   - `tcpdump` installed
@@ -145,21 +151,26 @@ The Windows installer sets up Enigma Agent as a Windows service using NSSM with 
 - **Account:** LocalSystem (runs with admin privileges)
 - **Startup:** Automatic (runs on boot)
 - **Log Location:** `C:\ProgramData\EnigmaAgent\logs\enigma-agent.log`
+- **Config Location:** `C:\ProgramData\EnigmaAgent\config.json`
 - **No Start Menu shortcut** is created.
-- **No advanced options** are shown during install; only API key and API host are prompted (host defaults to `https://enigmaai.net/`).
+- **No advanced options** are shown during install; only API key and API host are prompted (host defaults to `enigmaai.net:443`).
 - **No user password is required or prompted.**
 - The service is always run as LocalSystem.
 - **Uninstalling** will stop and remove the service.
+- **Zeek for Windows** is bundled as `zeek-runtime-win64.zip` and always extracted to `zeek-windows/` on agent start (overwriting any previous version).
 
 ### To build the installer:
 
 1. Download [NSSM](https://nssm.cc/download) and place `nssm.exe` in your `bin/` directory.
 2. Build the agent executable for Windows (already present as `bin/enigma-agent-windows-amd64.exe`).
-3. Open `installer/windows/enigma-agent-installer.iss` in Inno Setup and click 'Compile'.
-4. The installer (`enigma-agent-installer.exe`) will be created in the output directory.
+3. Place `zeek-runtime-win64.zip` in `installer/windows/`.
+4. Open `installer/windows/enigma-agent-installer.iss` in Inno Setup and click 'Compile'.
+5. The installer (`enigma-agent-installer.exe`) will be created in the output directory.
 
 ### Troubleshooting
 
 - The installer uses `WorkingDir: {app}` for all NSSM commands, so only the executable filename is used (not the full path). This avoids issues with spaces in the install path.
 - All paths passed to NSSM are properly quoted with double quotes. Do **not** use single or triple quotes in the .iss file.
 - If the service fails to start, ensure that `enigma-agent-windows-amd64.exe` exists in the install directory and that you have admin rights.
+- If Zeek is not extracted, ensure `zeek-runtime-win64.zip` is present in `installer/windows/` and that the agent has permission to write to `zeek-windows/`.
+- Config changes should be made in `C:\ProgramData\EnigmaAgent\config.json`.

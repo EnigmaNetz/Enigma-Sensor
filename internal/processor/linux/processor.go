@@ -102,22 +102,10 @@ func (p *Processor) ProcessPCAP(pcapPath string) (types.ProcessedData, error) {
 	}
 	log.Printf("[processor] Zeek execution completed successfully.")
 
-	paths := make(map[string]string)
-	for _, logName := range zeekLogFiles {
-		logPath := filepath.Join(runDir, logName)
-		log.Printf("[processor] Checking for Zeek log: %s", logPath)
-		if _, err := p.fs.Stat(logPath); err == nil {
-			xlsxPath := filepath.Join(runDir, logName[:len(logName)-len(filepath.Ext(logName))]+".xlsx")
-			log.Printf("[processor] Renaming %s to %s...", logPath, xlsxPath)
-			if err := p.fs.Rename(logPath, xlsxPath); err != nil {
-				log.Printf("[processor] Failed to rename %s to xlsx: %v", logName, err)
-				return types.ProcessedData{}, fmt.Errorf("failed to rename %s to xlsx: %w", logName, err)
-			}
-			log.Printf("[processor] Successfully renamed %s to %s", logPath, xlsxPath)
-			paths[logName] = xlsxPath
-		} else {
-			log.Printf("[processor] Zeek log not found: %s", logPath)
-		}
+	paths, err := types.RenameZeekLogsToXLSX(p.fs, runDir, zeekLogFiles)
+	if err != nil {
+		log.Printf("[processor] Failed to rename Zeek logs: %v", err)
+		return types.ProcessedData{}, err
 	}
 
 	metadata := map[string]interface{}{

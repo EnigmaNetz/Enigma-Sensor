@@ -3,6 +3,7 @@
 package windows
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log"
@@ -44,11 +45,11 @@ func (c *WindowsCapturer) Capture(ctx context.Context, config common.CaptureConf
 func (c *WindowsCapturer) runCapture(ctx context.Context, config common.CaptureConfig) (string, error) {
 	// Generate output filename with timestamp
 	timestamp := time.Now().Format("20060102_150405")
-	outputFile := fmt.Sprintf("%s/capture_%s.etl", c.outputDir, timestamp)
+	etlFile := fmt.Sprintf("%s/capture_%s.etl", c.outputDir, timestamp)
 
 	// Start pktmon capture
-	log.Printf("[capture] Running pktmon command: pktmon start --capture --file %s", outputFile)
-	c.cmd = commandContext("pktmon", "start", "--capture", "--file", outputFile)
+	log.Printf("[capture] Running pktmon command: pktmon start --capture --file %s", etlFile)
+	c.cmd = commandContext("pktmon", "start", "--capture", "--file", etlFile)
 
 	if err := c.cmd.Start(); err != nil {
 		return "", fmt.Errorf("failed to start pktmon: %v", err)
@@ -63,5 +64,39 @@ func (c *WindowsCapturer) runCapture(ctx context.Context, config common.CaptureC
 		return "", fmt.Errorf("failed to stop pktmon: %v", err)
 	}
 
-	return outputFile, nil
+	// Detect available pktmon conversion subcommand
+	subcommand, err := detectPktmonConversionSubcommand()
+	if err != nil {
+		return "", err
+	}
+
+	// Convert ETL to PCAPNG
+	pcapngFile := fmt.Sprintf("%s/capture_%s.pcapng", c.outputDir, timestamp)
+	log.Printf("[capture] Running conversion: pktmon %s %s -o %s", subcommand, etlFile, pcapngFile)
+	convertCmd := commandContext("pktmon", subcommand, etlFile, "-o", pcapngFile)
+	var outBuf, errBuf bytes.Buffer
+	convertCmd.Stdout = &outBuf
+	convertCmd.Stderr = &errBuf
+	if err := convertCmd.Run(); err != nil {
+		log.Printf("[capture] pktmon %s stdout: %s", subcommand, outBuf.String())
+		log.Printf("[capture] pktmon %s stderr: %s", subcommand, errBuf.String())
+		return "", fmt.Errorf("failed to convert ETL to PCAPNG: %v", err)
+	}
+
+	return pcapngFile, nil
+}
+
+// detectPktmonConversionSubcommand checks which pktmon conversion subcommand is available.
+func detectPktmonConversionSubcommand() (string, error) {
+	// Try etl2pcapng first
+	cmd := exec.Command("pktmon", "etl2pcapng", "/?")
+	if err := cmd.Run(); err == nil {
+		return "etl2pcapng", nil
+	}
+	// Fallback to etl2pcap
+	cmd = exec.Command("pktmon", "etl2pcap", "/?")
+	if err := cmd.Run(); err == nil {
+		return "etl2pcap", nil
+	}
+	return "", fmt.Errorf("neither 'etl2pcapng' nor 'etl2pcap' subcommands are available in pktmon; please update Windows or pktmon")
 }

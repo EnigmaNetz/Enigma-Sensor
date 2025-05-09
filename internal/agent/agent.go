@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -14,6 +15,7 @@ import (
 	"EnigmaNetz/Enigma-Go-Agent/internal/api"
 	"EnigmaNetz/Enigma-Go-Agent/internal/capture/common"
 	types "EnigmaNetz/Enigma-Go-Agent/internal/processor/common"
+	"archive/zip"
 )
 
 // Capturer abstracts the capture logic
@@ -32,9 +34,99 @@ type Uploader interface {
 	UploadLogs(ctx context.Context, files api.LogFiles) error
 }
 
+// ensureZeekWindows extracts Zeek for Windows, always overwriting the directory to ensure the latest version is used
+func ensureZeekWindows() error {
+	zeekDir := "zeek-windows"
+	zipPaths := []string{"zeek-runtime-win64.zip", "installer/windows/zeek-runtime-win64.zip"}
+	var zipFile *os.File
+	var err error
+	for _, path := range zipPaths {
+		zipFile, err = os.Open(path)
+		if err == nil {
+			break
+		}
+	}
+	if zipFile == nil {
+		return err
+	}
+	defer zipFile.Close()
+	stat, err := zipFile.Stat()
+	if err != nil {
+		return err
+	}
+	zr, err := zip.NewReader(zipFile, stat.Size())
+	if err != nil {
+		return err
+	}
+	for _, f := range zr.File {
+		fpath := filepath.Join(zeekDir, f.Name)
+		if f.FileInfo().IsDir() {
+			if err := os.MkdirAll(fpath, f.Mode()); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(fpath), 0755); err != nil {
+			return err
+		}
+		outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+		if err != nil {
+			outFile.Close()
+			return err
+		}
+		rc, err := f.Open()
+		if err != nil {
+			outFile.Close()
+			return err
+		}
+		_, err = io.Copy(outFile, rc)
+		outFile.Close()
+		rc.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// deletePCAPFile deletes the given PCAP file and logs the result.
+func deletePCAPFile(pcapPath string) {
+	if err := os.Remove(pcapPath); err != nil {
+		log.Printf("[worker] Failed to delete processed PCAP file %s: %v", pcapPath, err)
+	} else {
+		log.Printf("[worker] Deleted processed PCAP file: %s", pcapPath)
+	}
+
+	// Also try to delete a corresponding .etl file if it exists (Windows)
+	etlPath := pcapPath[:len(pcapPath)-len(filepath.Ext(pcapPath))] + ".etl"
+	if _, err := os.Stat(etlPath); err == nil {
+		if err := os.Remove(etlPath); err != nil {
+			log.Printf("[worker] Failed to delete corresponding ETL file %s: %v", etlPath, err)
+		} else {
+			log.Printf("[worker] Deleted corresponding ETL file: %s", etlPath)
+		}
+	}
+}
+
 // RunAgent orchestrates capture, processing, and upload with graceful shutdown
 // If disableSignals is true, signal handling is skipped (for tests)
-func RunAgent(ctx context.Context, cfg *config.Config, capturer Capturer, processor Processor, uploader Uploader, disableSignals ...bool) error {
+// If skipEnsureZeek is true, ensureZeekWindows is not called (for tests)
+func RunAgent(ctx context.Context, cfg *config.Config, capturer Capturer, processor Processor, uploader Uploader, disableSignalsAndSkipZeek ...bool) error {
+	skipEnsureZeek := false
+	disableSignals := false
+	if len(disableSignalsAndSkipZeek) > 0 {
+		disableSignals = disableSignalsAndSkipZeek[0]
+	}
+	if len(disableSignalsAndSkipZeek) > 1 {
+		skipEnsureZeek = disableSignalsAndSkipZeek[1]
+	}
+	// Ensure Zeek for Windows is available
+	if !skipEnsureZeek {
+		if err := ensureZeekWindows(); err != nil {
+			return err
+		}
+	}
+
 	outputDir := cfg.Capture.OutputDir
 	window := time.Duration(cfg.Capture.WindowSeconds) * time.Second
 	loop := cfg.Capture.Loop
@@ -61,6 +153,7 @@ func RunAgent(ctx context.Context, cfg *config.Config, capturer Capturer, proces
 			result, err := processor.ProcessPCAP(absPCAPPath)
 			if err != nil {
 				log.Printf("[worker] Processing failed: %v", err)
+				// Do not delete the PCAP file on processing error
 				continue
 			}
 			log.Printf("[worker] Processing complete. Conn XLSX: %s, DNS XLSX: %s, Metadata: %+v", result.ConnPath, result.DNSPath, result.Metadata)
@@ -76,28 +169,27 @@ func RunAgent(ctx context.Context, cfg *config.Config, capturer Capturer, proces
 					log.Printf("[worker] Log upload successful.")
 				}
 			}
-			// Delete the capture file after processing and upload attempt
-			if err := os.Remove(absPCAPPath); err != nil {
-				log.Printf("[worker] Failed to delete processed PCAP file %s: %v", absPCAPPath, err)
-			} else {
-				log.Printf("[worker] Deleted processed PCAP file: %s", absPCAPPath)
-			}
-			// Clean up any other .pcap files in the output directory
+			// Only delete the capture file after successful processing and upload attempt
+			deletePCAPFile(absPCAPPath)
+			// Clean up any other .pcap and .etl files in the output directory
 			dir := filepath.Dir(absPCAPPath)
 			entries, err := os.ReadDir(dir)
 			if err == nil {
 				for _, entry := range entries {
-					if !entry.IsDir() && filepath.Ext(entry.Name()) == ".pcap" && entry.Name() != filepath.Base(absPCAPPath) {
-						orphanPath := filepath.Join(dir, entry.Name())
-						if err := os.Remove(orphanPath); err != nil {
-							log.Printf("[worker] Failed to delete orphaned PCAP file %s: %v", orphanPath, err)
-						} else {
-							log.Printf("[worker] Deleted orphaned PCAP file: %s", orphanPath)
+					if !entry.IsDir() {
+						ext := filepath.Ext(entry.Name())
+						if (ext == ".pcap" || ext == ".etl") && entry.Name() != filepath.Base(absPCAPPath) {
+							orphanPath := filepath.Join(dir, entry.Name())
+							if err := os.Remove(orphanPath); err != nil {
+								log.Printf("[worker] Failed to delete orphaned file %s: %v", orphanPath, err)
+							} else {
+								log.Printf("[worker] Deleted orphaned file: %s", orphanPath)
+							}
 						}
 					}
 				}
 			} else {
-				log.Printf("[worker] Failed to scan directory for orphaned PCAPs: %v", err)
+				log.Printf("[worker] Failed to scan directory for orphaned files: %v", err)
 			}
 		}
 		log.Printf("[worker] Exiting worker goroutine")
@@ -105,7 +197,7 @@ func RunAgent(ctx context.Context, cfg *config.Config, capturer Capturer, proces
 
 	// Optionally handle Ctrl+C for graceful shutdown
 	doSignals := true
-	if len(disableSignals) > 0 && disableSignals[0] {
+	if disableSignals {
 		doSignals = false
 	}
 	var sigCh chan os.Signal

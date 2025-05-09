@@ -57,8 +57,19 @@ func main() {
 		return
 	}
 	// Load config from config.json
-	cfg, err := config.LoadConfig("")
-	if err != nil {
+	configPaths := []string{
+		`C:\\ProgramData\\EnigmaAgent\\config.json`,
+		"config.json",
+	}
+	var cfg *config.Config
+	var err error
+	for _, path := range configPaths {
+		cfg, err = config.LoadConfig(path)
+		if err == nil {
+			break
+		}
+	}
+	if cfg == nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 

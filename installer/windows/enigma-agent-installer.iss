@@ -23,7 +23,7 @@ Name: "C:\ProgramData\EnigmaAgent\logs"; Flags: uninsalwaysuninstall
 
 [Code]
 var
-  ApiKeyPage, ApiHostPage: TInputQueryWizardPage;
+  ApiKeyPage: TInputQueryWizardPage;
   LoggingLevel, LoggingFile, LoggingMaxSize: String;
   CaptureOutputDir, CaptureWindowSeconds: String;
   ConfigExists: Boolean;
@@ -35,10 +35,6 @@ begin
   begin
     ApiKeyPage := CreateInputQueryPage(wpSelectDir, 'API Key', 'Enter your Enigma API Key', 'This is required.');
     ApiKeyPage.Add('API Key:', False);
-
-    ApiHostPage := CreateInputQueryPage(ApiKeyPage.ID, 'API Host', 'Enter your Enigma API Host', 'This is required.');
-    ApiHostPage.Add('API Host:', False);
-    ApiHostPage.Values[0] := 'enigmaai.net:443';
 
     LoggingLevel := 'info';
     LoggingFile := 'logs/enigma-agent.log';
@@ -54,9 +50,7 @@ begin
   if not ConfigExists then
   begin
     if CurPageID = ApiKeyPage.ID then
-      Result := ApiKeyPage.Values[0] <> ''
-    else if CurPageID = ApiHostPage.ID then
-      Result := ApiHostPage.Values[0] <> '';
+      Result := ApiKeyPage.Values[0] <> '';
   end;
 end;
 
@@ -85,7 +79,7 @@ begin
       '    "loop": true' + #13#10 +
       '  },' + #13#10 +
       '  "enigma_api": {' + #13#10 +
-      '    "server": "' + ApiHostPage.Values[0] + '",' + #13#10 +
+      '    "server": "enigmaai.net:443",' + #13#10 +
       '    "api_key": "' + ApiKeyPage.Values[0] + '",' + #13#10 +
       '    "upload": true' + #13#10 +
       '  }' + #13#10 +

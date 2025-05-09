@@ -15,6 +15,7 @@ import (
 	"EnigmaNetz/Enigma-Go-Agent/internal/api"
 	"EnigmaNetz/Enigma-Go-Agent/internal/capture"
 	"EnigmaNetz/Enigma-Go-Agent/internal/capture/common"
+	collect_logs "EnigmaNetz/Enigma-Go-Agent/internal/collect_logs"
 	"EnigmaNetz/Enigma-Go-Agent/internal/processor"
 	"EnigmaNetz/Enigma-Go-Agent/internal/version"
 )
@@ -22,11 +23,12 @@ import (
 func printHelp() {
 	fmt.Print(`Enigma Agent - Network Capture & Processing Tool
 
-Usage: enigma-agent [--version|-v] [--help|-h]
+Usage: enigma-agent [collect-logs] [--version|-v] [--help|-h]
 
 Runs a network capture and processing session using config.json.
 
 Options:
+  collect-logs    Package logs, captures, config, and diagnostics into a zip archive for support
   --version, -v   Print version and exit
   --help, -h      Show this help message and exit
 
@@ -39,6 +41,9 @@ Example:
   enigma-agent
     Runs a single capture and processing session using config.json.
 
+  enigma-agent collect-logs
+    Packages logs, captures, config, and diagnostics into a zip archive for support.
+
   enigma-agent --help
     Shows this help message.
 
@@ -48,13 +53,24 @@ Example:
 }
 
 func main() {
-	if len(os.Args) > 1 && (os.Args[1] == "--help" || os.Args[1] == "-h") {
-		printHelp()
-		return
-	}
-	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
-		fmt.Println(version.Version)
-		return
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "--help", "-h":
+			printHelp()
+			return
+		case "--version", "-v":
+			fmt.Println(version.Version)
+			return
+		case "collect-logs":
+			zipName := fmt.Sprintf("enigma-logs-%s.zip", time.Now().Format("20060102-150405"))
+			err := collect_logs.CollectLogs(zipName)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to collect logs: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Printf("Created %s with logs, config, and diagnostics.\n", zipName)
+			return
+		}
 	}
 	// Load config from config.json
 	configPaths := []string{

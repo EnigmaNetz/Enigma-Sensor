@@ -58,6 +58,37 @@ A cross-platform network capture agent that collects, processes, and optionally 
 
 ---
 
+## Collecting Logs for Diagnostics
+
+To package all logs and your config for support/diagnostics, run the following command based on your platform:
+
+**On Linux/macOS:**
+
+```sh
+./enigma-agent collect-logs
+```
+
+**On Windows (default install location):**
+
+```ps1
+# Note: This requires running PowerShell as Administrator
+& "C:\Program Files (x86)\EnigmaAgent\enigma-agent-windows-amd64.exe" collect-logs
+```
+
+On Windows, the resulting zip file will be in `C:\Program Files (x86)\EnigmaAgent\`.
+
+This creates a zip archive (e.g., `enigma-logs-YYYYMMDD-HHMMSS.zip`) in your current directory, containing:
+
+- all files from `logs/` (including rotated logs),
+- all files and subdirectories from `captures/`,
+- your `config.json`,
+- a `version.txt` file with the agent version,
+- and a `system-info.txt` file with OS, architecture, Go version, and basic CPU/memory info.
+
+You can send this archive to Enigma support for troubleshooting.
+
+---
+
 ## Configuration
 
 - All configuration is via `config.json`.

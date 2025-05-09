@@ -79,7 +79,7 @@ begin
       '    "loop": true' + #13#10 +
       '  },' + #13#10 +
       '  "enigma_api": {' + #13#10 +
-      '    "server": "enigmaai.net:443",' + #13#10 +
+      '    "server": "api.enigmaai.net:443",' + #13#10 +
       '    "api_key": "' + ApiKeyPage.Values[0] + '",' + #13#10 +
       '    "upload": true' + #13#10 +
       '  }' + #13#10 +

@@ -106,7 +106,7 @@ You can send this archive to Enigma support for troubleshooting.
 
 ### Changing API Host for Staging/Development
 
-By default, the agent uses the production API host (`enigmaai.net:443`).
+By default, the agent uses the production API host (`api.enigmaai.net:443`).
 
 To use the staging or development API host (`dev.getenigma.ai:443`):
 
@@ -212,7 +212,7 @@ The Windows installer sets up Enigma Agent as a Windows service using NSSM with 
 - **Log Location:** `C:\ProgramData\EnigmaAgent\logs\enigma-agent.log`
 - **Config Location:** `C:\ProgramData\EnigmaAgent\config.json`
 - **No Start Menu shortcut** is created.
-- **No advanced options** are shown during install; only API key and API host are prompted (host defaults to `enigmaai.net:443`).
+- **No advanced options** are shown during install; only API key and API host are prompted (host defaults to `api.enigmaai.net:443`).
 - **No user password is required or prompted.**
 - The service is always run as LocalSystem.
 - **Uninstalling** will stop and remove the service.

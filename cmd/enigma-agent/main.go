@@ -123,7 +123,7 @@ func main() {
 		if server == "" || apiKey == "" {
 			log.Printf("enigma_api.server and enigma_api.api_key must be set to upload logs; skipping upload.")
 		} else {
-			u, err := api.NewLogUploader(server, apiKey, false)
+			u, err := api.NewLogUploader(server, apiKey)
 			if err != nil {
 				log.Printf("Failed to initialize LogUploader: %v", err)
 			} else {

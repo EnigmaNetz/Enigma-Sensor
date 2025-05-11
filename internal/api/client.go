@@ -50,22 +50,16 @@ type grpcClientImpl struct {
 }
 
 // NewLogUploader creates a new log uploader instance
-func NewLogUploader(serverAddr string, apiKey string, insecure bool) (*LogUploader, error) {
+func NewLogUploader(serverAddr string, apiKey string) (*LogUploader, error) {
 	var opts []grpc.DialOption
 
-	if !insecure {
-		// Extract hostname without port for TLS verification
-		host := serverAddr
-		if idx := strings.LastIndex(serverAddr, ":"); idx >= 0 {
-			host = serverAddr[:idx]
-		}
-
-		// Use SSL credentials without client certificates
-		creds := credentials.NewClientTLSFromCert(nil, host)
-		opts = append(opts, grpc.WithTransportCredentials(creds))
-	} else {
-		opts = append(opts, grpc.WithInsecure())
+	// Always use SSL credentials with system trust store
+	host := serverAddr
+	if idx := strings.LastIndex(serverAddr, ":"); idx >= 0 {
+		host = serverAddr[:idx]
 	}
+	creds := credentials.NewClientTLSFromCert(nil, host)
+	opts = append(opts, grpc.WithTransportCredentials(creds))
 
 	// Add keepalive options
 	opts = append(opts, grpc.WithDefaultServiceConfig(`{"loadBalancingConfig": [{"round_robin":{}}]}`))

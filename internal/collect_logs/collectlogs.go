@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 )
 
@@ -159,26 +158,6 @@ func getSystemInfo() string {
 		}
 	}
 	return b.String()
-}
-
-// The following Windows-specific helpers are only needed if you want to keep the same level of detail as before.
-// You may want to move them to a _windows.go file for clarity if needed elsewhere.
-
-func annotateWindowsVersion(productName, currentBuild string) string {
-	buildNum, err := parseBuildNumber(currentBuild)
-	if err != nil {
-		return ""
-	}
-	if buildNum >= 22000 {
-		return "Detected OS: Windows 11 (based on build number)\n"
-	} else if productName != "" {
-		return "Detected OS: Windows 10\n"
-	}
-	return ""
-}
-
-func parseBuildNumber(build string) (int, error) {
-	return strconv.Atoi(build)
 }
 
 // getWindowsRegistryVersion is a stub here; actual implementation should be in a _windows.go file.

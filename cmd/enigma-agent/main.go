@@ -7,7 +7,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"sort"
 	"time"
 
 	"EnigmaNetz/Enigma-Go-Agent/config"
@@ -135,27 +134,4 @@ func main() {
 	if err := agent.RunAgent(ctx, cfg, capturer, proc, uploader); err != nil {
 		log.Fatalf("Agent exited with error: %v", err)
 	}
-}
-
-// findLatestFile returns the most recently modified file with the given extension in dir
-func findLatestFile(dir, ext string) (string, error) {
-	files, err := os.ReadDir(dir)
-	if err != nil {
-		return "", err
-	}
-	var matches []string
-	for _, f := range files {
-		if !f.IsDir() && filepath.Ext(f.Name()) == ext {
-			matches = append(matches, filepath.Join(dir, f.Name()))
-		}
-	}
-	if len(matches) == 0 {
-		return "", fmt.Errorf("no %s files found in %s", ext, dir)
-	}
-	sort.Slice(matches, func(i, j int) bool {
-		fi, _ := os.Stat(matches[i])
-		fj, _ := os.Stat(matches[j])
-		return fi.ModTime().After(fj.ModTime())
-	})
-	return matches[0], nil
 }

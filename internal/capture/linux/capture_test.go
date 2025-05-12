@@ -5,7 +5,6 @@ package linux
 import (
 	"context"
 	"errors"
-	"os"
 	"os/exec"
 	"testing"
 	"time"
@@ -15,13 +14,6 @@ import (
 
 // mockCmd is a mock for exec.Cmd
 var mockRunError error
-
-type mockCmd struct{}
-
-func (m *mockCmd) Run() error           { return mockRunError }
-func (m *mockCmd) Process() *os.Process { return nil }
-func (m *mockCmd) Start() error         { return mockRunError }
-func (m *mockCmd) Kill() error          { return mockRunError }
 
 // TestLinuxCapturer_Capture_Success verifies that the LinuxCapturer successfully captures data when the command executes without error.
 func TestLinuxCapturer_Capture_Success(t *testing.T) {

@@ -63,6 +63,15 @@ func (m *mockUploader) UploadLogs(ctx context.Context, files api.LogFiles) error
 	return nil
 }
 
+type goneUploader struct {
+	calls *int32
+}
+
+func (m *goneUploader) UploadLogs(ctx context.Context, files api.LogFiles) error {
+	atomic.AddInt32(m.calls, 1)
+	return api.ErrAPIGone
+}
+
 func minimalConfig(loop bool) *config.Config {
 	return &config.Config{
 		Capture: struct {
@@ -183,4 +192,26 @@ func TestRunAgent_QueueFull(t *testing.T) {
 		t.Errorf("Expected at least 2 capture calls due to loop, got: %d", capCalls)
 	}
 	t.Log("TestRunAgent_QueueFull end reached")
+}
+
+func TestRunAgent_StopsOnAPIGone(t *testing.T) {
+	defer t.Log("TestRunAgent_StopsOnAPIGone completed")
+	var capCalls, procCalls, upCalls int32
+	cfg := minimalConfig(false)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	err := RunAgent(ctx, cfg,
+		&mockCapturer{calls: &capCalls},
+		&mockProcessor{calls: &procCalls},
+		&goneUploader{calls: &upCalls},
+		true, true,
+	)
+	if err != nil {
+		t.Fatalf("RunAgent should not return error on 410 Gone, got: %v", err)
+	}
+	if capCalls != 1 || procCalls != 1 || upCalls != 1 {
+		t.Errorf("Expected 1 call each, got: cap=%d proc=%d up=%d", capCalls, procCalls, upCalls)
+	}
+	t.Log("TestRunAgent_StopsOnAPIGone end reached")
 }

@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"errors"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
@@ -304,4 +306,30 @@ func TestUploadLogs_ContextCancelled(t *testing.T) {
 		ConnPath: connPath,
 	})
 	assert.Error(t, err)
+}
+
+// TestUploadLogs_410Gone simulates the API returning 410 Gone and expects an error from UploadLogs.
+func TestUploadLogs_410Gone(t *testing.T) {
+	tmpDir := t.TempDir()
+	dnsPath := filepath.Join(tmpDir, "dns.xlsx")
+	connPath := filepath.Join(tmpDir, "conn.log")
+	assert.NoError(t, os.WriteFile(dnsPath, []byte("dns"), 0644))
+	assert.NoError(t, os.WriteFile(connPath, []byte("conn"), 0644))
+	mock := &mockPublishClient{
+		uploadResponses: []uploadResponse{{status: "gone", statusCode: 410, message: "gone", err: nil}},
+	}
+	uploader := &LogUploader{
+		client:       mock,
+		apiKey:       "test-key",
+		retryCount:   1,
+		retryDelay:   time.Millisecond,
+		compressFunc: compressData,
+	}
+	err := uploader.UploadLogs(context.Background(), LogFiles{
+		DNSPath:  dnsPath,
+		ConnPath: connPath,
+	})
+	if !errors.Is(err, ErrAPIGone) {
+		t.Fatalf("expected error to be ErrAPIGone, got: %v", err)
+	}
 }

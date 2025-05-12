@@ -18,6 +18,8 @@ import (
 	collect_logs "EnigmaNetz/Enigma-Go-Agent/internal/collect_logs"
 	"EnigmaNetz/Enigma-Go-Agent/internal/processor"
 	"EnigmaNetz/Enigma-Go-Agent/internal/version"
+
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 func printHelp() {
@@ -95,11 +97,15 @@ func main() {
 		if err := os.MkdirAll(logDir, 0755); err != nil {
 			log.Fatalf("Failed to create log directory: %v", err)
 		}
-		f, err := os.OpenFile(cfg.Logging.File, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-		if err != nil {
-			log.Fatalf("Failed to open log file: %v", err)
+		// Use lumberjack for log rotation based on config
+		logWriter := &lumberjack.Logger{
+			Filename:   cfg.Logging.File,
+			MaxSize:    int(cfg.Logging.MaxSizeMB),   // megabytes
+			MaxAge:     cfg.Logging.LogRetentionDays, // days
+			MaxBackups: 3,                            // keep up to 3 old log files
+			Compress:   true,                         // compress rotated logs
 		}
-		log.SetOutput(io.MultiWriter(os.Stdout, f))
+		log.SetOutput(io.MultiWriter(os.Stdout, logWriter))
 	}
 
 	log.Printf("Loaded config: %+v", cfg)

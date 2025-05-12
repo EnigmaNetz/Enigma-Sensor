@@ -47,13 +47,17 @@ A cross-platform network capture agent that collects, processes, and optionally 
 2. **Configure Agent:**
    - Copy `config.example.json` to `config.json` and edit as needed (e.g., set your API key, adjust capture/output settings).
 3. **Build:**
+
    ```sh
    go build -o bin/enigma-agent ./cmd/enigma-agent
    ```
+
 4. **Run:**
+
    ```sh
    ./bin/enigma-agent
    ```
+
    - On Windows, Zeek for Windows will be auto-extracted from `installer/windows/zeek-runtime-win64.zip` to `zeek-windows/` on first run. No manual setup required. The installer always overwrites the Zeek directory with the bundled version.
 
 ---
@@ -101,6 +105,24 @@ You can send this archive to Enigma support for troubleshooting.
 - **How to configure:**
   1. On Windows, edit `C:\ProgramData\EnigmaAgent\config.json` after install if needed.
   2. On Linux/macOS, copy `config.example.json` to `config.json` and edit as needed.
+
+### Logging & Log Rotation
+
+The agent supports automatic log rotation and compression. Configure these options in your `config.json`:
+
+```json
+"logging": {
+  "level": "info",                // Log level: debug, info, warn, error
+  "file": "logs/enigma-agent.log", // Log file path (if empty, logs to stdout only)
+  "max_size_mb": 100,              // Maximum size (in MB) before rotating log file
+  "log_retention_days": 7          // Number of days to keep old log files (rotated logs are compressed)
+}
+```
+
+- When the log file exceeds `max_size_mb`, it is rotated and compressed (gzip).
+- Up to 3 rotated log files are kept by default.
+- Rotated logs older than `log_retention_days` are deleted automatically.
+- All logs are also output to stdout for convenience.
 
 ---
 
@@ -218,7 +240,7 @@ The Windows installer sets up Enigma Agent as a Windows service using NSSM with 
 - **Uninstalling** will stop and remove the service.
 - **Zeek for Windows** is bundled as `zeek-runtime-win64.zip` and always extracted to `zeek-windows/` on agent start (overwriting any previous version).
 
-### To build the installer:
+### To build the installer
 
 1. Download [NSSM](https://nssm.cc/download) and place `nssm.exe` in your `bin/` directory.
 2. Build the agent executable for Windows (already present as `bin/enigma-agent-windows-amd64.exe`).

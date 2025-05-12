@@ -7,6 +7,7 @@ require (
 	github.com/stretchr/testify v1.8.4
 	google.golang.org/grpc v1.72.0
 	google.golang.org/protobuf v1.36.6
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
 
 require (

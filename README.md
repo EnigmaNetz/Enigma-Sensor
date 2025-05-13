@@ -45,7 +45,8 @@ A cross-platform network capture agent that collects, processes, and optionally 
 
 1. **Install Go 1.24+**
 2. **Configure Agent:**
-   - Copy `config.example.json` to `config.json` and edit as needed (e.g., set your API key, adjust capture/output settings).
+   - On Windows, copy `config.example.json` to `config.json` and edit as needed (e.g., set your API key, adjust capture/output settings).
+   - On Linux, the install script creates `/etc/enigma-agent/config.json` if it does not exist.
 3. **Build:**
 
    ```sh
@@ -97,6 +98,7 @@ You can send this archive to Enigma support for troubleshooting.
 
 - All configuration is via `config.json`.
 - **On Windows, the installer writes config to:** `C:\ProgramData\EnigmaAgent\config.json` (this is always used if present).
+- **On Linux, the install script creates config at:** `/etc/enigma-agent/config.json` if it does not exist. Edit this file after install to adjust settings.
 - **Key fields:**
   - `logging`: Log level, file path, and max size.
   - `capture`: Output directory, interval, and window duration.
@@ -104,7 +106,7 @@ You can send this archive to Enigma support for troubleshooting.
   - `log_retention_days`: Number of days to keep log files. Logs older than this are deleted on startup. Default: 1
 - **How to configure:**
   1. On Windows, edit `C:\ProgramData\EnigmaAgent\config.json` after install if needed.
-  2. On Linux/macOS, copy `config.example.json` to `config.json` and edit as needed.
+  2. On Linux, edit `/etc/enigma-agent/config.json` after install if needed.
 
 ### Logging & Log Rotation
 
@@ -194,6 +196,42 @@ All logs are in TSV format, suitable for Zeek-style analysis.
 
 ---
 
+### Building and Testing the Debian Package
+
+1. **Build the .deb package:**
+
+   ```sh
+   cd installer/debian
+   ./build-deb.sh
+   ```
+
+   - This script will automatically build the Go binary if it is missing and package it as a Debian installer.
+   - The resulting `.deb` file will be named `enigma-agent_*.deb` (or similar) in the current directory.
+
+2. **Test install in a clean Debian environment:**
+   - **Recommended:** Use a VM or Docker container running your target Debian version.
+   - **Install the package:**
+
+     ```sh
+     sudo dpkg -i enigma-agent_*.deb
+     sudo apt-get install -f  # Fix dependencies if needed
+     ```
+
+   - **Verify:**
+     - The agent binary is installed to `/usr/local/bin/enigma-agent`.
+     - The systemd service is installed and can be started with `sudo systemctl start enigma-agent`.
+     - Uninstall with `sudo dpkg -r enigma-agent` and verify cleanup.
+
+3. **Optional: Lint the package**
+
+   ```sh
+   lintian ./enigma-agent_0.1.0.deb
+   ```
+
+   - Fix any errors or warnings for best Debian compliance.
+
+---
+
 ## Platform Requirements
 
 - **Windows:**
@@ -203,7 +241,7 @@ All logs are in TSV format, suitable for Zeek-style analysis.
   - Config is always loaded from `C:\ProgramData\EnigmaAgent\config.json` if present.
 - **Linux/macOS:**
   - Root privileges (for `tcpdump`)
-  - `tcpdump` installed
+  - `tcpdump` and `zeek` are required and installed by the install script
 
 ---
 
@@ -255,3 +293,21 @@ The Windows installer sets up Enigma Agent as a Windows service using NSSM with 
 - If the service fails to start, ensure that `enigma-agent-windows-amd64.exe` exists in the install directory and that you have admin rights.
 - If Zeek is not extracted, ensure `zeek-runtime-win64.zip` is present in `installer/windows/` and that the agent has permission to write to `zeek-windows/`.
 - Config changes should be made in `C:\ProgramData\EnigmaAgent\config.json`.
+
+## Installing on Linux (Debian/Ubuntu)
+
+1. **Build or download the `.deb` package** (see GitHub Releases).
+2. **Run the install script** (this will install dependencies, the agent, and create a config if needed):
+
+   ```sh
+   export ENIGMA_API_KEY=YOUR_API_KEY
+   sudo bash installer/debian/install-enigma-agent.sh
+   ```
+
+   - The script will:
+     - Install `zeek` and `tcpdump` if missing.
+     - Install the agent `.deb` package.
+     - Create `/etc/enigma-agent/config.json` if it does not exist.
+     - Restart the agent service (if systemd is present).
+
+3. **Edit `/etc/enigma-agent/config.json`** to adjust settings as needed.

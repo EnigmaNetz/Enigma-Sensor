@@ -43,6 +43,16 @@ jobs:
             GOOS=windows GOARCH=amd64 go build -o bin/enigma-agent-windows-amd64-$VERSION.exe ./cmd/enigma-agent
           fi
 
+      - name: Install packaging dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y dos2unix fakeroot
+
+      - name: Build .deb package
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          cd installer/debian
+          bash build-deb.sh
+
       # Only for windows-latest: install Inno Setup, build installer, upload artifact
       - name: Install Inno Setup
         if: matrix.os == 'windows-latest'
@@ -88,6 +98,8 @@ jobs:
         if: matrix.os != 'windows-latest' && startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: bin/enigma-agent-*-${{ steps.get_version.outputs.version }}*
+          files: |
+            bin/enigma-agent-*-${{ steps.get_version.outputs.version }}*
+            bin/enigma-agent_*.deb
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

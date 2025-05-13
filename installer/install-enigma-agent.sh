@@ -19,6 +19,7 @@ fi
 if [ -f /etc/os-release ]; then
   . /etc/os-release
   OS_ID=$ID
+  VERSION_ID=$VERSION_ID
 else
   echo "ERROR: Cannot detect OS type (missing /etc/os-release)."
   exit 1
@@ -31,8 +32,23 @@ case "$OS_ID" in
     apt install -y curl gpg
     # --- Add Zeek repository and key if not present ---
     if ! grep -q 'security:/zeek' /etc/apt/sources.list.d/security:zeek.list 2>/dev/null; then
-      curl -fsSL https://download.opensuse.org/repositories/security:zeek/xUbuntu_22.04/Release.key | gpg --dearmor | tee /etc/apt/trusted.gpg.d/security_zeek.gpg
-      echo 'deb http://download.opensuse.org/repositories/security:/zeek/xUbuntu_22.04/ /' | tee /etc/apt/sources.list.d/security:zeek.list
+      case "$VERSION_ID" in
+        "20.04")
+          ZEEK_RELEASE="xUbuntu_20.04"
+          ;;
+        "22.04")
+          ZEEK_RELEASE="xUbuntu_22.04"
+          ;;
+        "24.04")
+          ZEEK_RELEASE="xUbuntu_24.04"
+          ;;
+        *)
+          echo "ERROR: Unsupported Ubuntu version: $VERSION_ID for Zeek repo."
+          exit 1
+          ;;
+      esac
+      curl -fsSL https://download.opensuse.org/repositories/security:zeek/${ZEEK_RELEASE}/Release.key | gpg --dearmor | tee /etc/apt/trusted.gpg.d/security_zeek.gpg
+      echo "deb http://download.opensuse.org/repositories/security:/zeek/${ZEEK_RELEASE}/ /" | tee /etc/apt/sources.list.d/security:zeek.list
       apt update
     fi
     # --- Install Zeek, tcpdump, and dependencies ---

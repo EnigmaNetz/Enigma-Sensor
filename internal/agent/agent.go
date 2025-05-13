@@ -16,6 +16,7 @@ import (
 	"EnigmaNetz/Enigma-Go-Agent/internal/capture/common"
 	types "EnigmaNetz/Enigma-Go-Agent/internal/processor/common"
 	"archive/zip"
+	"runtime"
 )
 
 // Capturer abstracts the capture logic
@@ -121,7 +122,7 @@ func RunAgent(ctx context.Context, cfg *config.Config, capturer Capturer, proces
 		skipEnsureZeek = disableSignalsAndSkipZeek[1]
 	}
 	// Ensure Zeek for Windows is available
-	if !skipEnsureZeek {
+	if !skipEnsureZeek && runtime.GOOS == "windows" {
 		if err := ensureZeekWindows(); err != nil {
 			return err
 		}

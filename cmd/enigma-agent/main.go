@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"EnigmaNetz/Enigma-Go-Agent/config"
@@ -74,9 +75,17 @@ func main() {
 		}
 	}
 	// Load config from config.json
-	configPaths := []string{
-		`C:\\ProgramData\\EnigmaAgent\\config.json`,
-		"config.json",
+	var configPaths []string
+	if runtime.GOOS == "windows" {
+		configPaths = []string{
+			`C:\\ProgramData\\EnigmaAgent\\config.json`,
+			"config.json",
+		}
+	} else {
+		configPaths = []string{
+			"/etc/enigma-agent/config.json",
+			"config.json",
+		}
 	}
 	var cfg *config.Config
 	var err error

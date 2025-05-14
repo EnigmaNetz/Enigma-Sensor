@@ -1,0 +1,12 @@
+[Unit]
+Description=Enigma Agent Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/enigma-agent
+Restart=on-failure
+User=root
+
+[Install]
+WantedBy=multi-user.target

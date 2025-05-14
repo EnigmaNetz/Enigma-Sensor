@@ -294,20 +294,33 @@ The Windows installer sets up Enigma Agent as a Windows service using NSSM with 
 - If Zeek is not extracted, ensure `zeek-runtime-win64.zip` is present in `installer/windows/` and that the agent has permission to write to `zeek-windows/`.
 - Config changes should be made in `C:\ProgramData\EnigmaAgent\config.json`.
 
-## Installing on Linux (Debian/Ubuntu)
+## Installing on Linux
 
-1. **Build or download the `.deb` package** (see GitHub Releases).
-2. **Run the install script** (this will install dependencies, the agent, and create a config if needed):
+1. **Download the latest Linux release zip** from the [GitHub Releases](https://github.com/<your-org>/<your-repo>/releases) page. The file will be named like:
+
+   ```
+   enigma-agent-<version>-linux-release.zip
+   ```
+
+2. **Unzip the release:**
+
+   ```sh
+   unzip enigma-agent-<version>-linux-release.zip
+   cd enigma-agent-<version>-linux-release
+   ```
+
+3. **Run the install script:**
 
    ```sh
    export ENIGMA_API_KEY=YOUR_API_KEY
-   sudo bash installer/debian/install-enigma-agent.sh
+   sudo bash install-enigma-agent.sh
    ```
 
    - The script will:
+     - Detect your Linux distribution and install dependencies (currently supports Debian/Ubuntu; CentOS/RHEL support coming soon).
      - Install `zeek` and `tcpdump` if missing.
-     - Install the agent `.deb` package.
+     - Install the agent `.deb` package (on Debian/Ubuntu).
      - Create `/etc/enigma-agent/config.json` if it does not exist.
      - Restart the agent service (if systemd is present).
 
-3. **Edit `/etc/enigma-agent/config.json`** to adjust settings as needed.
+4. **Edit `/etc/enigma-agent/config.json`** to adjust settings as needed.

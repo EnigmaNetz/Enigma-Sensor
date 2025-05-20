@@ -1,16 +1,23 @@
 package load
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"io"
+	"log"
+	"math/rand"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
 	"EnigmaNetz/Enigma-Go-Agent/internal/api"
 	"EnigmaNetz/Enigma-Go-Agent/internal/capture/common"
 	types "EnigmaNetz/Enigma-Go-Agent/internal/processor/common"
+
+	"github.com/xuri/excelize/v2"
 )
 
 // Capturer matches the capture interface used by the main agent.
@@ -28,10 +35,11 @@ type Uploader interface {
 	UploadLogs(ctx context.Context, files api.LogFiles) error
 }
 
-// Config controls the synthetic capture duration and output location.
+// Config controls the synthetic capture duration and traffic generation.
 type Config struct {
-	Duration  time.Duration
-	OutputDir string
+	Duration   time.Duration // How long to run traffic generation
+	RPS        int           // Target requests per second
+	Throughput int           // Target network throughput in MB/sec (0 = default 1)
 }
 
 // RunSyntheticCaptureLoad generates local HTTP traffic, captures it, processes
@@ -40,17 +48,36 @@ func RunSyntheticCaptureLoad(ctx context.Context, cap Capturer, proc Processor, 
 	if cfg.Duration <= 0 {
 		cfg.Duration = 5 * time.Second
 	}
+	if cfg.RPS <= 0 {
+		cfg.RPS = 100
+	}
+	if cfg.Throughput <= 0 {
+		cfg.Throughput = 1 // MB/sec
+	}
+	throughputBytes := cfg.Throughput * 1024 * 1024
 
-	// Start a simple HTTP server on a random port.
+	// Find a non-loopback IPv4 address for local client traffic
+	localIP := "127.0.0.1"
+	if addrs, err := net.InterfaceAddrs(); err == nil {
+		for _, addr := range addrs {
+			if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() && ipnet.IP.To4() != nil {
+				localIP = ipnet.IP.String()
+				break
+			}
+		}
+	}
+
+	// Start a simple HTTP server on all interfaces (0.0.0.0)
 	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.Copy(io.Discard, r.Body)
 		w.WriteHeader(http.StatusOK)
 	})}
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := net.Listen("tcp", "0.0.0.0:0")
 	if err != nil {
 		return err
 	}
 	srv.Addr = listener.Addr().String()
+	log.Printf("[local server] Listening on %s (client will use %s)", listener.Addr().String(), localIP)
 	go srv.Serve(listener)
 	defer srv.Shutdown(context.Background())
 
@@ -59,18 +86,51 @@ func RunSyntheticCaptureLoad(ctx context.Context, cap Capturer, proc Processor, 
 	defer cancelGen()
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go func(addr string) {
+	go func(localAddr string, localIP string) {
 		defer wg.Done()
 		client := &http.Client{}
-		for genCtx.Err() == nil {
-			req, _ := http.NewRequestWithContext(genCtx, http.MethodGet, "http://"+addr, nil)
-			_, _ = client.Do(req)
-			time.Sleep(100 * time.Millisecond)
+		var payloadSize int
+		if throughputBytes > 0 && cfg.RPS > 0 {
+			payloadSize = throughputBytes / cfg.RPS
+			if payloadSize < 1 {
+				payloadSize = 1
+			}
+		} else {
+			payloadSize = 1024 // 1KB default
 		}
-	}(srv.Addr)
+		interval := time.Second / time.Duration(cfg.RPS)
+		if interval < time.Millisecond {
+			interval = time.Millisecond
+		}
+
+		domains := []string{
+			"example.com", "google.com", "github.com", "wikipedia.org", "amazon.com",
+			"microsoft.com", "apple.com", "cloudflare.com", "reddit.com", "stackoverflow.com",
+		}
+		for genCtx.Err() == nil {
+			payload := make([]byte, payloadSize)
+			_, _ = rand.Read(payload)
+			// 90% local server, 10% random external domain
+			var url string
+			if rand.Intn(10) < 9 {
+				// Use real IP and actual port
+				_, port, _ := net.SplitHostPort(localAddr)
+				url = "http://" + localIP + ":" + port + "/test"
+			} else {
+				domain := domains[rand.Intn(len(domains))]
+				url = "http://" + domain + "/test"
+			}
+			req, _ := http.NewRequestWithContext(genCtx, http.MethodPost, url, bytes.NewReader(payload))
+			resp, _ := client.Do(req)
+			if resp != nil {
+				resp.Body.Close()
+			}
+			time.Sleep(interval)
+		}
+	}(listener.Addr().String(), localIP)
 
 	// Capture traffic while it is being generated.
-	capCfg := common.CaptureConfig{CaptureWindow: cfg.Duration, OutputDir: cfg.OutputDir}
+	capCfg := common.CaptureConfig{CaptureWindow: cfg.Duration, OutputDir: "./captures"}
 	pcapPath, err := cap.Capture(ctx, capCfg)
 	if err != nil {
 		return err
@@ -83,6 +143,28 @@ func RunSyntheticCaptureLoad(ctx context.Context, cap Capturer, proc Processor, 
 		return err
 	}
 
+	// --- Traffic Stats Summary ---
+	stats := make(map[string]interface{})
+	// PCAP file size
+	if fi, err := os.Stat(pcapPath); err == nil {
+		stats["pcap_bytes"] = fi.Size()
+	}
+	// conn.xlsx row count
+	connRows := "N/A"
+	if n, err := countXLSXRows(result.ConnPath); err == nil {
+		connRows = fmt.Sprintf("%d", n)
+	}
+	// dns.xlsx row count
+	dnsRows := "N/A"
+	if n, err := countXLSXRows(result.DNSPath); err == nil {
+		dnsRows = fmt.Sprintf("%d", n)
+	}
+	fmt.Printf("\n--- Traffic Capture Stats ---\n")
+	fmt.Printf("PCAP: %s (%d bytes)\n", pcapPath, stats["pcap_bytes"])
+	fmt.Printf("conn.xlsx: %s (%s rows)\n", result.ConnPath, connRows)
+	fmt.Printf("dns.xlsx: %s (%s rows)\n", result.DNSPath, dnsRows)
+	fmt.Printf("----------------------------\n\n")
+
 	if up != nil {
 		if err := up.UploadLogs(ctx, api.LogFiles{DNSPath: result.DNSPath, ConnPath: result.ConnPath}); err != nil {
 			return err
@@ -90,4 +172,24 @@ func RunSyntheticCaptureLoad(ctx context.Context, cap Capturer, proc Processor, 
 	}
 
 	return nil
+}
+
+// countXLSXRows returns the number of non-header rows in the first sheet of an XLSX file.
+func countXLSXRows(path string) (int, error) {
+	f, err := excelize.OpenFile(path)
+	if err != nil {
+		return 0, err
+	}
+	sheets := f.GetSheetList()
+	if len(sheets) == 0 {
+		return 0, nil
+	}
+	rows, err := f.GetRows(sheets[0])
+	if err != nil {
+		return 0, err
+	}
+	if len(rows) <= 1 {
+		return 0, nil // Only header or empty
+	}
+	return len(rows) - 1, nil // Exclude header
 }

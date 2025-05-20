@@ -10,6 +10,7 @@ type CaptureConfig struct {
 	CaptureWindow   time.Duration // Duration of each capture window
 	CaptureInterval time.Duration // Interval between capture starts
 	OutputDir       string        // Directory to store capture output
+	Interface       string        // Network interface to capture on (optional)
 }
 
 // CaptureResult represents the result of a single capture operation

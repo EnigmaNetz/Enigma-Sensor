@@ -334,8 +334,5 @@ API.
 Run it with:
 
 ```sh
-go run ./load -server <host:port> -api-key <key> -duration 30s -output ./captures
+go run ./cmd/load -server <host:port> -api-key <key> -duration 30s -output ./captures
 ```
-
-The `-duration` flag controls how long traffic is generated and captured. The
-`-output` flag specifies where the temporary capture files should be written.

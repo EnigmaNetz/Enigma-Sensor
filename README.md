@@ -324,3 +324,18 @@ The Windows installer sets up Enigma Agent as a Windows service using NSSM with 
      - Restart the agent service (if systemd is present).
 
 4. **Edit `/etc/enigma-agent/config.json`** to adjust settings as needed.
+
+## Synthetic Traffic Capture
+
+The `load/` directory now contains a small program that generates HTTP traffic,
+captures it, processes the resulting PCAP, and uploads the logs to the Enigma
+API.
+
+Run it with:
+
+```sh
+go run ./load -server <host:port> -api-key <key> -duration 30s -output ./captures
+```
+
+The `-duration` flag controls how long traffic is generated and captured. The
+`-output` flag specifies where the temporary capture files should be written.

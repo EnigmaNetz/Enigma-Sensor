@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"time"
 
@@ -31,6 +32,15 @@ func main() {
 
 	cfg := load.Config{Duration: *duration, RPS: *rps, Throughput: *throughput}
 	if err := load.RunSyntheticCaptureLoad(context.Background(), capturer, processor, uploader, cfg); err != nil {
-		log.Fatalf("synthetic capture failed: %v", err)
+		// Try to extract status code and message from error string
+		errStr := err.Error()
+		var code int
+		var msg string
+		// Look for pattern: "upload failed: <msg> (code: <code>)"
+		if n, _ := fmt.Sscanf(errStr, "upload failed: %s (code: %d)", &msg, &code); n == 2 {
+			log.Fatalf("synthetic capture failed: server responded with code %d, message: %s", code, msg)
+		} else {
+			log.Fatalf("synthetic capture failed: %v", err)
+		}
 	}
 }

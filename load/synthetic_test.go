@@ -47,7 +47,7 @@ func TestRunSyntheticCaptureLoadSuccess(t *testing.T) {
 	cap := &mockCapturer{}
 	proc := &mockProcessor{}
 	up := &mockUploader{}
-	cfg := Config{Duration: 50 * time.Millisecond, OutputDir: t.TempDir()}
+	cfg := Config{Duration: 50 * time.Millisecond}
 	if err := RunSyntheticCaptureLoad(context.Background(), cap, proc, up, cfg); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestRunSyntheticCaptureLoadCaptureError(t *testing.T) {
 	cap := &mockCapturer{err: errors.New("capture failed")}
 	proc := &mockProcessor{}
 	up := &mockUploader{}
-	cfg := Config{Duration: 10 * time.Millisecond, OutputDir: t.TempDir()}
+	cfg := Config{Duration: 10 * time.Millisecond}
 	if err := RunSyntheticCaptureLoad(context.Background(), cap, proc, up, cfg); err == nil {
 		t.Fatal("expected error but got nil")
 	}

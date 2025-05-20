@@ -334,5 +334,6 @@ API.
 Run it with:
 
 ```sh
-go run ./cmd/load -server <host:port> -api-key <key> -duration 30s -output ./captures
+# Example with all options:
+go run ./cmd/load -server <host:port> -api-key <key> -duration 30s -rps 100 -throughput 1
 ```

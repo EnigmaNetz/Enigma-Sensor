@@ -17,7 +17,7 @@ import (
 	"EnigmaNetz/Enigma-Go-Agent/internal/capture/common"
 	types "EnigmaNetz/Enigma-Go-Agent/internal/processor/common"
 
-	"github.com/xuri/excelize/v2"
+	"bufio"
 )
 
 // Capturer matches the capture interface used by the main agent.
@@ -151,12 +151,12 @@ func RunSyntheticCaptureLoad(ctx context.Context, cap Capturer, proc Processor, 
 	}
 	// conn.xlsx row count
 	connRows := "N/A"
-	if n, err := countXLSXRows(result.ConnPath); err == nil {
+	if n, err := countLogRows(result.ConnPath); err == nil {
 		connRows = fmt.Sprintf("%d", n)
 	}
 	// dns.xlsx row count
 	dnsRows := "N/A"
-	if n, err := countXLSXRows(result.DNSPath); err == nil {
+	if n, err := countLogRows(result.DNSPath); err == nil {
 		dnsRows = fmt.Sprintf("%d", n)
 	}
 	fmt.Printf("\n--- Traffic Capture Stats ---\n")
@@ -169,27 +169,31 @@ func RunSyntheticCaptureLoad(ctx context.Context, cap Capturer, proc Processor, 
 		if err := up.UploadLogs(ctx, api.LogFiles{DNSPath: result.DNSPath, ConnPath: result.ConnPath}); err != nil {
 			return err
 		}
+		fmt.Println("Upload to API succeeded.")
 	}
 
 	return nil
 }
 
-// countXLSXRows returns the number of non-header rows in the first sheet of an XLSX file.
-func countXLSXRows(path string) (int, error) {
-	f, err := excelize.OpenFile(path)
+// countLogRows returns the number of data rows in a Zeek TSV file (lines not starting with # and not empty).
+func countLogRows(path string) (int, error) {
+	f, err := os.Open(path)
 	if err != nil {
 		return 0, err
 	}
-	sheets := f.GetSheetList()
-	if len(sheets) == 0 {
-		return 0, nil
+	defer f.Close()
+
+	n := 0
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if len(line) == 0 || line[0] == '#' {
+			continue
+		}
+		n++
 	}
-	rows, err := f.GetRows(sheets[0])
-	if err != nil {
+	if err := scanner.Err(); err != nil {
 		return 0, err
 	}
-	if len(rows) <= 1 {
-		return 0, nil // Only header or empty
-	}
-	return len(rows) - 1, nil // Exclude header
+	return n, nil
 }

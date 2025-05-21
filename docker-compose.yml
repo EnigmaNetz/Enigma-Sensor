@@ -1,0 +1,24 @@
+version: '3.9'
+services:
+  agent:
+    build: .
+    privileged: true
+    ports:
+      - "8080:80"
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ./captures:/captures
+      - ./logs:/var/log/enigma-agent
+    command: /entrypoint.sh
+
+  loadtest:
+    image: rakyll/hey
+    depends_on:
+      - agent
+    entrypoint: ["sh", "-c", "hey -z $DURATION -q $RPS $TARGET"]
+    environment:
+      - TARGET=http://agent
+      - DURATION=10s
+      - RPS=100

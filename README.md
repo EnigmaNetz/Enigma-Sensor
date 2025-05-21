@@ -324,3 +324,26 @@ The Windows installer sets up Enigma Agent as a Windows service using NSSM with 
      - Restart the agent service (if systemd is present).
 
 4. **Edit `/etc/enigma-agent/config.json`** to adjust settings as needed.
+
+---
+
+## Docker Compose Demo
+
+The repository includes a sample `Dockerfile` and `docker-compose.yml` for testing the agent inside a container. The `agent` service runs NGINX and the Enigma Agent together, while the `loadtest` service uses the [`hey`](https://github.com/rakyll/hey) tool to generate HTTP traffic at a configurable rate.
+
+1. Build and start the containers:
+
+   ```sh
+   docker compose up --build
+   ```
+
+2. Captured data and logs are stored in `./captures` and `./logs` on the host.
+
+   You can adjust the load test by setting `RPS` (requests per second) and `DURATION` in the `loadtest` service. By default the test runs at 100 requests per second for 10 seconds.
+
+3. Stop the demo with:
+
+   ```sh
+   docker compose down
+   ```
+

@@ -3,7 +3,7 @@
 
 [Setup]
 AppName=Enigma Agent
-AppVersion=1.0.1
+AppVersion=1.1.0
 DefaultDirName={autopf}\EnigmaAgent
 DefaultGroupName=Enigma Agent
 OutputBaseFilename=enigma-agent-installer

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log"
 	"os"
@@ -18,6 +19,8 @@ import (
 	"archive/zip"
 	"runtime"
 )
+
+var ErrAPIGone = errors.New("agent received 410 Gone from API and should stop")
 
 // Capturer abstracts the capture logic
 // (You can use mockgen for tests)
@@ -136,6 +139,7 @@ func RunAgent(ctx context.Context, cfg *config.Config, capturer Capturer, proces
 	var wg sync.WaitGroup
 
 	// Processing worker
+	shutdownCh := make(chan struct{}, 1)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -165,6 +169,12 @@ func RunAgent(ctx context.Context, cfg *config.Config, capturer Capturer, proces
 					ConnPath: result.ConnPath,
 				})
 				if uploadErr != nil {
+					if uploadErr == api.ErrAPIGone {
+						log.Printf("[agent] Received 410 Gone from API because the API key is invalid. Stopping agent and service as instructed.")
+						// Signal main loop to shutdown
+						shutdownCh <- struct{}{}
+						return
+					}
 					log.Printf("[worker] Log upload failed: %v", uploadErr)
 				} else {
 					log.Printf("[worker] Log upload successful.")
@@ -243,6 +253,9 @@ func RunAgent(ctx context.Context, cfg *config.Config, capturer Capturer, proces
 			log.Printf("Context canceled, shutting down after current capture...")
 			closeQueue()
 			return nil
+		case <-shutdownCh:
+			// Received shutdown signal from worker
+			return ErrAPIGone
 		default:
 			if doSignals {
 				select {

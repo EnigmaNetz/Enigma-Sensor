@@ -147,6 +147,10 @@ func main() {
 	}
 
 	if err := agent.RunAgent(ctx, cfg, capturer, proc, uploader); err != nil {
+		if err == api.ErrAPIGone || err == agent.ErrAPIGone {
+			log.Printf("Agent stopped due to 410 Gone from API because the API key is invalid. Exiting as instructed.")
+			os.Exit(0)
+		}
 		log.Fatalf("Agent exited with error: %v", err)
 	}
 }

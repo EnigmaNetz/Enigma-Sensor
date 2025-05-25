@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -43,6 +44,9 @@ type CombinedLogs struct {
 	DNS  string `json:"dns"`  // base64 encoded compressed data
 	Conn string `json:"conn"` // base64 encoded compressed data
 }
+
+// ErrAPIGone is returned when the API responds with HTTP 410 (Gone), indicating the agent should stop.
+var ErrAPIGone = errors.New("API returned 410 Gone: agent should stop sending data and terminate")
 
 // grpcClientImpl implements the grpcClient interface
 type grpcClientImpl struct {
@@ -122,7 +126,7 @@ func (u *LogUploader) UploadLogs(ctx context.Context, files LogFiles) error {
 		return nil
 	}
 
-	return fmt.Errorf("failed to upload after %d retries: %v", u.retryCount, lastErr)
+	return fmt.Errorf("failed to upload after %d retries: %w", u.retryCount, lastErr)
 }
 
 // prepareLogData reads, compresses, and combines the log files
@@ -172,6 +176,10 @@ func (u *LogUploader) upload(ctx context.Context, data []byte) error {
 	_, statusCode, message, err := u.client.uploadExcelMethod(ctx, data, u.apiKey)
 	if err != nil {
 		return fmt.Errorf("gRPC call failed: %v", err)
+	}
+
+	if statusCode == 410 {
+		return fmt.Errorf("API returned 410 Gone: agent should stop sending data and terminate: %w", ErrAPIGone)
 	}
 
 	if statusCode != 200 {

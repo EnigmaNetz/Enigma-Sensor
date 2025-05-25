@@ -14,11 +14,7 @@ services:
     command: /entrypoint.sh
 
   loadtest:
-    image: rakyll/hey
+    image: loadimpact/loadgentest-hey
     depends_on:
       - agent
-    entrypoint: ["sh", "-c", "hey -z $DURATION -q $RPS $TARGET"]
-    environment:
-      - TARGET=http://agent
-      - DURATION=10s
-      - RPS=100
+    entrypoint: ["sh", "-c", "hey -n 10000 -q 100 http://agent"]

@@ -26,6 +26,7 @@ COPY config.example.json /etc/enigma-agent/config.json
 # Entry script
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
+RUN ls -l /
 
 EXPOSE 80
 

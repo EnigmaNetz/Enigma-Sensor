@@ -1,0 +1,48 @@
+FROM debian:bullseye-slim
+
+# Install required packages for network capture and load testing
+RUN apt-get update && apt-get install -y \
+    tcpdump \
+    curl \
+    apache2-utils \
+    dnsutils \
+    iputils-ping \
+    net-tools \
+    procps \
+    wget \
+    python3 \
+    python3-minimal \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create directories
+RUN mkdir -p /app/captures /app/logs
+
+# Copy load test scripts
+COPY load-test.sh /app/load-test.sh
+COPY heavy-load-test.sh /app/heavy-load-test.sh
+RUN chmod +x /app/load-test.sh /app/heavy-load-test.sh
+
+WORKDIR /app
+
+# Simple test script instead of the full agent
+RUN echo '#!/bin/bash\n\
+echo "Starting network traffic capture test..."\n\
+echo "Starting tcpdump in background..."\n\
+tcpdump -i any -w /app/captures/capture-$(date +%s).pcap &\n\
+TCPDUMP_PID=$!\n\
+echo "tcpdump started with PID $TCPDUMP_PID"\n\
+echo "Starting load test..."\n\
+./load-test.sh &\n\
+LOAD_TEST_PID=$!\n\
+echo "Load test started with PID $LOAD_TEST_PID"\n\
+echo "Capturing traffic for 60 seconds..."\n\
+sleep 60\n\
+echo "Stopping tcpdump..."\n\
+kill $TCPDUMP_PID\n\
+echo "Checking captured files..."\n\
+ls -la /app/captures/\n\
+echo "Traffic capture test completed!"\n\
+sleep 300  # Keep container alive for inspection\n\
+' > /app/test-capture.sh && chmod +x /app/test-capture.sh
+
+CMD ["./test-capture.sh"]

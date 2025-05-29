@@ -1,0 +1,27 @@
+FROM node:18-alpine AS api-builder
+
+WORKDIR /app
+COPY mock-apis/ ./
+RUN npm install
+
+FROM nginx:alpine
+
+# Install Node.js for running mock APIs alongside Nginx
+RUN apk add --no-cache nodejs npm supervisor
+
+# Copy Nginx configuration
+COPY nginx.conf /etc/nginx/nginx.conf
+COPY static/ /usr/share/nginx/html/
+
+# Copy mock APIs
+COPY --from=api-builder /app /app
+
+# Copy supervisor configuration to run both Nginx and APIs
+COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+# Create log directories
+RUN mkdir -p /var/log/supervisor /var/log/mock-apis
+
+EXPOSE 80 8080 8081 8082 8083
+
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

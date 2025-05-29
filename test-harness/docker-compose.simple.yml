@@ -1,0 +1,37 @@
+services:
+  simple-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.simple-agent
+    privileged: true
+    volumes:
+      - ./captures:/app/captures
+      - ./logs:/app/logs
+    networks:
+      - test-network
+    depends_on:
+      - targets
+
+  targets:
+    build:
+      context: .
+      dockerfile: Dockerfile.targets
+    networks:
+      - test-network
+    ports:
+      - "8080:80"     # Nginx (mapped for external access)
+      - "8081:8081"   # Mock API 1
+      - "8082:8082"   # Mock API 2
+      - "8083:8083"   # Mock API 3
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+networks:
+  test-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

@@ -1,0 +1,16 @@
+{
+  "name": "enigma-test-mock-apis",
+  "version": "1.0.0",
+  "description": "Mock API services for Enigma agent test harness",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "api1": "PORT=8081 node servers/api1.js",
+    "api2": "PORT=8082 node servers/api2.js", 
+    "api3": "PORT=8083 node servers/api3.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5"
+  }
+}

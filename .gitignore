@@ -7,3 +7,4 @@ coverage.out
 .out
 Output/
 zeek-windows/
+test-harness/.env

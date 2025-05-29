@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enigma Agent Test Harness</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { color: #333; border-bottom: 2px solid #007acc; padding-bottom: 10px; }
+        .service { margin: 20px 0; padding: 15px; background: #f9f9f9; border-left: 4px solid #007acc; }
+        .endpoint { font-family: monospace; background: #e8e8e8; padding: 5px 8px; border-radius: 3px; margin: 5px 0; }
+        .status { display: inline-block; padding: 3px 8px; border-radius: 12px; font-size: 12px; font-weight: bold; }
+        .status.healthy { background: #d4edda; color: #155724; }
+        button { background: #007acc; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin: 5px; }
+        button:hover { background: #005a9e; }
+        #output { background: #f8f9fa; border: 1px solid #dee2e6; padding: 15px; margin: 15px 0; border-radius: 4px; font-family: monospace; white-space: pre-wrap; max-height: 300px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Enigma Agent Test Harness</h1>
+        <p>This test environment generates network traffic for the Enigma Go Agent to capture and analyze.</p>
+        
+        <div class="service">
+            <h3>🏥 Health Status</h3>
+            <div id="health-status">Checking services...</div>
+        </div>
+        
+        <div class="service">
+            <h3>👥 User Management API (Port 8081)</h3>
+            <div class="endpoint">GET /api/users</div>
+            <div class="endpoint">POST /api/users</div>
+            <div class="endpoint">PUT /api/users/:id</div>
+            <div class="endpoint">DELETE /api/users/:id</div>
+            <button onclick="testUsers()">Test User API</button>
+        </div>
+        
+        <div class="service">
+            <h3>📊 Analytics API (Port 8082)</h3>
+            <div class="endpoint">GET /api/analytics</div>
+            <div class="endpoint">POST /api/data</div>
+            <div class="endpoint">POST /api/upload</div>
+            <button onclick="testAnalytics()">Test Analytics API</button>
+        </div>
+        
+        <div class="service">
+            <h3>🔔 Notification API (Port 8083)</h3>
+            <div class="endpoint">GET /api/notifications</div>
+            <div class="endpoint">POST /api/notifications</div>
+            <div class="endpoint">GET /api/events (SSE)</div>
+            <button onclick="testNotifications()">Test Notification API</button>
+        </div>
+        
+        <div class="service">
+            <h3>📈 Load Testing</h3>
+            <button onclick="generateLoad()">Generate Mixed Load</button>
+            <button onclick="clearOutput()">Clear Output</button>
+        </div>
+        
+        <div id="output"></div>
+    </div>
+
+    <script>
+        const output = document.getElementById('output');
+        
+        function log(message) {
+            output.textContent += new Date().toISOString() + ': ' + message + '\n';
+            output.scrollTop = output.scrollHeight;
+        }
+        
+        function clearOutput() {
+            output.textContent = '';
+        }
+        
+        async function checkHealth() {
+            try {
+                const services = [
+                    { name: 'Nginx', url: '/health' },
+                    { name: 'User API', url: ':8081/health' },
+                    { name: 'Analytics API', url: ':8082/health' },
+                    { name: 'Notification API', url: ':8083/health' }
+                ];
+                
+                let statusHtml = '';
+                for (const service of services) {
+                    try {
+                        const response = await fetch(service.url);
+                        const status = response.ok ? 'healthy' : 'unhealthy';
+                        statusHtml += `<span class="status ${status}">${service.name}: ${status}</span> `;
+                    } catch (e) {
+                        statusHtml += `<span class="status unhealthy">${service.name}: error</span> `;
+                    }
+                }
+                
+                document.getElementById('health-status').innerHTML = statusHtml;
+            } catch (e) {
+                document.getElementById('health-status').textContent = 'Health check failed';
+            }
+        }
+        
+        async function testUsers() {
+            log('Testing User API...');
+            try {
+                // Get users
+                let response = await fetch('/api/users');
+                let data = await response.json();
+                log('GET /api/users: ' + JSON.stringify(data, null, 2));
+                
+                // Create user
+                response = await fetch('/api/users', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: 'Test User', email: 'test@example.com' })
+                });
+                data = await response.json();
+                log('POST /api/users: ' + JSON.stringify(data, null, 2));
+            } catch (e) {
+                log('User API test failed: ' + e.message);
+            }
+        }
+        
+        async function testAnalytics() {
+            log('Testing Analytics API...');
+            try {
+                // Get analytics
+                let response = await fetch('/api/analytics');
+                let data = await response.json();
+                log('GET /api/analytics: ' + JSON.stringify(data, null, 2));
+                
+                // Send data
+                response = await fetch('/api/data', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type: 'pageview', data: { page: '/test', user: 'test-user' } })
+                });
+                data = await response.json();
+                log('POST /api/data: ' + JSON.stringify(data, null, 2));
+            } catch (e) {
+                log('Analytics API test failed: ' + e.message);
+            }
+        }
+        
+        async function testNotifications() {
+            log('Testing Notification API...');
+            try {
+                // Get notifications
+                let response = await fetch('/api/notifications');
+                let data = await response.json();
+                log('GET /api/notifications: ' + JSON.stringify(data, null, 2));
+                
+                // Send notification
+                response = await fetch('/api/notifications', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        type: 'test', 
+                        title: 'Test Notification', 
+                        message: 'This is a test from the web interface' 
+                    })
+                });
+                data = await response.json();
+                log('POST /api/notifications: ' + JSON.stringify(data, null, 2));
+            } catch (e) {
+                log('Notification API test failed: ' + e.message);
+            }
+        }
+        
+        async function generateLoad() {
+            log('Generating mixed load...');
+            const requests = [];
+            
+            // Generate multiple concurrent requests
+            for (let i = 0; i < 10; i++) {
+                requests.push(fetch('/api/users'));
+                requests.push(fetch('/api/analytics'));
+                requests.push(fetch('/api/notifications'));
+                requests.push(fetch('/api/data', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ test: 'data', id: i })
+                }));
+            }
+            
+            try {
+                await Promise.all(requests);
+                log('Generated 40 concurrent requests across all APIs');
+            } catch (e) {
+                log('Load generation failed: ' + e.message);
+            }
+        }
+        
+        // Check health on page load and periodically
+        checkHealth();
+        setInterval(checkHealth, 30000);
+        
+        log('Test harness loaded. Services are being monitored.');
+    </script>
+</body>
+</html>

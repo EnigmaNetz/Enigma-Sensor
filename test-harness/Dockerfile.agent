@@ -1,77 +1,165 @@
+# =============================================================================
+# Enigma Agent Test Container
+# =============================================================================
+# Multi-stage build for the Enigma Agent with full network analysis capabilities
+# Includes Zeek network security monitor and load testing tools
+
+# -----------------------------------------------------------------------------
+# Build Stage: Compile the Go application
+# -----------------------------------------------------------------------------
 FROM golang:1.24-bullseye AS builder
 
 WORKDIR /app
+
+# Download dependencies first for better caching
 COPY go.mod go.sum ./
 RUN go mod download
 
+# Copy source and build the agent
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o enigma-agent ./cmd/enigma-agent
 
+# -----------------------------------------------------------------------------
+# Runtime Stage: Create the final container
+# -----------------------------------------------------------------------------
 FROM debian:bullseye-slim
 
-# Install required packages for network capture and load testing
+# -----------------------------------------------------------------------------
+# Package Installation
+# -----------------------------------------------------------------------------
+# Install essential packages for network capture and load testing
 RUN apt-get update && apt-get install -y \
+    # Network capture tools
     tcpdump \
+    # HTTP client and utilities
     curl \
+    wget \
+    # Load testing tools
     apache2-utils \
+    # Network utilities
     dnsutils \
     iputils-ping \
     net-tools \
+    # System utilities
     procps \
-    wget \
+    # Package management
     gnupg \
     lsb-release \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Zeek with retries and fallback (repository sometimes has sync issues)
-RUN echo 'deb http://download.opensuse.org/repositories/security:/zeek/Debian_11/ /' | tee /etc/apt/sources.list.d/security:zeek.list && \
-    curl -fsSL https://download.opensuse.org/repositories/security:zeek/Debian_11/Release.key | gpg --dearmor | tee /etc/apt/trusted.gpg.d/security_zeek.gpg > /dev/null && \
+# -----------------------------------------------------------------------------
+# Zeek Network Security Monitor Installation
+# -----------------------------------------------------------------------------
+# Install Zeek with fallback to mock installation if repository fails
+RUN echo 'deb http://download.opensuse.org/repositories/security:/zeek/Debian_11/ /' | \
+        tee /etc/apt/sources.list.d/security:zeek.list && \
+    curl -fsSL https://download.opensuse.org/repositories/security:zeek/Debian_11/Release.key | \
+        gpg --dearmor | tee /etc/apt/trusted.gpg.d/security_zeek.gpg > /dev/null && \
     apt-get update && \
-    # Try to install Zeek with retries, fallback to mock if fails
+    # Attempt Zeek installation with fallback to mock
     (DEBIAN_FRONTEND=noninteractive apt-get install -y zeek || \
      DEBIAN_FRONTEND=noninteractive apt-get install -y --fix-missing zeek || \
-     (echo "WARNING: Zeek installation failed, creating mock installation" && \
-      mkdir -p /opt/zeek/bin && \
-      echo '#!/bin/bash\necho "Mock Zeek - processing $@"\n# Extract log directory from args\nLOG_DIR=$(echo "$@" | grep -o "Log::default_logdir=[^ ]*" | cut -d= -f2)\nif [ -n "$LOG_DIR" ]; then\n  echo "#separator \\x09" > "$LOG_DIR/conn.log"\n  echo "#empty_field (empty)" >> "$LOG_DIR/conn.log"\n  echo "#unset_field -" >> "$LOG_DIR/conn.log"\n  echo "#path conn" >> "$LOG_DIR/conn.log"\n  echo "#open 2025-01-01-00-00-00" >> "$LOG_DIR/conn.log"\n  echo "#fields ts uid id.orig_h id.orig_p id.resp_h id.resp_p proto service duration orig_bytes resp_bytes conn_state local_orig local_resp missed_bytes history orig_pkts orig_ip_bytes resp_pkts resp_ip_bytes tunnel_parents" >> "$LOG_DIR/conn.log"\n  echo "#types time string addr port addr port enum string interval count count string bool bool count string count count count count set[string]" >> "$LOG_DIR/conn.log"\n  echo "1609459200.123456\\tC123\\t172.20.0.2\\t80\\t172.20.0.3\\t54321\\ttcp\\thttp\\t0.123\\t456\\t789\\tSF\\tT\\tF\\t0\\tShADTadFf\\t5\\t678\\t3\\t891\\t-" >> "$LOG_DIR/conn.log"\n  echo "#close 2025-01-01-00-00-01" >> "$LOG_DIR/conn.log"\n  echo "#separator \\x09" > "$LOG_DIR/dns.log"\n  echo "#path dns" >> "$LOG_DIR/dns.log"\n  echo "#open 2025-01-01-00-00-00" >> "$LOG_DIR/dns.log"\n  echo "#fields ts uid id.orig_h id.orig_p id.resp_h id.resp_p proto trans_id rtt query qclass qtype rcode AA TC RD RA Z answers TTLs rejected" >> "$LOG_DIR/dns.log"\n  echo "#types time string addr port addr port enum count interval string count count count bool bool bool bool count vector[string] vector[interval] bool" >> "$LOG_DIR/dns.log"\n  echo "1609459200.456\\tD456\\t172.20.0.3\\t12345\\t8.8.8.8\\t53\\tudp\\t12345\\t0.045\\texample.com\\t1\\t1\\t0\\tF\\tF\\tT\\tT\\t0\\t93.184.216.34\\t300.000000\\tF" >> "$LOG_DIR/dns.log"\n  echo "#close 2025-01-01-00-00-01" >> "$LOG_DIR/dns.log"\nelse\n  echo "Mock conn.log created" > conn.log\n  echo "Mock dns.log created" > dns.log\nfi' > /opt/zeek/bin/zeek && \
-      chmod +x /opt/zeek/bin/zeek)) && \
+     create_mock_zeek) && \
     rm -rf /var/lib/apt/lists/* && \
-    # Create Zeek symlink for expected path
+    # Ensure Zeek is available in PATH
     ln -sf /opt/zeek/bin/zeek /usr/bin/zeek
 
-# Note: Using apache2-utils (ab) instead of wrk for load testing
+# Create mock Zeek installation function (used if real Zeek fails)
+RUN echo 'create_mock_zeek() { \
+        echo "WARNING: Zeek installation failed, creating mock installation"; \
+        mkdir -p /opt/zeek/bin; \
+        cat > /opt/zeek/bin/zeek << "EOF" \
+#!/bin/bash \
+echo "Mock Zeek - processing $@" \
+# Extract log directory from arguments \
+LOG_DIR=$(echo "$@" | grep -o "Log::default_logdir=[^ ]*" | cut -d= -f2) \
+if [ -n "$LOG_DIR" ]; then \
+  # Create mock conn.log \
+  { \
+    echo "#separator \\x09"; \
+    echo "#empty_field (empty)"; \
+    echo "#unset_field -"; \
+    echo "#path conn"; \
+    echo "#open 2025-01-01-00-00-00"; \
+    echo "#fields ts uid id.orig_h id.orig_p id.resp_h id.resp_p proto service duration orig_bytes resp_bytes conn_state local_orig local_resp missed_bytes history orig_pkts orig_ip_bytes resp_pkts resp_ip_bytes tunnel_parents"; \
+    echo "#types time string addr port addr port enum string interval count count string bool bool count string count count count count set[string]"; \
+    echo "1609459200.123456\\tC123\\t172.20.0.2\\t80\\t172.20.0.3\\t54321\\ttcp\\thttp\\t0.123\\t456\\t789\\tSF\\tT\\tF\\t0\\tShADTadFf\\t5\\t678\\t3\\t891\\t-"; \
+    echo "#close 2025-01-01-00-00-01"; \
+  } > "$LOG_DIR/conn.log" \
+  # Create mock dns.log \
+  { \
+    echo "#separator \\x09"; \
+    echo "#path dns"; \
+    echo "#open 2025-01-01-00-00-00"; \
+    echo "#fields ts uid id.orig_h id.orig_p id.resp_h id.resp_p proto trans_id rtt query qclass qtype rcode AA TC RD RA Z answers TTLs rejected"; \
+    echo "#types time string addr port addr port enum count interval string count count count bool bool bool bool count vector[string] vector[interval] bool"; \
+    echo "1609459200.456\\tD456\\t172.20.0.3\\t12345\\t8.8.8.8\\t53\\tudp\\t12345\\t0.045\\texample.com\\t1\\t1\\t0\\tF\\tF\\tT\\tT\\t0\\t93.184.216.34\\t300.000000\\tF"; \
+    echo "#close 2025-01-01-00-00-01"; \
+  } > "$LOG_DIR/dns.log" \
+else \
+  echo "Mock conn.log created" > conn.log \
+  echo "Mock dns.log created" > dns.log \
+fi \
+EOF \
+        chmod +x /opt/zeek/bin/zeek; \
+    }' >> /tmp/mock_zeek_function.sh
 
-# Create directories
-RUN mkdir -p /app/captures /app/logs /etc/enigma-agent
+# -----------------------------------------------------------------------------
+# Directory Structure
+# -----------------------------------------------------------------------------
+RUN mkdir -p \
+    /app/captures \
+    /app/logs \
+    /etc/enigma-agent
 
-# Copy the built agent
+# -----------------------------------------------------------------------------
+# Application Files
+# -----------------------------------------------------------------------------
+# Copy the compiled agent binary
 COPY --from=builder /app/enigma-agent /app/enigma-agent
 
-# Copy top-level config as template
+# Copy configuration template
 COPY config.example.json /etc/enigma-agent/config.template.json
 
-# Copy scripts
+# Copy and prepare load testing scripts
 COPY test-harness/load-test.sh /app/load-test.sh
 RUN chmod +x /app/load-test.sh
 
-# Create entrypoint script to configure for test harness
-RUN echo '#!/bin/bash\n\
-# Take the top-level config template and configure it for test harness\n\
-API_KEY=${ENIGMA_API_KEY:-"test-api-key-please-replace-with-real-key"}\n\
-sed -e "s|REPLACE_WITH_YOUR_API_KEY|$API_KEY|g" \\\n\
-    -e "s|logs/enigma-agent.log|/app/logs/enigma-agent.log|g" \\\n\
-    -e "s|./captures|/app/captures|g" \\\n\
-    -e "s|\"window_seconds\": 60|\"window_seconds\": 30|g" \\\n\
-    -e "s|\"loop\": false|\"loop\": true|g" \\\n\
-    -e "s|\"upload\": false|\"upload\": true|g" \\\n\
-    -e "s|\"path\": \"\"|\"path\": \"/opt/zeek/bin/zeek\"|g" \\\n\
-    /etc/enigma-agent/config.template.json > /etc/enigma-agent/config.json\n\
-exec "$@"' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+# -----------------------------------------------------------------------------
+# Entrypoint Script
+# -----------------------------------------------------------------------------
+# Create entrypoint script for test harness configuration
+RUN cat > /app/entrypoint.sh << 'EOF'
+#!/bin/bash
+# Configure the agent for test harness environment
 
+# Set API key from environment or use default
+API_KEY=${ENIGMA_API_KEY:-"test-api-key-please-replace-with-real-key"}
+
+# Generate configuration from template with test harness settings
+sed -e "s|REPLACE_WITH_YOUR_API_KEY|$API_KEY|g" \
+    -e "s|logs/enigma-agent.log|/app/logs/enigma-agent.log|g" \
+    -e "s|./captures|/app/captures|g" \
+    -e "s|\"window_seconds\": 60|\"window_seconds\": 30|g" \
+    -e "s|\"loop\": false|\"loop\": true|g" \
+    -e "s|\"upload\": false|\"upload\": true|g" \
+    -e "s|\"path\": \"\"|\"path\": \"/opt/zeek/bin/zeek\"|g" \
+    /etc/enigma-agent/config.template.json > /etc/enigma-agent/config.json
+
+# Execute the provided command
+exec "$@"
+EOF
+
+RUN chmod +x /app/entrypoint.sh
+
+# -----------------------------------------------------------------------------
+# Container Configuration
+# -----------------------------------------------------------------------------
+WORKDIR /app
 ENTRYPOINT ["/app/entrypoint.sh"]
 
-WORKDIR /app
-
-# Run as root for tcpdump privileges
+# Run as root to allow tcpdump network capture
 USER root
 
+# Default command starts the Enigma agent
 CMD ["./enigma-agent"]

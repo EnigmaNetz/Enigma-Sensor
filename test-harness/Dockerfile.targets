@@ -1,27 +1,74 @@
+# =============================================================================
+# Test Targets Container
+# =============================================================================
+# Multi-service container providing HTTP targets for load testing
+# Combines Nginx static content with Node.js mock APIs
+
+# -----------------------------------------------------------------------------
+# Build Stage: Prepare Node.js Dependencies
+# -----------------------------------------------------------------------------
 FROM node:18-alpine AS api-builder
 
 WORKDIR /app
+
+# Copy package configuration and install dependencies
 COPY mock-apis/ ./
 RUN npm install
 
+# -----------------------------------------------------------------------------
+# Runtime Stage: Multi-service Web Server
+# -----------------------------------------------------------------------------
 FROM nginx:alpine
 
-# Install Node.js for running mock APIs alongside Nginx
-RUN apk add --no-cache nodejs npm supervisor
+# -----------------------------------------------------------------------------
+# Runtime Dependencies
+# -----------------------------------------------------------------------------
+# Install Node.js runtime and process supervisor
+RUN apk add --no-cache \
+    nodejs \
+    npm \
+    supervisor
 
-# Copy Nginx configuration
+# -----------------------------------------------------------------------------
+# Web Server Configuration
+# -----------------------------------------------------------------------------
+# Configure Nginx for static content serving
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY static/ /usr/share/nginx/html/
 
-# Copy mock APIs
+# -----------------------------------------------------------------------------
+# Mock APIs
+# -----------------------------------------------------------------------------
+# Copy prepared Node.js applications from build stage
 COPY --from=api-builder /app /app
 
-# Copy supervisor configuration to run both Nginx and APIs
+# -----------------------------------------------------------------------------
+# Process Management
+# -----------------------------------------------------------------------------
+# Configure supervisor to manage both Nginx and Node.js APIs
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-# Create log directories
-RUN mkdir -p /var/log/supervisor /var/log/mock-apis
+# -----------------------------------------------------------------------------
+# Logging Setup
+# -----------------------------------------------------------------------------
+# Create directories for service logs
+RUN mkdir -p \
+    /var/log/supervisor \
+    /var/log/mock-apis
 
-EXPOSE 80 8080 8081 8082 8083
+# -----------------------------------------------------------------------------
+# Network Configuration
+# -----------------------------------------------------------------------------
+# Expose ports for various services
+EXPOSE \
+    80    \
+    8080  \
+    8081  \
+    8082  \
+    8083
 
+# -----------------------------------------------------------------------------
+# Service Startup
+# -----------------------------------------------------------------------------
+# Start supervisor to manage all services
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

@@ -276,6 +276,7 @@ func RunAgent(ctx context.Context, cfg *config.Config, capturer Capturer, proces
 		capCfg := common.CaptureConfig{
 			CaptureWindow: window,
 			OutputDir:     zeekOutDir,
+			Interface:     cfg.Capture.Interface,
 		}
 		log.Printf("Starting capture iteration at %s", timestamp)
 		pcapPath, err := capturer.Capture(ctx, capCfg)

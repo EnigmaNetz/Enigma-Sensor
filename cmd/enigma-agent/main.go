@@ -126,6 +126,7 @@ func main() {
 	capCfg := common.CaptureConfig{
 		CaptureWindow: window,
 		OutputDir:     cfg.Capture.OutputDir, // Will be overridden per iteration
+		Interface:     cfg.Capture.Interface,
 	}
 	capturer := capture.NewCapturer(capCfg)
 	proc := processor.NewProcessor()

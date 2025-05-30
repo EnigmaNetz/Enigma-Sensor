@@ -12,6 +12,8 @@ import (
 )
 
 // TestWindowsCapturer_Capture_Success verifies that the WindowsCapturer successfully captures data when the command executes without error.
+var winArgsList [][]string
+
 func TestWindowsCapturer_Capture_Success(t *testing.T) {
 	c := NewWindowsCapturer()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -21,11 +23,14 @@ func TestWindowsCapturer_Capture_Success(t *testing.T) {
 		CaptureWindow:   1 * time.Second,
 		CaptureInterval: 1 * time.Second,
 		OutputDir:       "C:/tmp",
+		Interface:       "1",
 	}
 
-	// Patch commandContext to return a dummy Cmd
+	// Patch commandContext to record all command invocations
 	origCommandContext := commandContext
+	winArgsList = nil
 	commandContext = func(name string, arg ...string) *exec.Cmd {
+		winArgsList = append(winArgsList, append([]string{name}, arg...))
 		return exec.Command("cmd", "/C", "echo")
 	}
 	defer func() { commandContext = origCommandContext }()
@@ -33,6 +38,16 @@ func TestWindowsCapturer_Capture_Success(t *testing.T) {
 	_, err := c.Capture(ctx, config)
 	if err != nil {
 		t.Fatalf("Capture() error = %v", err)
+	}
+	found := false
+	for _, args := range winArgsList {
+		if len(args) >= 4 && args[0] == "pktmon" && args[1] == "filter" && args[2] == "add" && args[3] == "-i" && len(args) >= 5 && args[4] == "1" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected pktmon filter add command with interface, got %v", winArgsList)
 	}
 }
 

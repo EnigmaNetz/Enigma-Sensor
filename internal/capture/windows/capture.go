@@ -47,6 +47,14 @@ func (c *WindowsCapturer) runCapture(ctx context.Context, config common.CaptureC
 	timestamp := time.Now().Format("20060102_150405")
 	etlFile := fmt.Sprintf("%s/capture_%s.etl", c.outputDir, timestamp)
 
+	if config.Interface != "" && config.Interface != "any" && config.Interface != "all" {
+		addCmd := commandContext("pktmon", "filter", "add", "-i", config.Interface)
+		if err := addCmd.Run(); err != nil {
+			return "", fmt.Errorf("failed to add pktmon filter: %v", err)
+		}
+		defer commandContext("pktmon", "filter", "remove").Run()
+	}
+
 	// Start pktmon capture
 	log.Printf("[capture] Running pktmon command: pktmon start --capture --file %s", etlFile)
 	c.cmd = commandContext("pktmon", "start", "--capture", "--file", etlFile)

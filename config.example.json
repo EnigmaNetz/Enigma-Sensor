@@ -8,7 +8,8 @@
   "capture": {
     "output_dir": "./captures",
     "window_seconds": 60,
-    "loop": false
+    "loop": false,
+    "interface": "any"
   },
   "enigma_api": {
     "server": "api.enigmaai.net:443",

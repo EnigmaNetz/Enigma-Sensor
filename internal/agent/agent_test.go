@@ -78,10 +78,12 @@ func minimalConfig(loop bool) *config.Config {
 			OutputDir     string `json:"output_dir"`
 			WindowSeconds int    `json:"window_seconds"`
 			Loop          bool   `json:"loop"`
+			Interface     string `json:"interface"`
 		}{
 			OutputDir:     "/tmp",
 			WindowSeconds: 0,
 			Loop:          loop,
+			Interface:     "any",
 		},
 		Logging: struct {
 			Level            string `json:"level"`

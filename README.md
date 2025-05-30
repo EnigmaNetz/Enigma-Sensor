@@ -101,7 +101,7 @@ You can send this archive to Enigma support for troubleshooting.
 - **On Linux, the install script creates config at:** `/etc/enigma-agent/config.json` if it does not exist. Edit this file after install to adjust settings.
 - **Key fields:**
   - `logging`: Log level, file path, and max size.
-  - `capture`: Output directory, interval, and window duration.
+  - `capture`: Output directory, interval, window duration, and interface.
   - `enigma_api`: API server, API key, upload toggle (always enabled).
   - `log_retention_days`: Number of days to keep log files. Logs older than this are deleted on startup. Default: 1
 - **How to configure:**

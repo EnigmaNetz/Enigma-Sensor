@@ -47,8 +47,12 @@ func (c *LinuxCapturer) runCapture(ctx context.Context, config common.CaptureCon
 	outputFile := filepath.Join(c.outputDir, fmt.Sprintf("capture_%s.pcap", timestamp))
 
 	// Build tcpdump command
+	iface := "any"
+	if config.Interface != "" && config.Interface != "any" && config.Interface != "all" {
+		iface = config.Interface
+	}
 	args := []string{
-		"-i", "any", // Capture on all interfaces
+		"-i", iface, // Capture on specified interface
 		"-w", outputFile, // Write to file
 		"-G", fmt.Sprintf("%d", int(config.CaptureWindow.Seconds())), // Rotate after duration
 		"-W", "1", // Create only one file

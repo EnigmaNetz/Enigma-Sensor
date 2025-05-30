@@ -28,6 +28,8 @@ type Config struct {
 		WindowSeconds int `json:"window_seconds"`
 		// Loop determines if the agent should run in a continuous loop
 		Loop bool `json:"loop"`
+		// Interface specifies which network interface to capture from. "any" captures on every interface
+		Interface string `json:"interface"`
 	} `json:"capture"`
 
 	// Enigma API configuration
@@ -84,6 +86,9 @@ func LoadConfig(configPath string) (*Config, error) {
 	}
 	if config.Capture.Loop != true {
 		config.Capture.Loop = false
+	}
+	if config.Capture.Interface == "" {
+		config.Capture.Interface = "any"
 	}
 	// Zeek path can be empty by default
 

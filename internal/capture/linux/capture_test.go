@@ -14,6 +14,7 @@ import (
 
 // mockCmd is a mock for exec.Cmd
 var mockRunError error
+var gotArgs []string
 
 // TestLinuxCapturer_Capture_Success verifies that the LinuxCapturer successfully captures data when the command executes without error.
 func TestLinuxCapturer_Capture_Success(t *testing.T) {
@@ -25,11 +26,13 @@ func TestLinuxCapturer_Capture_Success(t *testing.T) {
 		CaptureWindow:   1 * time.Second,
 		CaptureInterval: 1 * time.Second,
 		OutputDir:       "/tmp",
+		Interface:       "eth0",
 	}
 
 	// Patch commandContext to return a dummy Cmd
 	origCommandContext := commandContext
 	commandContext = func(name string, arg ...string) *exec.Cmd {
+		gotArgs = arg
 		return exec.Command("echo")
 	}
 	defer func() { commandContext = origCommandContext }()
@@ -37,6 +40,15 @@ func TestLinuxCapturer_Capture_Success(t *testing.T) {
 	_, err := c.Capture(ctx, config)
 	if err != nil {
 		t.Fatalf("Capture() error = %v", err)
+	}
+	found := false
+	for i := range gotArgs {
+		if gotArgs[i] == "eth0" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected interface arg 'eth0', got %v", gotArgs)
 	}
 }
 

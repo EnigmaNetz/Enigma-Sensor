@@ -16,7 +16,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/proto"
 
-	pb "EnigmaNetz/Enigma-Go-Agent/internal/api/publish"
+	pb "EnigmaNetz/Enigma-Go-Sensor/internal/api/publish"
 )
 
 // grpcClient defines the interface for gRPC operations
@@ -45,8 +45,8 @@ type CombinedLogs struct {
 	Conn string `json:"conn"` // base64 encoded compressed data
 }
 
-// ErrAPIGone is returned when the API responds with HTTP 410 (Gone), indicating the agent should stop.
-var ErrAPIGone = errors.New("API returned 410 Gone: agent should stop sending data and terminate")
+// ErrAPIGone is returned when the API responds with HTTP 410 (Gone), indicating the sensor should stop.
+var ErrAPIGone = errors.New("API returned 410 Gone: sensor should stop sending data and terminate")
 
 // grpcClientImpl implements the grpcClient interface
 type grpcClientImpl struct {
@@ -179,7 +179,7 @@ func (u *LogUploader) upload(ctx context.Context, data []byte) error {
 	}
 
 	if statusCode == 410 {
-		return fmt.Errorf("API returned 410 Gone: agent should stop sending data and terminate: %w", ErrAPIGone)
+		return fmt.Errorf("API returned 410 Gone: sensor should stop sending data and terminate: %w", ErrAPIGone)
 	}
 
 	if statusCode != 200 {

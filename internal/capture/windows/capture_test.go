@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"EnigmaNetz/Enigma-Go-Agent/internal/capture/common"
+	"EnigmaNetz/Enigma-Go-Sensor/internal/capture/common"
 )
 
 // TestWindowsCapturer_Capture_Success verifies that the WindowsCapturer successfully captures data when the command executes without error.

@@ -1,4 +1,4 @@
-package agent
+package sensor
 
 import (
 	"context"
@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"EnigmaNetz/Enigma-Go-Agent/config"
-	"EnigmaNetz/Enigma-Go-Agent/internal/api"
-	"EnigmaNetz/Enigma-Go-Agent/internal/capture/common"
-	types "EnigmaNetz/Enigma-Go-Agent/internal/processor/common"
+	"EnigmaNetz/Enigma-Go-Sensor/config"
+	"EnigmaNetz/Enigma-Go-Sensor/internal/api"
+	"EnigmaNetz/Enigma-Go-Sensor/internal/capture/common"
+	types "EnigmaNetz/Enigma-Go-Sensor/internal/processor/common"
 )
 
 type mockCapturer struct {
@@ -104,21 +104,21 @@ func minimalConfig(loop bool) *config.Config {
 	}
 }
 
-func TestRunAgent_SingleIteration_Success(t *testing.T) {
-	defer t.Log("TestRunAgent_SingleIteration_Success completed")
+func TestRunSensor_SingleIteration_Success(t *testing.T) {
+	defer t.Log("TestRunSensor_SingleIteration_Success completed")
 	var capCalls, procCalls, upCalls int32
 	cfg := minimalConfig(false)
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	err := RunAgent(ctx, cfg,
+	err := RunSensor(ctx, cfg,
 		&mockCapturer{calls: &capCalls},
 		&mockProcessor{calls: &procCalls},
 		&mockUploader{calls: &upCalls},
 		true, true,
 	)
 	if err != nil {
-		t.Fatalf("RunAgent failed: %v", err)
+		t.Fatalf("RunSensor failed: %v", err)
 	}
 	if capCalls != 1 || procCalls != 1 || upCalls != 1 {
 		t.Errorf("Expected 1 call each, got: cap=%d proc=%d up=%d", capCalls, procCalls, upCalls)
@@ -131,16 +131,16 @@ func TestRunAgent_SingleIteration_Success(t *testing.T) {
 	if _, err := os.Stat("/tmp/fake.etl"); !os.IsNotExist(err) {
 		t.Errorf("Expected ETL file to be deleted, but it still exists or another error occurred: %v", err)
 	}
-	t.Log("TestRunAgent_SingleIteration_Success end reached")
+	t.Log("TestRunSensor_SingleIteration_Success end reached")
 }
 
-func TestRunAgent_CaptureError(t *testing.T) {
-	defer t.Log("TestRunAgent_CaptureError completed")
+func TestRunSensor_CaptureError(t *testing.T) {
+	defer t.Log("TestRunSensor_CaptureError completed")
 	var capCalls int32
 	cfg := minimalConfig(false)
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	err := RunAgent(ctx, cfg,
+	err := RunSensor(ctx, cfg,
 		&mockCapturer{calls: &capCalls, fail: true},
 		&mockProcessor{calls: new(int32)},
 		&mockUploader{calls: new(int32)},
@@ -149,71 +149,71 @@ func TestRunAgent_CaptureError(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error from failed capture, got nil")
 	}
-	t.Log("TestRunAgent_CaptureError end reached")
+	t.Log("TestRunSensor_CaptureError end reached")
 }
 
-func TestRunAgent_ProcessorError(t *testing.T) {
-	defer t.Log("TestRunAgent_ProcessorError completed")
+func TestRunSensor_ProcessorError(t *testing.T) {
+	defer t.Log("TestRunSensor_ProcessorError completed")
 	var capCalls, procCalls int32
 	cfg := minimalConfig(false)
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	err := RunAgent(ctx, cfg,
+	err := RunSensor(ctx, cfg,
 		&mockCapturer{calls: &capCalls},
 		&mockProcessor{calls: &procCalls, fail: true},
 		&mockUploader{calls: new(int32)},
 		true, true,
 	)
 	if err != nil {
-		t.Fatalf("RunAgent should not fail on processor error, got: %v", err)
+		t.Fatalf("RunSensor should not fail on processor error, got: %v", err)
 	}
 	if capCalls != 1 || procCalls != 1 {
 		t.Errorf("Expected 1 call each, got: cap=%d proc=%d", capCalls, procCalls)
 	}
-	t.Log("TestRunAgent_ProcessorError end reached")
+	t.Log("TestRunSensor_ProcessorError end reached")
 }
 
-func TestRunAgent_QueueFull(t *testing.T) {
-	defer t.Log("TestRunAgent_QueueFull completed")
+func TestRunSensor_QueueFull(t *testing.T) {
+	defer t.Log("TestRunSensor_QueueFull completed")
 	var capCalls, procCalls int32
 	cfg := minimalConfig(true)
 	cfg.Capture.Loop = true
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	// Use a capturer that returns quickly to fill the queue
-	err := RunAgent(ctx, cfg,
+	err := RunSensor(ctx, cfg,
 		&mockCapturer{calls: &capCalls},
 		&mockProcessor{calls: &procCalls},
 		&mockUploader{calls: new(int32)},
 		true, true,
 	)
 	if err != nil {
-		t.Fatalf("RunAgent failed: %v", err)
+		t.Fatalf("RunSensor failed: %v", err)
 	}
 	if capCalls < 2 {
 		t.Errorf("Expected at least 2 capture calls due to loop, got: %d", capCalls)
 	}
-	t.Log("TestRunAgent_QueueFull end reached")
+	t.Log("TestRunSensor_QueueFull end reached")
 }
 
-func TestRunAgent_StopsOnAPIGone(t *testing.T) {
-	defer t.Log("TestRunAgent_StopsOnAPIGone completed")
+func TestRunSensor_StopsOnAPIGone(t *testing.T) {
+	defer t.Log("TestRunSensor_StopsOnAPIGone completed")
 	var capCalls, procCalls, upCalls int32
 	cfg := minimalConfig(false)
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	err := RunAgent(ctx, cfg,
+	err := RunSensor(ctx, cfg,
 		&mockCapturer{calls: &capCalls},
 		&mockProcessor{calls: &procCalls},
 		&goneUploader{calls: &upCalls},
 		true, true,
 	)
 	if err != nil {
-		t.Fatalf("RunAgent should not return error on 410 Gone, got: %v", err)
+		t.Fatalf("RunSensor should not return error on 410 Gone, got: %v", err)
 	}
 	if capCalls != 1 || procCalls != 1 || upCalls != 1 {
 		t.Errorf("Expected 1 call each, got: cap=%d proc=%d up=%d", capCalls, procCalls, upCalls)
 	}
-	t.Log("TestRunAgent_StopsOnAPIGone end reached")
+	t.Log("TestRunSensor_StopsOnAPIGone end reached")
 }

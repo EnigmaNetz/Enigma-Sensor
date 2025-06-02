@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"runtime"
 
-	types "EnigmaNetz/Enigma-Go-Agent/internal/processor/common"
-	"EnigmaNetz/Enigma-Go-Agent/internal/processor/linux"
-	"EnigmaNetz/Enigma-Go-Agent/internal/processor/windows"
+	types "EnigmaNetz/Enigma-Go-Sensor/internal/processor/common"
+	"EnigmaNetz/Enigma-Go-Sensor/internal/processor/linux"
+	"EnigmaNetz/Enigma-Go-Sensor/internal/processor/windows"
 )
 
 // NewProcessor returns the correct platform-specific Processor implementation.

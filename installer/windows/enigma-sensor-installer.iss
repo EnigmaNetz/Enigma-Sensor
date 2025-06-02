@@ -1,23 +1,23 @@
-; Enigma Agent Windows Installer
+; Enigma Sensor Windows Installer
 ; Requires Inno Setup (https://jrsoftware.org/isinfo.php)
 
 [Setup]
-AppName=Enigma Agent
+AppName=Enigma Sensor
 AppVersion=1.1.0
-DefaultDirName={autopf}\EnigmaAgent
-DefaultGroupName=Enigma Agent
-OutputBaseFilename=enigma-agent-installer
+DefaultDirName={autopf}\EnigmaSensor
+DefaultGroupName=Enigma Sensor
+OutputBaseFilename=enigma-sensor-installer
 Compression=lzma
 SolidCompression=yes
 PrivilegesRequired=admin
 
 [Files]
-Source: "..\\..\\bin\\enigma-agent-windows-amd64.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\\..\\bin\\enigma-sensor-windows-amd64.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\\..\\bin\\nssm.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "zeek-runtime-win64.zip"; DestDir: "{app}"; Flags: ignoreversion
 
 [Dirs]
-Name: "C:\ProgramData\EnigmaAgent\logs"; Flags: uninsalwaysuninstall
+Name: "C:\ProgramData\EnigmaSensor\logs"; Flags: uninsalwaysuninstall
 
 [Icons]
 
@@ -30,14 +30,14 @@ var
 
 procedure InitializeWizard;
 begin
-  ConfigExists := FileExists('C:\\ProgramData\\EnigmaAgent\\config.json');
+  ConfigExists := FileExists('C:\\ProgramData\\EnigmaSensor\\config.json');
   if not ConfigExists then
   begin
     ApiKeyPage := CreateInputQueryPage(wpSelectDir, 'API Key', 'Enter your Enigma API Key', 'This is required.');
     ApiKeyPage.Add('API Key:', False);
 
     LoggingLevel := 'info';
-    LoggingFile := 'logs/enigma-agent.log';
+    LoggingFile := 'logs/enigma-sensor.log';
     LoggingMaxSize := '100';
     CaptureOutputDir := './captures';
     CaptureWindowSeconds := '60';
@@ -61,16 +61,16 @@ begin
   if CurStep = ssInstall then
   begin
     if FileExists(ExpandConstant('{app}\nssm.exe')) then
-      Exec(ExpandConstant('{app}\nssm.exe'), 'stop EnigmaAgent', ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ExitCode);
+      Exec(ExpandConstant('{app}\nssm.exe'), 'stop EnigmaSensor', ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ExitCode);
   end;
   if (CurStep = ssPostInstall) and (not ConfigExists) then
   begin
     SaveStringToFile(
-      'C:\\ProgramData\\EnigmaAgent\\config.json',
+      'C:\\ProgramData\\EnigmaSensor\\config.json',
       '{' + #13#10 +
       '  "logging": {' + #13#10 +
       '    "level": "' + LoggingLevel + '",' + #13#10 +
-      '    "file": "logs/enigma-agent.log",' + #13#10 +
+      '    "file": "logs/enigma-sensor.log",' + #13#10 +
       '    "max_size_mb": ' + LoggingMaxSize + #13#10 +
       '  },' + #13#10 +
       '  "capture": {' + #13#10 +
@@ -95,14 +95,14 @@ begin
 end;
 
 [Run]
-Filename: "{app}\nssm.exe"; Parameters: "install EnigmaAgent enigma-agent-windows-amd64.exe"; WorkingDir: "{app}"
-Filename: "{app}\nssm.exe"; Parameters: "set EnigmaAgent AppDirectory {app}"; WorkingDir: "{app}"
-Filename: "{app}\nssm.exe"; Parameters: "set EnigmaAgent AppStdout C:\\ProgramData\\EnigmaAgent\\logs\\enigma-agent.log"; WorkingDir: "{app}"
-Filename: "{app}\nssm.exe"; Parameters: "set EnigmaAgent AppStderr C:\\ProgramData\\EnigmaAgent\\logs\\enigma-agent.log"; WorkingDir: "{app}"
-Filename: "{app}\nssm.exe"; Parameters: "set EnigmaAgent Start SERVICE_AUTO_START"; WorkingDir: "{app}"
-Filename: "{app}\nssm.exe"; Parameters: "set EnigmaAgent ObjectName LocalSystem"; WorkingDir: "{app}"
-Filename: "{app}\nssm.exe"; Parameters: "start EnigmaAgent"; WorkingDir: "{app}"
+Filename: "{app}\nssm.exe"; Parameters: "install EnigmaSensor enigma-sensor-windows-amd64.exe"; WorkingDir: "{app}"
+Filename: "{app}\nssm.exe"; Parameters: "set EnigmaSensor AppDirectory {app}"; WorkingDir: "{app}"
+Filename: "{app}\nssm.exe"; Parameters: "set EnigmaSensor AppStdout C:\\ProgramData\\EnigmaSensor\\logs\\enigma-sensor.log"; WorkingDir: "{app}"
+Filename: "{app}\nssm.exe"; Parameters: "set EnigmaSensor AppStderr C:\\ProgramData\\EnigmaSensor\\logs\\enigma-sensor.log"; WorkingDir: "{app}"
+Filename: "{app}\nssm.exe"; Parameters: "set EnigmaSensor Start SERVICE_AUTO_START"; WorkingDir: "{app}"
+Filename: "{app}\nssm.exe"; Parameters: "set EnigmaSensor ObjectName LocalSystem"; WorkingDir: "{app}"
+Filename: "{app}\nssm.exe"; Parameters: "start EnigmaSensor"; WorkingDir: "{app}"
 
 [UninstallRun]
-Filename: "{app}\nssm.exe"; Parameters: "stop EnigmaAgent"
-Filename: "{app}\nssm.exe"; Parameters: "remove EnigmaAgent confirm"
+Filename: "{app}\nssm.exe"; Parameters: "stop EnigmaSensor"
+Filename: "{app}\nssm.exe"; Parameters: "remove EnigmaSensor confirm"

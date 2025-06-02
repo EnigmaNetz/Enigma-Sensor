@@ -2,7 +2,7 @@
 
 package windows
 
-import "EnigmaNetz/Enigma-Go-Agent/internal/capture/common"
+import "EnigmaNetz/Enigma-Go-Sensor/internal/capture/common"
 
 func NewWindowsCapturer() common.Capturer {
 	panic("NewWindowsCapturer called on non-Windows platform")

@@ -54,7 +54,7 @@ case "$OS_ID" in
     # --- Install Zeek, tcpdump, and dependencies ---
     export DEBIAN_FRONTEND=noninteractive
     apt install -y zeek tcpdump
-    # --- Find and install Enigma Agent .deb package ---
+    # --- Find and install Enigma Sensor .deb package ---
     PKG=$(ls ./*.deb 2>/dev/null | head -n1)
     if [ -z "$PKG" ]; then
       echo "ERROR: No .deb package found in the current directory."
@@ -66,7 +66,7 @@ case "$OS_ID" in
     # --- Install Zeek, tcpdump, and dependencies ---
     yum install -y epel-release || true
     yum install -y zeek tcpdump || dnf install -y zeek tcpdump
-    # --- Find and install Enigma Agent .rpm package ---
+    # --- Find and install Enigma Sensor .rpm package ---
     PKG=$(ls ./*.rpm 2>/dev/null | head -n1)
     if [ -z "$PKG" ]; then
       echo "ERROR: No .rpm package found in the current directory."
@@ -81,9 +81,9 @@ case "$OS_ID" in
 esac
 
 # --- Write config file only if it doesn't exist ---
-mkdir -p /etc/enigma-agent
-if [ ! -f /etc/enigma-agent/config.json ]; then
-  cat > /etc/enigma-agent/config.json <<EOF
+mkdir -p /etc/enigma-sensor
+if [ ! -f /etc/enigma-sensor/config.json ]; then
+  cat > /etc/enigma-sensor/config.json <<EOF
 {
   "enigma_api": {
     "api_key": "$ENIGMA_API_KEY",
@@ -95,7 +95,7 @@ fi
 
 # --- Restart service if systemd is present ---
 if command -v systemctl >/dev/null 2>&1; then
-  systemctl restart enigma-agent || true
+  systemctl restart enigma-sensor || true
 fi
 
-echo "Enigma Agent installed and configured."
+echo "Enigma Sensor installed and configured."

@@ -36,11 +36,11 @@ jobs:
           mkdir -p bin
           VERSION="${{ steps.get_version.outputs.version }}"
           if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
-            GOOS=linux GOARCH=amd64 go build -o bin/enigma-agent-linux-amd64-$VERSION ./cmd/enigma-agent
+            GOOS=linux GOARCH=amd64 go build -o bin/enigma-sensor-linux-amd64-$VERSION ./cmd/enigma-sensor
           elif [ "${{ matrix.os }}" = "macos-latest" ]; then
-            GOOS=darwin GOARCH=amd64 go build -o bin/enigma-agent-darwin-amd64-$VERSION ./cmd/enigma-agent
+            GOOS=darwin GOARCH=amd64 go build -o bin/enigma-sensor-darwin-amd64-$VERSION ./cmd/enigma-sensor
           elif [ "${{ matrix.os }}" = "windows-latest" ]; then
-            GOOS=windows GOARCH=amd64 go build -o bin/enigma-agent-windows-amd64-$VERSION.exe ./cmd/enigma-agent
+            GOOS=windows GOARCH=amd64 go build -o bin/enigma-sensor-windows-amd64-$VERSION.exe ./cmd/enigma-sensor
           fi
 
       - name: Install packaging dependencies
@@ -56,10 +56,10 @@ jobs:
       - name: Prepare Linux release zip
         if: matrix.os == 'ubuntu-latest'
         run: |
-          RELEASE_DIR="enigma-agent-${{ steps.get_version.outputs.version }}-linux-release"
+          RELEASE_DIR="enigma-sensor-${{ steps.get_version.outputs.version }}-linux-release"
           mkdir "$RELEASE_DIR"
-          cp installer/install-enigma-agent.sh "$RELEASE_DIR/"
-          cp bin/enigma-agent_*.deb "$RELEASE_DIR/" || true
+          cp installer/install-enigma-sensor.sh "$RELEASE_DIR/"
+          cp bin/enigma-sensor_*.deb "$RELEASE_DIR/" || true
           cd "$RELEASE_DIR"
           zip -r "../${RELEASE_DIR}.zip" .
           cd ..
@@ -68,7 +68,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest' && startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: enigma-agent-*-linux-release.zip
+          files: enigma-sensor-*-linux-release.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -81,7 +81,7 @@ jobs:
       - name: Copy binary for installer
         if: matrix.os == 'windows-latest'
         run: |
-          Copy-Item -Path bin/enigma-agent-windows-amd64-${{ env.VERSION }}.exe -Destination bin/enigma-agent-windows-amd64.exe
+          Copy-Item -Path bin/enigma-sensor-windows-amd64-${{ env.VERSION }}.exe -Destination bin/enigma-sensor-windows-amd64.exe
         shell: powershell
         env:
           VERSION: ${{ steps.get_version.outputs.version }}
@@ -89,27 +89,27 @@ jobs:
       - name: Build Windows Installer
         if: matrix.os == 'windows-latest'
         run: |
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer/windows/enigma-agent-installer.iss
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer/windows/enigma-sensor-installer.iss
         shell: powershell
 
       - name: Rename installer
         if: matrix.os == 'windows-latest'
         run: |
-          Rename-Item -Path installer/windows/Output/enigma-agent-installer.exe -NewName enigma-agent-installer.exe
+          Rename-Item -Path installer/windows/Output/enigma-sensor-installer.exe -NewName enigma-sensor-installer.exe
         shell: powershell
 
       - name: Upload Windows Installer Artifact
         if: matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
-          name: enigma-agent-installer
-          path: installer/windows/Output/enigma-agent-installer.exe
+          name: enigma-sensor-installer
+          path: installer/windows/Output/enigma-sensor-installer.exe
 
       - name: Upload installer to GitHub Release
         if: matrix.os == 'windows-latest'
         uses: softprops/action-gh-release@v2
         with:
-          files: installer/windows/Output/enigma-agent-installer.exe
+          files: installer/windows/Output/enigma-sensor-installer.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -118,6 +118,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            bin/enigma-agent-*-${{ steps.get_version.outputs.version }}*
+            bin/enigma-sensor-*-${{ steps.get_version.outputs.version }}*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"runtime"
 
-	"EnigmaNetz/Enigma-Go-Agent/internal/capture/common"
-	"EnigmaNetz/Enigma-Go-Agent/internal/capture/linux"
-	"EnigmaNetz/Enigma-Go-Agent/internal/capture/windows"
+	"EnigmaNetz/Enigma-Go-Sensor/internal/capture/common"
+	"EnigmaNetz/Enigma-Go-Sensor/internal/capture/linux"
+	"EnigmaNetz/Enigma-Go-Sensor/internal/capture/windows"
 )
 
 // NewCapturer creates a new Capturer appropriate for the current platform

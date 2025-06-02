@@ -1,7 +1,7 @@
 {
   "logging": {
     "level": "info",
-    "file": "logs/enigma-agent.log",
+    "file": "logs/enigma-sensor.log",
     "max_size_mb": 100,
     "log_retention_days": 1
   },

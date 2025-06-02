@@ -3,8 +3,8 @@ set -e
 
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload
-  systemctl enable enigma-agent.service
-  systemctl start enigma-agent.service
+  systemctl enable enigma-sensor.service
+  systemctl start enigma-sensor.service
 fi
 
 exit 0

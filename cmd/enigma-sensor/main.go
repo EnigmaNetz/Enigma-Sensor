@@ -10,22 +10,22 @@ import (
 	"runtime"
 	"time"
 
-	"EnigmaNetz/Enigma-Go-Agent/config"
-	"EnigmaNetz/Enigma-Go-Agent/internal/agent"
-	"EnigmaNetz/Enigma-Go-Agent/internal/api"
-	"EnigmaNetz/Enigma-Go-Agent/internal/capture"
-	"EnigmaNetz/Enigma-Go-Agent/internal/capture/common"
-	collect_logs "EnigmaNetz/Enigma-Go-Agent/internal/collect_logs"
-	"EnigmaNetz/Enigma-Go-Agent/internal/processor"
-	"EnigmaNetz/Enigma-Go-Agent/internal/version"
+	"EnigmaNetz/Enigma-Go-Sensor/config"
+	"EnigmaNetz/Enigma-Go-Sensor/internal/api"
+	"EnigmaNetz/Enigma-Go-Sensor/internal/capture"
+	"EnigmaNetz/Enigma-Go-Sensor/internal/capture/common"
+	collect_logs "EnigmaNetz/Enigma-Go-Sensor/internal/collect_logs"
+	"EnigmaNetz/Enigma-Go-Sensor/internal/processor"
+	"EnigmaNetz/Enigma-Go-Sensor/internal/sensor"
+	"EnigmaNetz/Enigma-Go-Sensor/internal/version"
 
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 func printHelp() {
-	fmt.Print(`Enigma Agent - Network Capture & Processing Tool
+	fmt.Print(`Enigma Sensor - Network Capture & Processing Tool
 
-Usage: enigma-agent [collect-logs] [--version|-v] [--help|-h]
+Usage: enigma-sensor [collect-logs] [--version|-v] [--help|-h]
 
 Runs a network capture and processing session using config.json.
 
@@ -35,22 +35,22 @@ Options:
   --help, -h      Show this help message and exit
 
 Configuration:
-  The agent loads its configuration from config.json in the working directory by default.
+  The sensor loads its configuration from config.json in the working directory by default.
   You can customize logging, capture, and Enigma API settings in this file.
   See config.example.json for a template and documentation of all options.
 
 Example:
-  enigma-agent
+  enigma-sensor
     Runs a single capture and processing session using config.json.
 
-  enigma-agent collect-logs
+  enigma-sensor collect-logs
     Packages logs, captures, config, and diagnostics into a zip archive for support.
 
-  enigma-agent --help
+  enigma-sensor --help
     Shows this help message.
 
-  enigma-agent --version
-    Prints the agent version.
+  enigma-sensor --version
+    Prints the sensor version.
 `)
 }
 
@@ -78,12 +78,12 @@ func main() {
 	var configPaths []string
 	if runtime.GOOS == "windows" {
 		configPaths = []string{
-			`C:\\ProgramData\\EnigmaAgent\\config.json`,
+			`C:\\ProgramData\\EnigmaSensor\\config.json`,
 			"config.json",
 		}
 	} else {
 		configPaths = []string{
-			"/etc/enigma-agent/config.json",
+			"/etc/enigma-sensor/config.json",
 			"config.json",
 		}
 	}
@@ -121,7 +121,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Prepare capturer, processor, uploader for agent.RunAgent
+	// Prepare capturer, processor, uploader for sensor.RunSensor
 	window := time.Duration(cfg.Capture.WindowSeconds) * time.Second
 	capCfg := common.CaptureConfig{
 		CaptureWindow: window,
@@ -131,7 +131,7 @@ func main() {
 	capturer := capture.NewCapturer(capCfg)
 	proc := processor.NewProcessor()
 
-	var uploader agent.Uploader
+	var uploader sensor.Uploader
 	if cfg.EnigmaAPI.Upload {
 		server := cfg.EnigmaAPI.Server
 		apiKey := cfg.EnigmaAPI.APIKey
@@ -147,11 +147,11 @@ func main() {
 		}
 	}
 
-	if err := agent.RunAgent(ctx, cfg, capturer, proc, uploader); err != nil {
-		if err == api.ErrAPIGone || err == agent.ErrAPIGone {
-			log.Printf("Agent stopped due to 410 Gone from API because the API key is invalid. Exiting as instructed.")
+	if err := sensor.RunSensor(ctx, cfg, capturer, proc, uploader); err != nil {
+		if err == api.ErrAPIGone || err == sensor.ErrAPIGone {
+			log.Printf("Sensor stopped due to 410 Gone from API because the API key is invalid. Exiting as instructed.")
 			os.Exit(0)
 		}
-		log.Fatalf("Agent exited with error: %v", err)
+		log.Fatalf("Sensor exited with error: %v", err)
 	}
 }

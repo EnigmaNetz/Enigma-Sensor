@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package publish;
 
-option go_package = "EnigmaNetz/Enigma-Go-Agent/internal/api/publish";
+option go_package = "EnigmaNetz/Enigma-Go-Sensor/internal/api/publish";
 
 service publishService {
   rpc getMethod(getRequest) returns (getResponse);

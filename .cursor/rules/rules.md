@@ -1,4 +1,4 @@
-# Cursor Rules for Enigma Go Agent
+# Cursor Rules for Enigma Go Sensor
 
 ## Code Style & Linting
 

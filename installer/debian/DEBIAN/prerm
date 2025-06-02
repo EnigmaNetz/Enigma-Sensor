@@ -2,8 +2,8 @@
 set -e
 
 if command -v systemctl >/dev/null 2>&1; then
-  systemctl stop enigma-agent.service || true
-  systemctl disable enigma-agent.service || true
+  systemctl stop enigma-sensor.service || true
+  systemctl disable enigma-sensor.service || true
   systemctl daemon-reload
 fi
 

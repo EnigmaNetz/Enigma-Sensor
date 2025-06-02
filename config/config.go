@@ -26,7 +26,7 @@ type Config struct {
 		OutputDir string `json:"output_dir"`
 		// WindowSeconds is how long each capture runs
 		WindowSeconds int `json:"window_seconds"`
-		// Loop determines if the agent should run in a continuous loop
+		// Loop determines if the sensor should run in a continuous loop
 		Loop bool `json:"loop"`
 		// Interface specifies which network interface to capture from. "any" captures on every interface
 		Interface string `json:"interface"`

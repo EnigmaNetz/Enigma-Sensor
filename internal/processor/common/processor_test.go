@@ -1,7 +1,7 @@
 package types_test
 
 import (
-	types "EnigmaNetz/Enigma-Go-Agent/internal/processor/common"
+	types "EnigmaNetz/Enigma-Go-Sensor/internal/processor/common"
 	"errors"
 	"os"
 	"path/filepath"

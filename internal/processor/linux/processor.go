@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
-	types "EnigmaNetz/Enigma-Go-Agent/internal/processor/common"
+	types "EnigmaNetz/Enigma-Go-Sensor/internal/processor/common"
 )
 
 // zeekBinary is the path to the Zeek executable

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"EnigmaNetz/Enigma-Go-Agent/internal/capture/common"
+	"EnigmaNetz/Enigma-Go-Sensor/internal/capture/common"
 )
 
 // mockCmd is a mock for exec.Cmd

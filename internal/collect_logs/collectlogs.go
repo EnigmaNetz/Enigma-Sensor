@@ -1,7 +1,7 @@
 package collect_logs
 
 import (
-	"EnigmaNetz/Enigma-Go-Agent/internal/version"
+	"EnigmaNetz/Enigma-Go-Sensor/internal/version"
 	"archive/zip"
 	"bufio"
 	"fmt"

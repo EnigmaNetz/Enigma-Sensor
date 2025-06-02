@@ -2,7 +2,7 @@
 
 package linux
 
-import "EnigmaNetz/Enigma-Go-Agent/internal/capture/common"
+import "EnigmaNetz/Enigma-Go-Sensor/internal/capture/common"
 
 func NewLinuxCapturer() common.Capturer {
 	panic("NewLinuxCapturer called on non-Linux platform")

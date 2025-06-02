@@ -1,9 +1,9 @@
-Package: enigma-agent
+Package: enigma-sensor
 Version: 1.1.0
 Section: utils
 Priority: optional
 Architecture: amd64
 Maintainer: Brian Conn <brian.conn@getenigma.ai>
 Depends: zeek, tcpdump
-Description: Enigma Go Agent
- A service that runs the Enigma Go Agent in continuous mode as a systemd service.
+Description: Enigma Go Sensor
+ A service that runs the Enigma Go Sensor in continuous mode as a systemd service.

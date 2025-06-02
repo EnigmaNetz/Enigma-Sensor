@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"EnigmaNetz/Enigma-Go-Agent/internal/capture/common"
+	"EnigmaNetz/Enigma-Go-Sensor/internal/capture/common"
 )
 
 type WindowsCapturer struct {

@@ -1,4 +1,4 @@
-module EnigmaNetz/Enigma-Go-Agent
+module EnigmaNetz/Enigma-Go-Sensor
 
 go 1.24
 

@@ -1,4 +1,4 @@
-package agent
+package sensor
 
 import (
 	"context"
@@ -12,20 +12,20 @@ import (
 	"syscall"
 	"time"
 
-	"EnigmaNetz/Enigma-Go-Agent/config"
-	"EnigmaNetz/Enigma-Go-Agent/internal/api"
-	"EnigmaNetz/Enigma-Go-Agent/internal/capture/common"
-	types "EnigmaNetz/Enigma-Go-Agent/internal/processor/common"
+	"EnigmaNetz/Enigma-Go-Sensor/config"
+	"EnigmaNetz/Enigma-Go-Sensor/internal/api"
+	"EnigmaNetz/Enigma-Go-Sensor/internal/capture/common"
+	types "EnigmaNetz/Enigma-Go-Sensor/internal/processor/common"
 	"archive/zip"
 	"runtime"
 )
 
-var ErrAPIGone = errors.New("agent received 410 Gone from API and should stop")
+var ErrAPIGone = errors.New("sensor received 410 Gone from API and should stop")
 
 // Capturer abstracts the capture logic
 // (You can use mockgen for tests)
 //
-//go:generate mockgen -destination=mock_capturer.go -package=agent . Capturer
+//go:generate mockgen -destination=mock_capturer.go -package=sensor . Capturer
 type Capturer interface {
 	Capture(ctx context.Context, cfg common.CaptureConfig) (string, error)
 }
@@ -112,10 +112,10 @@ func deletePCAPFile(pcapPath string) {
 	}
 }
 
-// RunAgent orchestrates capture, processing, and upload with graceful shutdown
+// RunSensor orchestrates capture, processing, and upload with graceful shutdown
 // If disableSignals is true, signal handling is skipped (for tests)
 // If skipEnsureZeek is true, ensureZeekWindows is not called (for tests)
-func RunAgent(ctx context.Context, cfg *config.Config, capturer Capturer, processor Processor, uploader Uploader, disableSignalsAndSkipZeek ...bool) error {
+func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, processor Processor, uploader Uploader, disableSignalsAndSkipZeek ...bool) error {
 	skipEnsureZeek := false
 	disableSignals := false
 	if len(disableSignalsAndSkipZeek) > 0 {
@@ -170,7 +170,7 @@ func RunAgent(ctx context.Context, cfg *config.Config, capturer Capturer, proces
 				})
 				if uploadErr != nil {
 					if uploadErr == api.ErrAPIGone {
-						log.Printf("[agent] Received 410 Gone from API because the API key is invalid. Stopping agent and service as instructed.")
+						log.Printf("[sensor] Received 410 Gone from API because the API key is invalid. Stopping sensor and service as instructed.")
 						// Signal main loop to shutdown
 						shutdownCh <- struct{}{}
 						return

@@ -1,10 +1,10 @@
 [Unit]
-Description=Enigma Agent Service
+Description=Enigma Sensor Service
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/enigma-agent
+ExecStart=/usr/local/bin/enigma-sensor
 Restart=on-failure
 User=root
 

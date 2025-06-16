@@ -46,6 +46,8 @@ type Config struct {
 	Zeek struct {
 		// Path is the Zeek executable path
 		Path string `json:"path"`
+		// SamplingPercentage is the percentage of traffic to process (0-100)
+		SamplingPercentage float64 `json:"sampling_percentage"`
 	} `json:"zeek"`
 }
 
@@ -91,6 +93,9 @@ func LoadConfig(configPath string) (*Config, error) {
 		config.Capture.Interface = "any"
 	}
 	// Zeek path can be empty by default
+	if config.Zeek.SamplingPercentage == 0 {
+		config.Zeek.SamplingPercentage = 100 // Default to 100% (process all traffic)
+	}
 
 	return &config, nil
 }

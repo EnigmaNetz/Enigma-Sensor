@@ -31,7 +31,7 @@ type Capturer interface {
 }
 
 type Processor interface {
-	ProcessPCAP(pcapPath string) (types.ProcessedData, error)
+	ProcessPCAP(pcapPath string, samplingPercentage float64) (types.ProcessedData, error)
 }
 
 type Uploader interface {
@@ -155,7 +155,7 @@ func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, proce
 			}
 			log.Printf("[worker] Processing PCAP file at absolute path: %s", absPCAPPath)
 
-			result, err := processor.ProcessPCAP(absPCAPPath)
+			result, err := processor.ProcessPCAP(absPCAPPath, cfg.Zeek.SamplingPercentage)
 			if err != nil {
 				log.Printf("[worker] Processing failed: %v", err)
 				// Do not delete the PCAP file on processing error

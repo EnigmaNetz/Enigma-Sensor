@@ -39,7 +39,7 @@ func toZeekPath(path string) string {
 	return strings.ReplaceAll(path, string(os.PathSeparator), "/")
 }
 
-func (p *Processor) ProcessPCAP(pcapPath string) (types.ProcessedData, error) {
+func (p *Processor) ProcessPCAP(pcapPath string, samplingPercentage float64) (types.ProcessedData, error) {
 	runDir := filepath.Dir(pcapPath)
 	zeekBaseDir := filepath.Join("zeek-windows", "zeek-runtime-win64")
 	zeekPath := filepath.Join(zeekBaseDir, "bin", "zeek.exe")
@@ -60,9 +60,13 @@ func (p *Processor) ProcessPCAP(pcapPath string) (types.ProcessedData, error) {
 	zeekPcapPath := toZeekPath(pcapPath)
 	zeekScript := toZeekPath(filepath.Join(zeekShareAbs, "site", "custom-scripts", "main.zeek"))
 
-	log.Printf("[processor] Running Zeek: %s -r %s %s Log::default_logdir=%s -C", zeekPath, zeekPcapPath, zeekScript, zeekRunDir)
+	// Prepare Zeek command arguments with sampling
+	baseArgs := []string{"-r", zeekPcapPath, zeekScript, fmt.Sprintf("Log::default_logdir=%s", zeekRunDir), "-C"}
+	zeekArgs := types.PrepareZeekArgsWithSampling(pcapPath, runDir, samplingPercentage, baseArgs)
 
-	cmd := p.execCmd("bin/zeek.exe", "-r", zeekPcapPath, zeekScript, fmt.Sprintf("Log::default_logdir=%s", zeekRunDir), "-C")
+	log.Printf("[processor] Running Zeek: %s %v", zeekPath, zeekArgs)
+
+	cmd := p.execCmd("bin/zeek.exe", zeekArgs...)
 	cmd.Dir = zeekBaseDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -81,9 +85,10 @@ func (p *Processor) ProcessPCAP(pcapPath string) (types.ProcessedData, error) {
 	}
 
 	metadata := map[string]interface{}{
-		"zeek_out_dir": runDir,
-		"timestamp":    time.Now().UTC().Format("20060102T150405Z"),
-		"pcap_path":    pcapPath,
+		"zeek_out_dir":        runDir,
+		"timestamp":           time.Now().UTC().Format("20060102T150405Z"),
+		"pcap_path":           pcapPath,
+		"sampling_percentage": samplingPercentage,
 	}
 	log.Printf("[processor] Returning results: conn.xlsx=%s, dns.xlsx=%s, metadata=%v", paths["conn.log"], paths["dns.log"], metadata)
 

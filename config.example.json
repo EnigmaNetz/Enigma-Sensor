@@ -17,6 +17,6 @@
     "upload": false
   },
   "zeek": {
-    "path": ""
+    "sampling_percentage": 100
   }
 }

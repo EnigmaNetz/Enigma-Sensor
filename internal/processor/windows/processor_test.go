@@ -87,7 +87,7 @@ func TestProcessPCAP(t *testing.T) {
 	}
 	p := NewTestProcessor(mockExecCmd, fs)
 
-	result, err := p.ProcessPCAP(pcapPath)
+	result, err := p.ProcessPCAP(pcapPath, 100)
 	if err != nil {
 		t.Fatalf("ProcessPCAP failed: %v", err)
 	}

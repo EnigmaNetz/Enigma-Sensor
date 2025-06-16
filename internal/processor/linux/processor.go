@@ -83,14 +83,17 @@ func NewProcessorWithDeps(fs FS, cmdRunner CmdRunner, zeekPath string) *Processo
 }
 
 // ProcessPCAP runs Zeek on the given PCAP, converts logs to XLSX, and returns their paths
-func (p *Processor) ProcessPCAP(pcapPath string) (types.ProcessedData, error) {
+func (p *Processor) ProcessPCAP(pcapPath string, samplingPercentage float64) (types.ProcessedData, error) {
 	// Use the directory containing the PCAP as the run directory
 	runDir := filepath.Dir(pcapPath)
 	log.Printf("[processor] Run directory: %s", runDir)
 
-	// Run Zeek directly on the provided PCAP
-	log.Printf("[processor] Running Zeek: %s -r %s Log::default_logdir=%s -C", p.zeekPath, pcapPath, runDir)
-	cmd := p.cmdRunner.Command(p.zeekPath, "-r", pcapPath, fmt.Sprintf("Log::default_logdir=%s", runDir), "-C")
+	// Prepare Zeek command with sampling if needed
+	baseArgs := []string{"-r", pcapPath, fmt.Sprintf("Log::default_logdir=%s", runDir), "-C"}
+	zeekArgs := types.PrepareZeekArgsWithSampling(pcapPath, runDir, samplingPercentage, baseArgs)
+
+	log.Printf("[processor] Running Zeek: %s %v", p.zeekPath, zeekArgs)
+	cmd := p.cmdRunner.Command(p.zeekPath, zeekArgs...)
 	cmdStdout, ok := cmd.(*realCmd)
 	if ok {
 		cmdStdout.cmd.Stdout = os.Stdout
@@ -109,9 +112,10 @@ func (p *Processor) ProcessPCAP(pcapPath string) (types.ProcessedData, error) {
 	}
 
 	metadata := map[string]interface{}{
-		"zeek_out_dir": runDir,
-		"timestamp":    time.Now().UTC().Format("20060102T150405Z"),
-		"pcap_path":    pcapPath,
+		"zeek_out_dir":        runDir,
+		"timestamp":           time.Now().UTC().Format("20060102T150405Z"),
+		"pcap_path":           pcapPath,
+		"sampling_percentage": samplingPercentage,
 	}
 	log.Printf("[processor] Returning results: conn.xlsx=%s, dns.xlsx=%s, metadata=%v", paths["conn.log"], paths["dns.log"], metadata)
 

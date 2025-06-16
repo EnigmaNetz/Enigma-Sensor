@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 )
@@ -9,7 +10,7 @@ import (
 // Processor defines the interface for platform-agnostic PCAP processing using Zeek.
 // Implementations should process the given PCAP file and return XLSX file paths for both con.log and dns.log.
 type Processor interface {
-	ProcessPCAP(pcapPath string) (ProcessedData, error)
+	ProcessPCAP(pcapPath string, samplingPercentage float64) (ProcessedData, error)
 }
 
 // ProcessedData represents the output of PCAP processing.
@@ -46,4 +47,38 @@ func RenameZeekLogsToXLSX(fs FS, runDir string, logFiles []string) (map[string]s
 		}
 	}
 	return paths, nil
+}
+
+// PrepareZeekArgsWithSampling prepares Zeek command arguments including sampling configuration
+func PrepareZeekArgsWithSampling(pcapPath, runDir string, samplingPercentage float64, baseArgs []string) []string {
+	args := make([]string, len(baseArgs))
+	copy(args, baseArgs)
+
+	// Add sampling script if sampling percentage is less than 100
+	if samplingPercentage < 100 {
+		// Try to find the sampling script in various locations
+		possiblePaths := []string{
+			"zeek-scripts/sampling.zeek",
+			filepath.Join("..", "..", "zeek-scripts", "sampling.zeek"),
+			filepath.Join(filepath.Dir(pcapPath), "..", "..", "zeek-scripts", "sampling.zeek"),
+		}
+
+		var samplingScriptPath string
+		for _, path := range possiblePaths {
+			if _, err := os.Stat(path); err == nil {
+				samplingScriptPath = path
+				break
+			}
+		}
+
+		if samplingScriptPath != "" {
+			args = append(args, fmt.Sprintf("Sampling::sampling_percentage=%.1f", samplingPercentage))
+			args = append(args, samplingScriptPath)
+			log.Printf("[processor] Added sampling script at %.1f%% from %s", samplingPercentage, samplingScriptPath)
+		} else {
+			log.Printf("[processor] Warning: sampling script not found, processing all traffic")
+		}
+	}
+
+	return args
 }

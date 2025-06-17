@@ -19,7 +19,7 @@ func TestProcessPCAP(t *testing.T) {
 		t.Skip("Test PCAP file not found; skipping integration test.")
 	}
 
-	result, err := p.ProcessPCAP(pcapPath)
+	result, err := p.ProcessPCAP(pcapPath, 100)
 	if err != nil {
 		t.Fatalf("ProcessPCAP failed: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestMetadataContent(t *testing.T) {
 	if _, err := os.Stat(pcapPath); os.IsNotExist(err) {
 		t.Skip("Test PCAP file not found; skipping integration test.")
 	}
-	result, err := p.ProcessPCAP(pcapPath)
+	result, err := p.ProcessPCAP(pcapPath, 100)
 	if err != nil {
 		t.Fatalf("ProcessPCAP failed: %v", err)
 	}

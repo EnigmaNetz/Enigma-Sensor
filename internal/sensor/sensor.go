@@ -3,11 +3,13 @@ package sensor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -31,7 +33,7 @@ type Capturer interface {
 }
 
 type Processor interface {
-	ProcessPCAP(pcapPath string) (types.ProcessedData, error)
+	ProcessPCAP(pcapPath string, samplingPercentage float64) (types.ProcessedData, error)
 }
 
 type Uploader interface {
@@ -90,6 +92,74 @@ func ensureZeekWindows() error {
 			return err
 		}
 	}
+
+	// Copy sampling script to the custom-scripts directory if it exists
+	samplingScriptSrc := "zeek-scripts/sampling.zeek"
+	samplingScriptDst := filepath.Join(zeekDir, "zeek-runtime-win64", "share", "zeek", "site", "custom-scripts", "sampling.zeek")
+
+	if _, err := os.Stat(samplingScriptSrc); err == nil {
+		srcFile, err := os.Open(samplingScriptSrc)
+		if err != nil {
+			log.Printf("[sensor] Warning: Failed to open sampling script source: %v", err)
+		} else {
+			defer srcFile.Close()
+
+			// Ensure destination directory exists
+			if err := os.MkdirAll(filepath.Dir(samplingScriptDst), 0755); err != nil {
+				log.Printf("[sensor] Warning: Failed to create sampling script destination directory: %v", err)
+			} else {
+				dstFile, err := os.Create(samplingScriptDst)
+				if err != nil {
+					log.Printf("[sensor] Warning: Failed to create sampling script destination: %v", err)
+				} else {
+					defer dstFile.Close()
+					if _, err := io.Copy(dstFile, srcFile); err != nil {
+						log.Printf("[sensor] Warning: Failed to copy sampling script: %v", err)
+					} else {
+						log.Printf("[sensor] Successfully copied sampling script to Windows Zeek runtime")
+
+						// Update main.zeek to load the sampling script
+						mainZeekPath := filepath.Join(zeekDir, "zeek-runtime-win64", "share", "zeek", "site", "custom-scripts", "main.zeek")
+						if err := addSamplingScriptToMainZeek(mainZeekPath); err != nil {
+							log.Printf("[sensor] Warning: Failed to update main.zeek: %v", err)
+						}
+					}
+				}
+			}
+		}
+	} else {
+		log.Printf("[sensor] Warning: Sampling script not found at %s", samplingScriptSrc)
+	}
+
+	return nil
+}
+
+// addSamplingScriptToMainZeek adds the sampling script load directive to main.zeek if not already present
+func addSamplingScriptToMainZeek(mainZeekPath string) error {
+	// Read the current main.zeek file
+	content, err := os.ReadFile(mainZeekPath)
+	if err != nil {
+		return fmt.Errorf("failed to read main.zeek: %w", err)
+	}
+
+	contentStr := string(content)
+	samplingLoadDirective := "@load ./sampling.zeek"
+
+	// Check if the sampling script is already loaded
+	if strings.Contains(contentStr, samplingLoadDirective) {
+		log.Printf("[sensor] Sampling script already loaded in main.zeek")
+		return nil
+	}
+
+	// Add the sampling script load directive
+	updatedContent := contentStr + "\n" + samplingLoadDirective + "\n"
+
+	// Write the updated content back
+	if err := os.WriteFile(mainZeekPath, []byte(updatedContent), 0644); err != nil {
+		return fmt.Errorf("failed to write updated main.zeek: %w", err)
+	}
+
+	log.Printf("[sensor] Added sampling script load directive to main.zeek")
 	return nil
 }
 
@@ -155,7 +225,7 @@ func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, proce
 			}
 			log.Printf("[worker] Processing PCAP file at absolute path: %s", absPCAPPath)
 
-			result, err := processor.ProcessPCAP(absPCAPPath)
+			result, err := processor.ProcessPCAP(absPCAPPath, cfg.Zeek.SamplingPercentage)
 			if err != nil {
 				log.Printf("[worker] Processing failed: %v", err)
 				// Do not delete the PCAP file on processing error

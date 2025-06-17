@@ -103,10 +103,15 @@ You can send this archive to Enigma support for troubleshooting.
   - `logging`: Log level, file path, and max size.
   - `capture`: Output directory, interval, window duration, and interface.
   - `enigma_api`: API server, API key, upload toggle (always enabled).
+  - `zeek`: Traffic sampling configuration.
   - `log_retention_days`: Number of days to keep log files. Logs older than this are deleted on startup. Default: 1
 - **How to configure:**
   1. On Windows, edit `C:\ProgramData\EnigmaSensor\config.json` after install if needed.
   2. On Linux, edit `/etc/enigma-sensor/config.json` after install if needed.
+
+### Traffic Sampling
+
+The sensor supports random sampling to reduce processing load. Configure `zeek.sampling_percentage` (0-100) to process a percentage of network connections and DNS queries. Default is 100 (no sampling).
 
 ### Logging & Log Rotation
 

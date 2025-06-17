@@ -38,7 +38,7 @@ type mockProcessor struct {
 	fail  bool
 }
 
-func (m *mockProcessor) ProcessPCAP(pcapPath string) (types.ProcessedData, error) {
+func (m *mockProcessor) ProcessPCAP(pcapPath string, samplingPercentage float64) (types.ProcessedData, error) {
 	atomic.AddInt32(m.calls, 1)
 	if m.fail {
 		return types.ProcessedData{}, errors.New("process failed")

@@ -88,6 +88,9 @@ if [ ! -f /etc/enigma-sensor/config.json ]; then
   "enigma_api": {
     "api_key": "$ENIGMA_API_KEY",
     "server": "$ENIGMA_API_URL"
+  },
+  "zeek": {
+    "sampling_percentage": 100
   }
 }
 EOF

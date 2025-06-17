@@ -83,6 +83,9 @@ begin
       '    "server": "api.enigmaai.net:443",' + #13#10 +
       '    "api_key": "' + ApiKeyPage.Values[0] + '",' + #13#10 +
       '    "upload": true' + #13#10 +
+      '  },' + #13#10 +
+      '  "zeek": {' + #13#10 +
+      '    "sampling_percentage": 100' + #13#10 +
       '  }' + #13#10 +
       '}',
       False

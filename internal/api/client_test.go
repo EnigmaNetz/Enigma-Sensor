@@ -223,18 +223,32 @@ func TestLogUploader_PrepareLogData(t *testing.T) {
 
 // TestUploadLogs_ReadFileError simulates a failure to read one of the log files and expects an error from UploadLogs.
 func TestUploadLogs_ReadFileError(t *testing.T) {
+	mock := &mockPublishClient{
+		uploadResponses: []uploadResponse{{status: "success", statusCode: 200, message: "ok", err: nil}},
+	}
 	uploader := &LogUploader{
+		client:       mock,
 		apiKey:       "test-key",
 		retryCount:   1,
 		retryDelay:   time.Millisecond,
 		compressFunc: compressData,
 	}
-	// Provide non-existent file paths
+	// Provide non-existent file paths for both logs (should error)
 	err := uploader.UploadLogs(context.Background(), LogFiles{
 		DNSPath:  "nonexistent_dns.log",
 		ConnPath: "nonexistent_conn.log",
 	})
 	assert.Error(t, err)
+
+	// Provide only missing DNS log (should succeed)
+	tmpDir := t.TempDir()
+	connPath := filepath.Join(tmpDir, "conn.log")
+	assert.NoError(t, os.WriteFile(connPath, []byte("conn data"), 0644))
+	err = uploader.UploadLogs(context.Background(), LogFiles{
+		DNSPath:  filepath.Join(tmpDir, "missing_dns.log"),
+		ConnPath: connPath,
+	})
+	assert.NoError(t, err)
 }
 
 // TestUploadLogs_CompressError simulates a compression failure and expects an error from UploadLogs.

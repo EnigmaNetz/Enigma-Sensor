@@ -131,13 +131,17 @@ func (u *LogUploader) UploadLogs(ctx context.Context, files LogFiles) error {
 
 // prepareLogData reads, compresses, and combines the log files
 func (u *LogUploader) prepareLogData(files LogFiles) ([]byte, error) {
-	// Read DNS log
+	// Read DNS log (allow missing)
 	dnsData, err := os.ReadFile(files.DNSPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read DNS log: %v", err)
+		if os.IsNotExist(err) {
+			dnsData = []byte{} // treat missing DNS log as empty
+		} else {
+			return nil, fmt.Errorf("failed to read DNS log: %v", err)
+		}
 	}
 
-	// Read connection log
+	// Read connection log (required)
 	connData, err := os.ReadFile(files.ConnPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read connection log: %v", err)

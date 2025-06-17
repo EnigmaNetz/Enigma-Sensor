@@ -39,6 +39,21 @@ func toZeekPath(path string) string {
 	return strings.ReplaceAll(path, string(os.PathSeparator), "/")
 }
 
+// prepareWindowsZeekArgsWithSampling prepares Zeek arguments for Windows using the copied sampling script
+func prepareWindowsZeekArgsWithSampling(runDir string, samplingPercentage float64, baseArgs []string) []string {
+	args := make([]string, len(baseArgs))
+	copy(args, baseArgs)
+
+	// Add sampling percentage parameter if sampling is enabled
+	// The sampling script is already loaded via main.zeek
+	if samplingPercentage < 100 {
+		args = append(args, fmt.Sprintf("Sampling::sampling_percentage=%.1f", samplingPercentage))
+		log.Printf("[processor] Added sampling configuration at %.1f%% (script loaded via main.zeek)", samplingPercentage)
+	}
+
+	return args
+}
+
 func (p *Processor) ProcessPCAP(pcapPath string, samplingPercentage float64) (types.ProcessedData, error) {
 	runDir := filepath.Dir(pcapPath)
 	zeekBaseDir := filepath.Join("zeek-windows", "zeek-runtime-win64")
@@ -62,7 +77,9 @@ func (p *Processor) ProcessPCAP(pcapPath string, samplingPercentage float64) (ty
 
 	// Prepare Zeek command arguments with sampling
 	baseArgs := []string{"-r", zeekPcapPath, zeekScript, fmt.Sprintf("Log::default_logdir=%s", zeekRunDir), "-C"}
-	zeekArgs := types.PrepareZeekArgsWithSampling(pcapPath, runDir, samplingPercentage, baseArgs)
+
+	// For Windows, we handle sampling by modifying the search paths to use absolute paths
+	zeekArgs := prepareWindowsZeekArgsWithSampling(runDir, samplingPercentage, baseArgs)
 
 	log.Printf("[processor] Running Zeek: %s %v", zeekPath, zeekArgs)
 

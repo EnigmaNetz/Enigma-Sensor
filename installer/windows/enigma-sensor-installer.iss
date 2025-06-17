@@ -15,6 +15,7 @@ PrivilegesRequired=admin
 Source: "..\\..\\bin\\enigma-sensor-windows-amd64.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\\..\\bin\\nssm.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "zeek-runtime-win64.zip"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\\..\\zeek-scripts\\*"; DestDir: "{app}\\zeek-scripts"; Flags: ignoreversion recursesubdirs
 
 [Dirs]
 Name: "C:\ProgramData\EnigmaSensor\logs"; Flags: uninsalwaysuninstall

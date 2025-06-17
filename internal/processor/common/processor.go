@@ -50,6 +50,7 @@ func RenameZeekLogsToXLSX(fs FS, runDir string, logFiles []string) (map[string]s
 }
 
 // PrepareZeekArgsWithSampling prepares Zeek command arguments including sampling configuration
+// This is primarily used by Linux; Windows handles sampling via main.zeek
 func PrepareZeekArgsWithSampling(pcapPath, runDir string, samplingPercentage float64, baseArgs []string) []string {
 	args := make([]string, len(baseArgs))
 	copy(args, baseArgs)

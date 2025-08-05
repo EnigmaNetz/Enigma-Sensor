@@ -97,9 +97,10 @@ func minimalConfig(loop bool) *config.Config {
 			LogRetentionDays: 1,
 		},
 		EnigmaAPI: struct {
-			Server string `json:"server"`
-			APIKey string `json:"api_key"`
-			Upload bool   `json:"upload"`
+			Server           string `json:"server"`
+			APIKey           string `json:"api_key"`
+			Upload           bool   `json:"upload"`
+			MaxPayloadSizeMB int64  `json:"max_payload_size_mb"`
 		}{},
 	}
 }

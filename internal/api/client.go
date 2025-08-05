@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bufio"
 	"bytes"
 	"compress/zlib"
 	"context"
@@ -9,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -26,11 +28,12 @@ type grpcClient interface {
 
 // LogUploader handles uploading logs to the gRPC server
 type LogUploader struct {
-	client       grpcClient
-	apiKey       string
-	retryCount   int
-	retryDelay   time.Duration
-	compressFunc func([]byte) ([]byte, error) // for DI/testing
+	client           grpcClient
+	apiKey           string
+	retryCount       int
+	retryDelay       time.Duration
+	compressFunc     func([]byte) ([]byte, error) // for DI/testing
+	maxPayloadSizeMB int64                        // maximum payload size before chunking
 }
 
 // LogFiles contains paths to the log files to upload
@@ -54,7 +57,7 @@ type grpcClientImpl struct {
 }
 
 // NewLogUploader creates a new log uploader instance
-func NewLogUploader(serverAddr string, apiKey string) (*LogUploader, error) {
+func NewLogUploader(serverAddr string, apiKey string, maxPayloadSizeMB int64) (*LogUploader, error) {
 	var opts []grpc.DialOption
 
 	// Always use SSL credentials with system trust store
@@ -74,11 +77,12 @@ func NewLogUploader(serverAddr string, apiKey string) (*LogUploader, error) {
 	}
 
 	return &LogUploader{
-		client:       &grpcClientImpl{client: pb.NewPublishServiceClient(conn)},
-		apiKey:       apiKey,
-		retryCount:   3,
-		retryDelay:   5 * time.Second,
-		compressFunc: compressData,
+		client:           &grpcClientImpl{client: pb.NewPublishServiceClient(conn)},
+		apiKey:           apiKey,
+		retryCount:       3,
+		retryDelay:       5 * time.Second,
+		compressFunc:     compressData,
+		maxPayloadSizeMB: maxPayloadSizeMB,
 	}, nil
 }
 
@@ -106,6 +110,23 @@ func (u *LogUploader) UploadLogs(ctx context.Context, files LogFiles) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
+
+	// Check if files need to be chunked
+	totalSizeMB, err := u.calculateTotalFileSize(files)
+	if err != nil {
+		return fmt.Errorf("failed to calculate file size: %v", err)
+	}
+
+	if totalSizeMB > u.maxPayloadSizeMB {
+		return u.uploadLogsChunked(ctx, files)
+	}
+
+	// Use existing upload path for smaller files
+	return u.uploadLogsSingle(ctx, files)
+}
+
+// uploadLogsSingle uploads logs as a single payload (existing behavior)
+func (u *LogUploader) uploadLogsSingle(ctx context.Context, files LogFiles) error {
 	// Read and compress log files
 	combinedData, err := u.prepareLogData(files)
 	if err != nil {
@@ -127,6 +148,73 @@ func (u *LogUploader) UploadLogs(ctx context.Context, files LogFiles) error {
 	}
 
 	return fmt.Errorf("failed to upload after %d retries: %w", u.retryCount, lastErr)
+}
+
+// uploadLogsChunked splits files and uploads each chunk separately
+func (u *LogUploader) uploadLogsChunked(ctx context.Context, files LogFiles) error {
+	// Calculate chunk size (90% of max to leave room for compression variance)
+	chunkSizeBytes := (u.maxPayloadSizeMB * 1024 * 1024 * 90) / 100
+
+	// Split DNS file if present
+	dnsChunks, err := splitCSVFile(files.DNSPath, chunkSizeBytes/2)
+	if err != nil {
+		return fmt.Errorf("failed to split DNS file: %v", err)
+	}
+
+	// Split connection file
+	connChunks, err := splitCSVFile(files.ConnPath, chunkSizeBytes/2)
+	if err != nil {
+		return fmt.Errorf("failed to split connection file: %v", err)
+	}
+
+	// Determine maximum chunks needed
+	maxChunks := len(connChunks)
+	if len(dnsChunks) > maxChunks {
+		maxChunks = len(dnsChunks)
+	}
+
+	// Track temp files for cleanup
+	var tempFiles []string
+	defer func() {
+		for _, file := range tempFiles {
+			if file != files.DNSPath && file != files.ConnPath {
+				os.Remove(file)
+			}
+		}
+	}()
+
+	// Upload each chunk
+	for i := 0; i < maxChunks; i++ {
+		chunkFiles := LogFiles{}
+
+		// Set DNS chunk path (or empty if no more chunks)
+		if i < len(dnsChunks) && dnsChunks[i] != "" {
+			chunkFiles.DNSPath = dnsChunks[i]
+			if dnsChunks[i] != files.DNSPath {
+				tempFiles = append(tempFiles, dnsChunks[i])
+			}
+		}
+
+		// Set connection chunk path (or empty if no more chunks)
+		if i < len(connChunks) && connChunks[i] != "" {
+			chunkFiles.ConnPath = connChunks[i]
+			if connChunks[i] != files.ConnPath {
+				tempFiles = append(tempFiles, connChunks[i])
+			}
+		}
+
+		// Skip empty chunks
+		if chunkFiles.DNSPath == "" && chunkFiles.ConnPath == "" {
+			continue
+		}
+
+		// Upload this chunk
+		if err := u.uploadLogsSingle(ctx, chunkFiles); err != nil {
+			return fmt.Errorf("failed to upload chunk %d: %v", i+1, err)
+		}
+	}
+
+	return nil
 }
 
 // prepareLogData reads, compresses, and combines the log files
@@ -207,4 +295,130 @@ func compressData(data []byte) ([]byte, error) {
 	}
 
 	return buf.Bytes(), nil
+}
+
+// calculateTotalFileSize calculates the total size of log files in MB
+func (u *LogUploader) calculateTotalFileSize(files LogFiles) (int64, error) {
+	var totalSize int64
+
+	// Check DNS file size (optional)
+	if files.DNSPath != "" {
+		if stat, err := os.Stat(files.DNSPath); err == nil {
+			totalSize += stat.Size()
+		} else if !os.IsNotExist(err) {
+			return 0, fmt.Errorf("failed to stat DNS file: %v", err)
+		}
+	}
+
+	// Check conn file size (required)
+	if stat, err := os.Stat(files.ConnPath); err != nil {
+		return 0, fmt.Errorf("failed to stat connection file: %v", err)
+	} else {
+		totalSize += stat.Size()
+	}
+
+	// Convert to MB
+	return totalSize / (1024 * 1024), nil
+}
+
+// splitCSVFile splits a CSV file into chunks of specified size
+func splitCSVFile(filePath string, maxSizeBytes int64) ([]string, error) {
+	if filePath == "" {
+		return nil, nil // Skip empty files
+	}
+
+	file, err := os.Open(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil // Skip missing files
+		}
+		return nil, fmt.Errorf("failed to open file %s: %v", filePath, err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+
+	// Read header
+	if !scanner.Scan() {
+		return []string{filePath}, nil // Return original file if empty
+	}
+	header := scanner.Text()
+
+	var chunks []string
+	var currentChunk []string
+	var currentSize int64
+	chunkNum := 1
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		lineSize := int64(len(line) + 1) // +1 for newline
+
+		// Start new chunk if size exceeded
+		if currentSize > 0 && currentSize+lineSize > maxSizeBytes {
+			chunkPath, err := writeChunk(filePath, chunkNum, header, currentChunk)
+			if err != nil {
+				return nil, err
+			}
+			chunks = append(chunks, chunkPath)
+
+			currentChunk = currentChunk[:0] // Reset slice
+			currentSize = int64(len(header) + 1)
+			chunkNum++
+		}
+
+		currentChunk = append(currentChunk, line)
+		currentSize += lineSize
+	}
+
+	// Write final chunk if we have data
+	if len(currentChunk) > 0 {
+		chunkPath, err := writeChunk(filePath, chunkNum, header, currentChunk)
+		if err != nil {
+			return nil, err
+		}
+		chunks = append(chunks, chunkPath)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("error reading file %s: %v", filePath, err)
+	}
+
+	// If no chunks were created, return original file
+	if len(chunks) == 0 {
+		return []string{filePath}, nil
+	}
+
+	return chunks, nil
+}
+
+// writeChunk writes a chunk of CSV data to a temporary file
+func writeChunk(originalPath string, chunkNum int, header string, lines []string) (string, error) {
+	dir := filepath.Dir(originalPath)
+	base := filepath.Base(originalPath)
+	ext := filepath.Ext(base)
+	name := strings.TrimSuffix(base, ext)
+
+	chunkPath := filepath.Join(dir, fmt.Sprintf("%s_chunk_%d%s", name, chunkNum, ext))
+
+	file, err := os.OpenFile(chunkPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	if err != nil {
+		return "", fmt.Errorf("failed to create chunk file: %v", err)
+	}
+	defer file.Close()
+
+	writer := bufio.NewWriter(file)
+
+	// Write header
+	if _, err := writer.WriteString(header + "\n"); err != nil {
+		return "", fmt.Errorf("failed to write header: %v", err)
+	}
+
+	// Write lines
+	for _, line := range lines {
+		if _, err := writer.WriteString(line + "\n"); err != nil {
+			return "", fmt.Errorf("failed to write line: %v", err)
+		}
+	}
+
+	return chunkPath, writer.Flush()
 }

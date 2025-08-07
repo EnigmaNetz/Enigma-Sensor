@@ -137,21 +137,21 @@ The sensor supports automatic log rotation and compression. Configure these opti
 
 By default, the sensor uses the production API host (`api.enigmaai.net:443`).
 
-To use the staging or development API host (`dev.getenigma.ai:443`):
+To use the staging or development API host (`api.staging.getenigma.ai:443`):
 
 - **Windows:**
   1. Open `C:\ProgramData\EnigmaSensor\config.json` in a text editor (as Administrator).
-  2. Change the value of `enigma_api.server` to `dev.getenigma.ai:443`.
+  2. Change the value of `enigma_api.server` to `api.staging.getenigma.ai:443`.
 - **Linux/macOS:**
   1. Open your `config.json` in a text editor.
-  2. Change the value of `enigma_api.server` to `dev.getenigma.ai:443`.
+  2. Change the value of `enigma_api.server` to `api.staging.getenigma.ai:443`.
 
 Example:
 
 ```json
 {
   "enigma_api": {
-    "server": "dev.getenigma.ai:443",
+    "server": "api.staging.getenigma.ai:443",
     "api_key": "YOUR_API_KEY",
     "upload": true
   }

@@ -40,6 +40,8 @@ type Config struct {
 		APIKey string `json:"api_key"`
 		// Upload is whether to upload captured data to the Enigma API
 		Upload bool `json:"upload"`
+		// MaxPayloadSizeMB is the maximum size of payload before chunking (default: 25MB)
+		MaxPayloadSizeMB int64 `json:"max_payload_size_mb"`
 	} `json:"enigma_api"`
 
 	// Zeek configuration
@@ -85,6 +87,9 @@ func LoadConfig(configPath string) (*Config, error) {
 	}
 	if config.EnigmaAPI.Upload == false {
 		config.EnigmaAPI.Upload = false
+	}
+	if config.EnigmaAPI.MaxPayloadSizeMB == 0 {
+		config.EnigmaAPI.MaxPayloadSizeMB = 25 // 25MB default
 	}
 	if config.Capture.Loop != true {
 		config.Capture.Loop = false

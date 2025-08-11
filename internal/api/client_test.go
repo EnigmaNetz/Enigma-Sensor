@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -346,4 +347,178 @@ func TestUploadLogs_410Gone(t *testing.T) {
 	if !errors.Is(err, ErrAPIGone) {
 		t.Fatalf("expected error to be ErrAPIGone, got: %v", err)
 	}
+}
+
+// TestCalculateTotalFileSize tests the file size calculation functionality
+func TestCalculateTotalFileSize(t *testing.T) {
+	// Create temporary test files
+	tempDir := t.TempDir()
+
+	dnsFile := filepath.Join(tempDir, "dns.csv")
+	connFile := filepath.Join(tempDir, "conn.csv")
+
+	// Write test data
+	dnsData := "header1,header2\nvalue1,value2\n"
+	connData := "header1,header2\nvalue1,value2\nvalue3,value4\n"
+
+	require.NoError(t, os.WriteFile(dnsFile, []byte(dnsData), 0600))
+	require.NoError(t, os.WriteFile(connFile, []byte(connData), 0600))
+
+	uploader := &LogUploader{maxPayloadSizeMB: 25}
+
+	files := LogFiles{
+		DNSPath:  dnsFile,
+		ConnPath: connFile,
+	}
+
+	sizeMB, err := uploader.calculateTotalFileSize(files)
+	require.NoError(t, err)
+
+	// Should be 0 MB for small test files
+	assert.Equal(t, int64(0), sizeMB)
+
+	// Test with missing DNS file
+	files.DNSPath = ""
+	sizeMB, err = uploader.calculateTotalFileSize(files)
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(0), sizeMB)
+}
+
+// TestSplitCSVFile tests the CSV file splitting functionality
+func TestSplitCSVFile(t *testing.T) {
+	tempDir := t.TempDir()
+	testFile := filepath.Join(tempDir, "test.csv")
+
+	// Create test CSV with header and multiple rows
+	content := "timestamp,src_ip,dst_ip,protocol\n"
+	for i := 0; i < 100; i++ {
+		content += "2023-01-01,192.168.1.1,10.0.0.1,tcp\n"
+	}
+
+	require.NoError(t, os.WriteFile(testFile, []byte(content), 0600))
+
+	tests := []struct {
+		name              string
+		maxSizeBytes      int64
+		minExpectedChunks int
+	}{
+		{"no_split", 10000, 1},     // Large enough to fit everything
+		{"split_multiple", 500, 2}, // Small enough to force splitting
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			chunks, err := splitCSVFile(testFile, tt.maxSizeBytes)
+			require.NoError(t, err)
+
+			assert.GreaterOrEqual(t, len(chunks), tt.minExpectedChunks)
+
+			// Verify each chunk has header
+			for i, chunkPath := range chunks {
+				data, err := os.ReadFile(chunkPath)
+				require.NoError(t, err)
+
+				lines := strings.Split(string(data), "\n")
+				assert.GreaterOrEqual(t, len(lines), 2, "Chunk %d should have at least header and one data line", i)
+
+				assert.Equal(t, "timestamp,src_ip,dst_ip,protocol", lines[0], "Chunk %d missing correct header", i)
+
+				// Clean up chunk files (except original)
+				if chunkPath != testFile {
+					os.Remove(chunkPath)
+				}
+			}
+		})
+	}
+}
+
+// TestUploadLogsChunking tests that large files trigger chunking behavior
+func TestUploadLogsChunking(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// Create large test files that will exceed threshold
+	dnsFile := filepath.Join(tempDir, "dns.csv")
+	connFile := filepath.Join(tempDir, "conn.csv")
+
+	// Create files with enough data to trigger chunking (>1MB each)
+	largeContent := "timestamp,src_ip,dst_ip,protocol\n"
+	for i := 0; i < 50000; i++ {
+		largeContent += "2023-01-01,192.168.1.1,10.0.0.1,tcp\n"
+	}
+
+	require.NoError(t, os.WriteFile(dnsFile, []byte(largeContent), 0600))
+	require.NoError(t, os.WriteFile(connFile, []byte(largeContent), 0600))
+
+	// Mock client that records upload calls
+	mockClient := &mockPublishClient{
+		uploadResponses: []uploadResponse{
+			{"success", 200, "ok", nil},
+			{"success", 200, "ok", nil},
+			{"success", 200, "ok", nil},
+			{"success", 200, "ok", nil},
+		},
+	}
+
+	uploader := &LogUploader{
+		client:           mockClient,
+		apiKey:           "test-key",
+		retryCount:       1,
+		retryDelay:       time.Millisecond,
+		compressFunc:     compressData,
+		maxPayloadSizeMB: 1, // 1MB threshold to force chunking
+	}
+
+	files := LogFiles{
+		DNSPath:  dnsFile,
+		ConnPath: connFile,
+	}
+
+	ctx := context.Background()
+	err := uploader.UploadLogs(ctx, files)
+	require.NoError(t, err)
+
+	// Should have made multiple upload calls due to chunking
+	assert.GreaterOrEqual(t, mockClient.currentCall, 2, "Expected multiple upload calls due to chunking")
+}
+
+// TestUploadLogsSinglePath tests that small files use the single upload path
+func TestUploadLogsSinglePath(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// Create small test files that won't trigger chunking
+	dnsFile := filepath.Join(tempDir, "dns.csv")
+	connFile := filepath.Join(tempDir, "conn.csv")
+
+	smallContent := "timestamp,src_ip,dst_ip,protocol\nvalue1,value2,value3,value4\n"
+
+	require.NoError(t, os.WriteFile(dnsFile, []byte(smallContent), 0600))
+	require.NoError(t, os.WriteFile(connFile, []byte(smallContent), 0600))
+
+	mockClient := &mockPublishClient{
+		uploadResponses: []uploadResponse{
+			{"success", 200, "ok", nil},
+		},
+	}
+
+	uploader := &LogUploader{
+		client:           mockClient,
+		apiKey:           "test-key",
+		retryCount:       1,
+		retryDelay:       time.Millisecond,
+		compressFunc:     compressData,
+		maxPayloadSizeMB: 25, // Large threshold, won't trigger chunking
+	}
+
+	files := LogFiles{
+		DNSPath:  dnsFile,
+		ConnPath: connFile,
+	}
+
+	ctx := context.Background()
+	err := uploader.UploadLogs(ctx, files)
+	require.NoError(t, err)
+
+	// Should have made exactly one upload call
+	assert.Equal(t, 1, mockClient.currentCall)
 }

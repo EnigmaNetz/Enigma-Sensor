@@ -1,0 +1,52 @@
+# Simplified Dockerfile for Performance Testing
+FROM ubuntu:22.04
+
+# Set non-interactive mode to avoid prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install dependencies including Zeek for log analysis
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tcpdump \
+    ca-certificates \
+    curl \
+    net-tools \
+    iputils-ping \
+    wget \
+    gnupg \
+    software-properties-common \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Zeek from official repository
+RUN curl -fsSL https://download.opensuse.org/repositories/security:zeek/xUbuntu_22.04/Release.key | gpg --dearmor | tee /etc/apt/trusted.gpg.d/security_zeek.gpg \
+    && echo "deb http://download.opensuse.org/repositories/security:/zeek/xUbuntu_22.04/ /" | tee /etc/apt/sources.list.d/security:zeek.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends zeek \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create app directory
+WORKDIR /app
+
+# Copy sensor binary
+COPY bin/enigma-sensor /app/bin/enigma-sensor
+
+# Copy configuration file  
+COPY loadtest/configs/sensor-config.json /app/config.json
+
+# Copy Zeek scripts
+COPY zeek-scripts/ /app/zeek-scripts/
+
+# Create necessary directories with proper permissions
+RUN mkdir -p /app/captures /app/logs /app/bin /app/loadtest/configs && \
+    chmod 777 /app/captures /app/logs
+
+# Make sensor executable
+RUN chmod +x /app/bin/enigma-sensor
+
+# Set up Zeek environment
+ENV ZEEK_SCRIPTS_PATH=/app/zeek-scripts
+
+# Run as root to allow packet capture (needed for tcpdump/packet capture)
+USER root
+
+# Default command
+CMD ["/app/bin/enigma-sensor"]

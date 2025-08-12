@@ -1,0 +1,74 @@
+services:
+  # Enigma sensor - main component under test
+  sensor:
+    build:
+      context: ../
+      dockerfile: loadtest/Dockerfile.sensor
+    container_name: enigma-sensor
+    privileged: true
+    network_mode: host
+    volumes:
+      - ./logs:/app/logs
+      - ./captures:/app/captures
+    environment:
+      - LOG_LEVEL=INFO
+    restart: unless-stopped
+
+  # HTTP load generators using curl
+  http-load:
+    image: curlimages/curl:latest
+    command: |
+      sh -c "
+        rate=${HTTP_RPS:-10};
+        duration=${TEST_DURATION:-60};
+        concurrent_limit=50;
+        echo 'Starting HTTP load: '\$${rate}' req/s for '\$${duration}'s';
+        end_time=\$$((\$$(date +%s) + duration));
+        count=0;
+        while [ \$$(date +%s) -lt \$$end_time ]; do
+          batch_size=\$$((\$${rate} < \$${concurrent_limit} ? \$${rate} : \$${concurrent_limit}));
+          for i in \$$(seq 1 \$$batch_size); do
+            curl -o /dev/null -s --connect-timeout 2 --max-time 5 http://target-server/ &
+            count=\$$((count + 1));
+          done;
+          wait;
+          sleep 1;
+        done;
+        echo 'HTTP load completed: '\$$count' requests sent'
+      "
+    depends_on:
+      - target-server
+    deploy:
+      replicas: ${HTTP_GENERATORS:-2}
+
+  # DNS load generators using dig
+  dns-load:
+    image: alpine:latest
+    command: |
+      sh -c "
+        apk add --no-cache bind-tools > /dev/null 2>&1;
+        rate=${DNS_QPS:-20};
+        duration=${TEST_DURATION:-60};
+        end_time=\$$((\$$(date +%s) + duration));
+        domains='google.com github.com stackoverflow.com reddit.com';
+        echo 'Starting DNS load: '\$${rate}' q/s for '\$${duration}'s';
+        while [ \$$(date +%s) -lt \$$end_time ]; do
+          for i in \$$(seq 1 \$$rate); do
+            domain=\$$(echo \$$domains | cut -d' ' -f\$$(((\$$i % 4) + 1)));
+            dig @8.8.8.8 \$$domain +short > /dev/null 2>&1 &
+          done;
+          sleep 1;
+          wait;
+        done;
+        echo 'DNS load completed'
+      "
+    deploy:
+      replicas: ${DNS_GENERATORS:-2}
+
+  # Target server
+  target-server:
+    image: nginx:alpine
+    container_name: target-server
+    ports:
+      - "8080:80"
+

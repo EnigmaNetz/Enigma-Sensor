@@ -20,18 +20,51 @@ func TestWindowsCapturer_Capture_Success(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Create a temporary directory for testing instead of hardcoded path
+	tempDir := t.TempDir()
 	config := common.CaptureConfig{
 		CaptureWindow:   1 * time.Second,
 		CaptureInterval: 1 * time.Second,
-		OutputDir:       "C:/tmp",
+		OutputDir:       tempDir,
 		Interface:       "1",
 	}
 
 	// Patch commandContext to record all command invocations
 	origCommandContext := commandContext
 	winArgsList = nil
+	var etlFilePath string
 	commandContext = func(name string, arg ...string) *exec.Cmd {
 		winArgsList = append(winArgsList, append([]string{name}, arg...))
+
+		// Handle pktmon start to create ETL file
+		if name == "pktmon" && len(arg) > 0 && arg[0] == "start" {
+			// Extract ETL file path from arguments and create a dummy file
+			for i, a := range arg {
+				if a == "--file" && i+1 < len(arg) {
+					etlFilePath = arg[i+1]
+					// Create the ETL file with some dummy content immediately
+					go func() {
+						time.Sleep(200 * time.Millisecond) // Simulate file creation delay
+						if err := os.WriteFile(etlFilePath, []byte("dummy ETL content"), 0644); err != nil {
+							t.Logf("Failed to create dummy ETL file: %v", err)
+						}
+					}()
+					break
+				}
+			}
+		}
+
+		// Handle pktmon etl2pcap/etl2pcapng to create PCAPNG file
+		if name == "pktmon" && len(arg) > 0 && (arg[0] == "etl2pcap" || arg[0] == "etl2pcapng") {
+			if len(arg) >= 4 && arg[2] == "-o" {
+				// Create dummy PCAPNG file
+				pcapngPath := arg[3]
+				if err := os.WriteFile(pcapngPath, []byte("dummy PCAPNG content"), 0644); err != nil {
+					t.Logf("Failed to create dummy PCAPNG file: %v", err)
+				}
+			}
+		}
+
 		return exec.Command("cmd", "/C", "echo")
 	}
 	defer func() { commandContext = origCommandContext }()
@@ -60,10 +93,12 @@ func TestWindowsCapturer_Capture_Error(t *testing.T) {
 		return exec.Command("cmd", "/C", "exit", "1")
 	}
 	defer func() { commandContext = origCommandContext }()
+	// Create a temporary directory for testing instead of hardcoded path
+	tempDir := t.TempDir()
 	config := common.CaptureConfig{
 		CaptureWindow:   1 * time.Second,
 		CaptureInterval: 1 * time.Second,
-		OutputDir:       "C:/tmp",
+		OutputDir:       tempDir,
 	}
 	_, err := c.Capture(context.Background(), config)
 	if err == nil {

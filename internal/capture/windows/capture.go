@@ -34,7 +34,7 @@ func (c *WindowsCapturer) Capture(ctx context.Context, config common.CaptureConf
 	if err == nil {
 		for _, entry := range entries {
 			if !entry.IsDir() && filepath.Ext(entry.Name()) == ".etl" {
-				os.Remove(c.outputDir + "/" + entry.Name())
+				os.Remove(filepath.Join(c.outputDir, entry.Name()))
 			}
 		}
 	}

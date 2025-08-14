@@ -325,7 +325,8 @@ The Windows installer sets up Enigma Sensor as a Windows service using NSSM with
      - Detect your Linux distribution and install dependencies (currently supports Debian/Ubuntu; CentOS/RHEL support coming soon).
      - Install `zeek` and `tcpdump` if missing.
      - Install the sensor `.deb` package (on Debian/Ubuntu).
-     - Create `/etc/enigma-sensor/config.json` if it does not exist.
+     - Create `/etc/enigma-sensor/config.json` with continuous operation enabled if it does not exist.
+     - Create necessary log and capture directories.
      - Restart the sensor service (if systemd is present).
 
-4. **Edit `/etc/enigma-sensor/config.json`** to adjust settings as needed.
+4. **Edit `/etc/enigma-sensor/config.json`** to adjust settings as needed. The default configuration enables continuous operation with 60-second capture windows.

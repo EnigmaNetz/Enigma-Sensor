@@ -85,9 +85,23 @@ mkdir -p /etc/enigma-sensor
 if [ ! -f /etc/enigma-sensor/config.json ]; then
   cat > /etc/enigma-sensor/config.json <<EOF
 {
+  "logging": {
+    "level": "info",
+    "file": "/var/log/enigma-sensor/enigma-sensor.log",
+    "max_size_mb": 100,
+    "log_retention_days": 7
+  },
+  "capture": {
+    "output_dir": "/var/lib/enigma-sensor/captures",
+    "window_seconds": 60,
+    "loop": true,
+    "interface": "any"
+  },
   "enigma_api": {
     "api_key": "$ENIGMA_API_KEY",
-    "server": "$ENIGMA_API_URL"
+    "server": "$ENIGMA_API_URL",
+    "upload": true,
+    "max_payload_size_mb": 25
   },
   "zeek": {
     "sampling_percentage": 100
@@ -95,6 +109,13 @@ if [ ! -f /etc/enigma-sensor/config.json ]; then
 }
 EOF
 fi
+
+# --- Create necessary directories ---
+mkdir -p /var/log/enigma-sensor
+mkdir -p /var/lib/enigma-sensor/captures
+chown -R root:root /var/log/enigma-sensor /var/lib/enigma-sensor
+chmod 755 /var/log/enigma-sensor /var/lib/enigma-sensor
+chmod 644 /var/lib/enigma-sensor/captures
 
 # --- Restart service if systemd is present ---
 if command -v systemctl >/dev/null 2>&1; then

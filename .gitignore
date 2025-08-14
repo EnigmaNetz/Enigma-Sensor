@@ -7,3 +7,5 @@ coverage.out
 .out
 Output/
 zeek-windows/
+.claude/
+results/

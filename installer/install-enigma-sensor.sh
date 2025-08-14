@@ -3,7 +3,7 @@ set -eu
 
 # --- User-provided variables ---
 ENIGMA_API_KEY="${ENIGMA_API_KEY:-}"
-ENIGMA_API_URL="${ENIGMA_API_URL:-https://api.enigmaai.net}"
+ENIGMA_API_URL="${ENIGMA_API_URL:-api.enigmaai.net:443}"
 
 if [ -z "$ENIGMA_API_KEY" ]; then
   echo "ENIGMA_API_KEY environment variable not set."

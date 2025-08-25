@@ -15,9 +15,12 @@ type Processor interface {
 
 // ProcessedData represents the output of PCAP processing.
 type ProcessedData struct {
-	ConnPath string                 // XLSX file path for conn.xlsx
-	DNSPath  string                 // XLSX file path for dns.xlsx
-	Metadata map[string]interface{} // Additional processing metadata
+	ConnPath   string                 // XLSX file path for conn.xlsx
+	DNSPath    string                 // XLSX file path for dns.xlsx
+	DHCPPath   string                 // XLSX file path for dhcp.xlsx
+	JA3JA4Path string                 // XLSX file path for ja3_ja4.xlsx
+	JA4SPath   string                 // XLSX file path for ja4s.xlsx
+	Metadata   map[string]interface{} // Additional processing metadata
 }
 
 // FS abstracts file system operations for testability (matches Linux, used by Windows with os).

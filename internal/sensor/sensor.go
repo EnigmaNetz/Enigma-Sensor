@@ -231,12 +231,15 @@ func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, proce
 				// Do not delete the PCAP file on processing error
 				continue
 			}
-			log.Printf("[worker] Processing complete. Conn XLSX: %s, DNS XLSX: %s, Metadata: %+v", result.ConnPath, result.DNSPath, result.Metadata)
+			log.Printf("[worker] Processing complete. Conn XLSX: %s, DNS XLSX: %s, DHCP XLSX: %s, JA3JA4 XLSX: %s, JA4S XLSX: %s, Metadata: %+v", result.ConnPath, result.DNSPath, result.DHCPPath, result.JA3JA4Path, result.JA4SPath, result.Metadata)
 
 			if uploader != nil {
 				uploadErr := uploader.UploadLogs(ctx, api.LogFiles{
-					DNSPath:  result.DNSPath,
-					ConnPath: result.ConnPath,
+					DNSPath:    result.DNSPath,
+					ConnPath:   result.ConnPath,
+					DHCPPath:   result.DHCPPath,
+					JA3JA4Path: result.JA3JA4Path,
+					JA4SPath:   result.JA4SPath,
 				})
 				if uploadErr != nil {
 					if uploadErr == api.ErrAPIGone {

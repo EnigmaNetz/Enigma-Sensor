@@ -94,7 +94,7 @@ func (p *Processor) ProcessPCAP(pcapPath string, samplingPercentage float64) (ty
 	}
 	log.Printf("[processor] Zeek execution completed successfully.")
 
-	logFiles := []string{"conn.log", "dns.log"}
+	logFiles := []string{"conn.log", "dns.log", "dhcp.log", "ja3_ja4.log", "ja4s.log"}
 	paths, err := types.RenameZeekLogsToXLSX(p.fs, runDir, logFiles)
 	if err != nil {
 		log.Printf("[processor] Failed to rename Zeek logs: %v", err)
@@ -107,11 +107,14 @@ func (p *Processor) ProcessPCAP(pcapPath string, samplingPercentage float64) (ty
 		"pcap_path":           pcapPath,
 		"sampling_percentage": samplingPercentage,
 	}
-	log.Printf("[processor] Returning results: conn.xlsx=%s, dns.xlsx=%s, metadata=%v", paths["conn.log"], paths["dns.log"], metadata)
+	log.Printf("[processor] Returning results: conn.xlsx=%s, dns.xlsx=%s, dhcp.xlsx=%s, ja3_ja4.xlsx=%s, ja4s.xlsx=%s, metadata=%v", paths["conn.log"], paths["dns.log"], paths["dhcp.log"], paths["ja3_ja4.log"], paths["ja4s.log"], metadata)
 
 	return types.ProcessedData{
-		ConnPath: paths["conn.log"],
-		DNSPath:  paths["dns.log"],
-		Metadata: metadata,
+		ConnPath:   paths["conn.log"],
+		DNSPath:    paths["dns.log"],
+		DHCPPath:   paths["dhcp.log"],
+		JA3JA4Path: paths["ja3_ja4.log"],
+		JA4SPath:   paths["ja4s.log"],
+		Metadata:   metadata,
 	}, nil
 }

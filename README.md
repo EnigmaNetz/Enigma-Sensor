@@ -301,7 +301,7 @@ The Windows installer sets up Enigma Sensor as a Windows service using NSSM with
 
 ## Installing on Linux
 
-1. **Download the latest Linux release zip** from the [GitHub Releases](https://github.com/<your-org>/<your-repo>/releases) page. The file will be named like:
+1. **Download the latest Linux release zip** from the [GitHub Releases](https://github.com/EnigmaNetz/Enigma-Sensor/releases/latest) page. The file will be named like:
 
    ```
    enigma-sensor-<version>-linux-release.zip

@@ -38,14 +38,20 @@ type LogUploader struct {
 
 // LogFiles contains paths to the log files to upload
 type LogFiles struct {
-	DNSPath  string
-	ConnPath string
+	DNSPath    string
+	ConnPath   string
+	DHCPPath   string
+	JA3JA4Path string
+	JA4SPath   string
 }
 
 // CombinedLogs represents the compressed log data
 type CombinedLogs struct {
-	DNS  string `json:"dns"`  // base64 encoded compressed data
-	Conn string `json:"conn"` // base64 encoded compressed data
+	DNS    string `json:"dns"`    // base64 encoded compressed data
+	Conn   string `json:"conn"`   // base64 encoded compressed data
+	JA3JA4 string `json:"ja3ja4"` // base64 encoded compressed data
+	JA4S   string `json:"ja4s"`   // base64 encoded compressed data
+	DHCP   string `json:"dhcp"`   // base64 encoded compressed data
 }
 
 // ErrAPIGone is returned when the API responds with HTTP 410 (Gone), indicating the sensor should stop.
@@ -156,15 +162,33 @@ func (u *LogUploader) uploadLogsChunked(ctx context.Context, files LogFiles) err
 	chunkSizeBytes := (u.maxPayloadSizeMB * 1024 * 1024 * 90) / 100
 
 	// Split DNS file if present
-	dnsChunks, err := splitCSVFile(files.DNSPath, chunkSizeBytes/2)
+	dnsChunks, err := splitCSVFile(files.DNSPath, chunkSizeBytes/5)
 	if err != nil {
 		return fmt.Errorf("failed to split DNS file: %v", err)
 	}
 
 	// Split connection file
-	connChunks, err := splitCSVFile(files.ConnPath, chunkSizeBytes/2)
+	connChunks, err := splitCSVFile(files.ConnPath, chunkSizeBytes/5)
 	if err != nil {
 		return fmt.Errorf("failed to split connection file: %v", err)
+	}
+
+	// Split JA3JA4 file if present
+	ja3ja4Chunks, err := splitCSVFile(files.JA3JA4Path, chunkSizeBytes/5)
+	if err != nil {
+		return fmt.Errorf("failed to split JA3JA4 file: %v", err)
+	}
+
+	// Split JA4S file if present
+	ja4sChunks, err := splitCSVFile(files.JA4SPath, chunkSizeBytes/5)
+	if err != nil {
+		return fmt.Errorf("failed to split JA4S file: %v", err)
+	}
+
+	// Split DHCP file if present
+	dhcpChunks, err := splitCSVFile(files.DHCPPath, chunkSizeBytes/5)
+	if err != nil {
+		return fmt.Errorf("failed to split DHCP file: %v", err)
 	}
 
 	// Determine maximum chunks needed
@@ -172,12 +196,21 @@ func (u *LogUploader) uploadLogsChunked(ctx context.Context, files LogFiles) err
 	if len(dnsChunks) > maxChunks {
 		maxChunks = len(dnsChunks)
 	}
+	if len(ja3ja4Chunks) > maxChunks {
+		maxChunks = len(ja3ja4Chunks)
+	}
+	if len(ja4sChunks) > maxChunks {
+		maxChunks = len(ja4sChunks)
+	}
+	if len(dhcpChunks) > maxChunks {
+		maxChunks = len(dhcpChunks)
+	}
 
 	// Track temp files for cleanup
 	var tempFiles []string
 	defer func() {
 		for _, file := range tempFiles {
-			if file != files.DNSPath && file != files.ConnPath {
+			if file != files.DNSPath && file != files.ConnPath && file != files.JA3JA4Path && file != files.JA4SPath && file != files.DHCPPath {
 				os.Remove(file)
 			}
 		}
@@ -203,8 +236,32 @@ func (u *LogUploader) uploadLogsChunked(ctx context.Context, files LogFiles) err
 			}
 		}
 
+		// Set JA3JA4 chunk path (or empty if no more chunks)
+		if i < len(ja3ja4Chunks) && ja3ja4Chunks[i] != "" {
+			chunkFiles.JA3JA4Path = ja3ja4Chunks[i]
+			if ja3ja4Chunks[i] != files.JA3JA4Path {
+				tempFiles = append(tempFiles, ja3ja4Chunks[i])
+			}
+		}
+
+		// Set JA4S chunk path (or empty if no more chunks)
+		if i < len(ja4sChunks) && ja4sChunks[i] != "" {
+			chunkFiles.JA4SPath = ja4sChunks[i]
+			if ja4sChunks[i] != files.JA4SPath {
+				tempFiles = append(tempFiles, ja4sChunks[i])
+			}
+		}
+
+		// Set DHCP chunk path (or empty if no more chunks)
+		if i < len(dhcpChunks) && dhcpChunks[i] != "" {
+			chunkFiles.DHCPPath = dhcpChunks[i]
+			if dhcpChunks[i] != files.DHCPPath {
+				tempFiles = append(tempFiles, dhcpChunks[i])
+			}
+		}
+
 		// Skip empty chunks
-		if chunkFiles.DNSPath == "" && chunkFiles.ConnPath == "" {
+		if chunkFiles.DNSPath == "" && chunkFiles.ConnPath == "" && chunkFiles.JA3JA4Path == "" && chunkFiles.JA4SPath == "" && chunkFiles.DHCPPath == "" {
 			continue
 		}
 
@@ -235,6 +292,36 @@ func (u *LogUploader) prepareLogData(files LogFiles) ([]byte, error) {
 		return nil, fmt.Errorf("failed to read connection log: %v", err)
 	}
 
+	// Read JA3JA4 log (allow missing)
+	ja3ja4Data, err := os.ReadFile(files.JA3JA4Path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			ja3ja4Data = []byte{} // treat missing JA3JA4 log as empty
+		} else {
+			return nil, fmt.Errorf("failed to read JA3JA4 log: %v", err)
+		}
+	}
+
+	// Read JA4S log (allow missing)
+	ja4sData, err := os.ReadFile(files.JA4SPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			ja4sData = []byte{} // treat missing JA4S log as empty
+		} else {
+			return nil, fmt.Errorf("failed to read JA4S log: %v", err)
+		}
+	}
+
+	// Read DHCP log (allow missing)
+	dhcpData, err := os.ReadFile(files.DHCPPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			dhcpData = []byte{} // treat missing DHCP log as empty
+		} else {
+			return nil, fmt.Errorf("failed to read DHCP log: %v", err)
+		}
+	}
+
 	// Compress DNS data
 	dnsCompressed, err := u.compressFunc(dnsData)
 	if err != nil {
@@ -247,10 +334,31 @@ func (u *LogUploader) prepareLogData(files LogFiles) ([]byte, error) {
 		return nil, fmt.Errorf("failed to compress connection data: %v", err)
 	}
 
+	// Compress JA3JA4 data
+	ja3ja4Compressed, err := u.compressFunc(ja3ja4Data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compress JA3JA4 data: %v", err)
+	}
+
+	// Compress JA4S data
+	ja4sCompressed, err := u.compressFunc(ja4sData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compress JA4S data: %v", err)
+	}
+
+	// Compress DHCP data
+	dhcpCompressed, err := u.compressFunc(dhcpData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compress DHCP data: %v", err)
+	}
+
 	// Combine into JSON structure
 	combined := CombinedLogs{
-		DNS:  base64.StdEncoding.EncodeToString(dnsCompressed),
-		Conn: base64.StdEncoding.EncodeToString(connCompressed),
+		DNS:    base64.StdEncoding.EncodeToString(dnsCompressed),
+		Conn:   base64.StdEncoding.EncodeToString(connCompressed),
+		JA3JA4: base64.StdEncoding.EncodeToString(ja3ja4Compressed),
+		JA4S:   base64.StdEncoding.EncodeToString(ja4sCompressed),
+		DHCP:   base64.StdEncoding.EncodeToString(dhcpCompressed),
 	}
 
 	// Marshal to JSON
@@ -315,6 +423,33 @@ func (u *LogUploader) calculateTotalFileSize(files LogFiles) (int64, error) {
 		return 0, fmt.Errorf("failed to stat connection file: %v", err)
 	} else {
 		totalSize += stat.Size()
+	}
+
+	// Check JA3JA4 file size (optional)
+	if files.JA3JA4Path != "" {
+		if stat, err := os.Stat(files.JA3JA4Path); err == nil {
+			totalSize += stat.Size()
+		} else if !os.IsNotExist(err) {
+			return 0, fmt.Errorf("failed to stat JA3JA4 file: %v", err)
+		}
+	}
+
+	// Check JA4S file size (optional)
+	if files.JA4SPath != "" {
+		if stat, err := os.Stat(files.JA4SPath); err == nil {
+			totalSize += stat.Size()
+		} else if !os.IsNotExist(err) {
+			return 0, fmt.Errorf("failed to stat JA4S file: %v", err)
+		}
+	}
+
+	// Check DHCP file size (optional)
+	if files.DHCPPath != "" {
+		if stat, err := os.Stat(files.DHCPPath); err == nil {
+			totalSize += stat.Size()
+		} else if !os.IsNotExist(err) {
+			return 0, fmt.Errorf("failed to stat DHCP file: %v", err)
+		}
 	}
 
 	// Convert to MB

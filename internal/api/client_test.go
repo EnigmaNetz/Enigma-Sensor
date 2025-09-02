@@ -451,13 +451,13 @@ func TestUploadLogsChunking(t *testing.T) {
 	require.NoError(t, os.WriteFile(connFile, []byte(largeContent), 0600))
 
 	// Mock client that records upload calls
+	// Need more responses now that we support 4 log types (HTTP/SSL added)
+	var responses []uploadResponse
+	for i := 0; i < 20; i++ { // Provide enough responses for multiple chunks
+		responses = append(responses, uploadResponse{"success", 200, "ok", nil})
+	}
 	mockClient := &mockPublishClient{
-		uploadResponses: []uploadResponse{
-			{"success", 200, "ok", nil},
-			{"success", 200, "ok", nil},
-			{"success", 200, "ok", nil},
-			{"success", 200, "ok", nil},
-		},
+		uploadResponses: responses,
 	}
 
 	uploader := &LogUploader{

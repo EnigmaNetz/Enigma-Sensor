@@ -44,6 +44,14 @@ type Config struct {
 		MaxPayloadSizeMB int64 `json:"max_payload_size_mb"`
 	} `json:"enigma_api"`
 
+	// Buffering configuration for local retries during publisher outages
+	Buffering struct {
+		// Dir is the directory to store buffered payloads
+		Dir string `json:"dir"`
+		// MaxAgeHours is the maximum age of buffered items before purge
+		MaxAgeHours int `json:"max_age_hours"`
+	} `json:"buffering"`
+
 	// Zeek configuration
 	Zeek struct {
 		// Path is the Zeek executable path
@@ -53,26 +61,8 @@ type Config struct {
 	} `json:"zeek"`
 }
 
-// LoadConfig loads configuration from a JSON file
-func LoadConfig(configPath string) (*Config, error) {
-	// Set default config path if not provided
-	if configPath == "" {
-		configPath = "config.json"
-	}
-
-	// Read config file
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read config file: %v", err)
-	}
-
-	// Parse config
-	var config Config
-	if err := json.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("failed to parse config file: %v", err)
-	}
-
-	// Set defaults if not specified
+// ValidateAndSetDefaults normalizes the configuration and sets defaults
+func (config *Config) ValidateAndSetDefaults() {
 	if config.Logging.Level == "" {
 		config.Logging.Level = "info"
 	}
@@ -101,6 +91,36 @@ func LoadConfig(configPath string) (*Config, error) {
 	if config.Zeek.SamplingPercentage == 0 {
 		config.Zeek.SamplingPercentage = 100 // Default to 100% (process all traffic)
 	}
+	// Defaults for buffering
+	if config.Buffering.Dir == "" {
+		config.Buffering.Dir = "logs/buffer"
+	}
+	if config.Buffering.MaxAgeHours == 0 {
+		config.Buffering.MaxAgeHours = 2 // Default to 2 hours retention
+	}
+}
+
+// LoadConfig loads configuration from a JSON file
+func LoadConfig(configPath string) (*Config, error) {
+	// Set default config path if not provided
+	if configPath == "" {
+		configPath = "config.json"
+	}
+
+	// Read config file
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config file: %v", err)
+	}
+
+	// Parse config
+	var config Config
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("failed to parse config file: %v", err)
+	}
+
+	// Normalize and apply defaults in one place
+	config.ValidateAndSetDefaults()
 
 	return &config, nil
 }

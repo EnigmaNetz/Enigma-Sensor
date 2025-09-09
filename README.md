@@ -103,6 +103,7 @@ You can send this archive to Enigma support for troubleshooting.
   - `logging`: Log level, file path, and max size.
   - `capture`: Output directory, interval, window duration, and interface.
   - `enigma_api`: API server, API key, upload toggle (always enabled).
+  - `buffering`: Local buffering directory and max age for retrying uploads.
   - `zeek`: Traffic sampling configuration.
   - `log_retention_days`: Number of days to keep log files. Logs older than this are deleted on startup. Default: 1
 - **How to configure:**
@@ -130,6 +131,24 @@ The sensor supports automatic log rotation and compression. Configure these opti
 - Up to 3 rotated log files are kept by default.
 - Rotated logs older than `log_retention_days` are deleted automatically.
 - All logs are also output to stdout for convenience.
+
+---
+
+### Buffering During API Outages
+
+The sensor buffers uploads locally when the publisher API is temporarily unavailable (e.g., 500/503 or gRPC Unavailable). Buffered payloads are retried automatically and purged after a time limit.
+
+```json
+"buffering": {
+  "dir": "logs/buffer",   // Directory for buffered payloads
+  "max_age_hours": 2       // Purge buffered items older than this many hours
+}
+```
+
+- On each upload attempt, the sensor first flushes any buffered payloads (oldest first).
+- If upload fails after retries, the current payload is saved to the buffer.
+- Items older than `max_age_hours` are purged automatically to prevent disk growth.
+- A 410 Gone response is treated as terminal and is not buffered.
 
 ---
 

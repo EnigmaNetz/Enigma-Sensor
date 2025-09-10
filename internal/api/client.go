@@ -34,6 +34,8 @@ type LogUploader struct {
 	retryDelay       time.Duration
 	compressFunc     func([]byte) ([]byte, error) // for DI/testing
 	maxPayloadSizeMB int64                        // maximum payload size before chunking
+	bufferDir        string
+	bufferMaxAge     time.Duration
 }
 
 // LogFiles contains paths to the log files to upload
@@ -63,7 +65,7 @@ type grpcClientImpl struct {
 }
 
 // NewLogUploader creates a new log uploader instance
-func NewLogUploader(serverAddr string, apiKey string, maxPayloadSizeMB int64) (*LogUploader, error) {
+func NewLogUploader(serverAddr string, apiKey string, maxPayloadSizeMB int64, bufferDir string, bufferMaxAgeHours int) (*LogUploader, error) {
 	var opts []grpc.DialOption
 
 	// Always use SSL credentials with system trust store
@@ -89,6 +91,8 @@ func NewLogUploader(serverAddr string, apiKey string, maxPayloadSizeMB int64) (*
 		retryDelay:       5 * time.Second,
 		compressFunc:     compressData,
 		maxPayloadSizeMB: maxPayloadSizeMB,
+		bufferDir:        bufferDir,
+		bufferMaxAge:     time.Duration(bufferMaxAgeHours) * time.Hour,
 	}, nil
 }
 
@@ -139,6 +143,9 @@ func (u *LogUploader) uploadLogsSingle(ctx context.Context, files LogFiles) erro
 		return fmt.Errorf("failed to prepare log data: %v", err)
 	}
 
+	// Best-effort flush of any buffered payloads first
+	_ = u.flushBuffer(ctx)
+
 	// Upload with retries
 	var lastErr error
 	for i := 0; i < u.retryCount; i++ {
@@ -153,7 +160,11 @@ func (u *LogUploader) uploadLogsSingle(ctx context.Context, files LogFiles) erro
 		return nil
 	}
 
-	return fmt.Errorf("failed to upload after %d retries: %w", u.retryCount, lastErr)
+	// If we reach here, upload failed after retries. Buffer the payload for later.
+	if err := u.bufferSave(combinedData); err != nil {
+		return fmt.Errorf("failed to upload after %d retries and also failed to buffer payload: %v; original error: %v", u.retryCount, err, lastErr)
+	}
+	return fmt.Errorf("failed to upload after %d retries: %w (payload buffered for retry)", u.retryCount, lastErr)
 }
 
 // uploadLogsChunked splits files and uploads each chunk separately
@@ -386,6 +397,78 @@ func (u *LogUploader) upload(ctx context.Context, data []byte) error {
 		return fmt.Errorf("upload failed: %s (code: %d)", message, statusCode)
 	}
 
+	return nil
+}
+
+// bufferSave writes a compressed payload to disk for later retry
+func (u *LogUploader) bufferSave(data []byte) error {
+	if u.bufferDir == "" {
+		return nil
+	}
+	if err := os.MkdirAll(u.bufferDir, 0o755); err != nil {
+		return fmt.Errorf("failed to create buffer dir: %w", err)
+	}
+	// Name encoded with timestamp for ordering
+	ts := time.Now().UTC().Format("20060102T150405Z")
+	// Include monotonic nsec to avoid collisions
+	fname := fmt.Sprintf("buf_%s_%d.bin", ts, time.Now().UTC().UnixNano())
+	path := filepath.Join(u.bufferDir, fname)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return fmt.Errorf("failed to write buffer file: %w", err)
+	}
+	return nil
+}
+
+// flushBuffer attempts to send buffered payloads oldest-first and purges old entries
+func (u *LogUploader) flushBuffer(ctx context.Context) error {
+	if u.bufferDir == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(u.bufferDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	now := time.Now()
+	// Sort entries by name ascending (timestamp-leading names)
+	// Simple insertion sort due to small expected counts
+	for i := 1; i < len(entries); i++ {
+		j := i
+		for j > 0 && entries[j-1].Name() > entries[j].Name() {
+			entries[j-1], entries[j] = entries[j], entries[j-1]
+			j--
+		}
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		full := filepath.Join(u.bufferDir, e.Name())
+		info, statErr := os.Stat(full)
+		if statErr != nil {
+			continue
+		}
+		// Purge old files beyond retention
+		if u.bufferMaxAge > 0 && info.ModTime().Add(u.bufferMaxAge).Before(now) {
+			_ = os.Remove(full)
+			continue
+		}
+		// Try upload
+		data, readErr := os.ReadFile(full)
+		if readErr != nil {
+			// If unreadable, remove to avoid blocking
+			_ = os.Remove(full)
+			continue
+		}
+		if err := u.upload(ctx, data); err != nil {
+			// Stop on first failure (likely still down); keep file
+			return err
+		}
+		// Success: remove file
+		_ = os.Remove(full)
+	}
 	return nil
 }
 

@@ -60,14 +60,15 @@ func (c *publishServiceClient) UploadExcelMethod(ctx context.Context, in *Upload
 }
 
 // PublishServiceServer is the server API for PublishService service.
-// All implementations should embed UnimplementedPublishServiceServer
+// All implementations must embed UnimplementedPublishServiceServer
 // for forward compatibility.
 type PublishServiceServer interface {
 	GetMethod(context.Context, *GetRequest) (*GetResponse, error)
 	UploadExcelMethod(context.Context, *UploadExcelRequest) (*UploadExcelResponse, error)
+	mustEmbedUnimplementedPublishServiceServer()
 }
 
-// UnimplementedPublishServiceServer should be embedded to have
+// UnimplementedPublishServiceServer must be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
@@ -80,7 +81,8 @@ func (UnimplementedPublishServiceServer) GetMethod(context.Context, *GetRequest)
 func (UnimplementedPublishServiceServer) UploadExcelMethod(context.Context, *UploadExcelRequest) (*UploadExcelResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UploadExcelMethod not implemented")
 }
-func (UnimplementedPublishServiceServer) testEmbeddedByValue() {}
+func (UnimplementedPublishServiceServer) mustEmbedUnimplementedPublishServiceServer() {}
+func (UnimplementedPublishServiceServer) testEmbeddedByValue()                        {}
 
 // UnsafePublishServiceServer may be embedded to opt out of forward compatibility for this service.
 // Use of this interface is not recommended, as added methods to PublishServiceServer will

@@ -130,6 +130,7 @@ type UploadExcelRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Data          []byte                 `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`
 	EmployeeId    string                 `protobuf:"bytes,2,opt,name=employeeId,proto3" json:"employeeId,omitempty"`
+	Metadata      map[string]string      `protobuf:"bytes,3,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -176,6 +177,13 @@ func (x *UploadExcelRequest) GetEmployeeId() string {
 		return x.EmployeeId
 	}
 	return ""
+}
+
+func (x *UploadExcelRequest) GetMetadata() map[string]string {
+	if x != nil {
+		return x.Metadata
+	}
+	return nil
 }
 
 type UploadExcelResponse struct {
@@ -251,12 +259,16 @@ const file_internal_api_publish_grpc_config_proto_rawDesc = "" +
 	"\n" +
 	"statusCode\x18\x02 \x01(\x05R\n" +
 	"statusCode\x12\x18\n" +
-	"\amessage\x18\x03 \x01(\tR\amessage\"H\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage\"\xcc\x01\n" +
 	"\x12uploadExcelRequest\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\x12\x1e\n" +
 	"\n" +
 	"employeeId\x18\x02 \x01(\tR\n" +
-	"employeeId\"g\n" +
+	"employeeId\x12E\n" +
+	"\bmetadata\x18\x03 \x03(\v2).publish.uploadExcelRequest.MetadataEntryR\bmetadata\x1a;\n" +
+	"\rMetadataEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"g\n" +
 	"\x13uploadExcelResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x1e\n" +
 	"\n" +
@@ -279,23 +291,25 @@ func file_internal_api_publish_grpc_config_proto_rawDescGZIP() []byte {
 	return file_internal_api_publish_grpc_config_proto_rawDescData
 }
 
-var file_internal_api_publish_grpc_config_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_internal_api_publish_grpc_config_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_internal_api_publish_grpc_config_proto_goTypes = []any{
 	(*GetRequest)(nil),          // 0: publish.getRequest
 	(*GetResponse)(nil),         // 1: publish.getResponse
 	(*UploadExcelRequest)(nil),  // 2: publish.uploadExcelRequest
 	(*UploadExcelResponse)(nil), // 3: publish.uploadExcelResponse
+	nil,                         // 4: publish.uploadExcelRequest.MetadataEntry
 }
 var file_internal_api_publish_grpc_config_proto_depIdxs = []int32{
-	0, // 0: publish.publishService.getMethod:input_type -> publish.getRequest
-	2, // 1: publish.publishService.uploadExcelMethod:input_type -> publish.uploadExcelRequest
-	1, // 2: publish.publishService.getMethod:output_type -> publish.getResponse
-	3, // 3: publish.publishService.uploadExcelMethod:output_type -> publish.uploadExcelResponse
-	2, // [2:4] is the sub-list for method output_type
-	0, // [0:2] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	4, // 0: publish.uploadExcelRequest.metadata:type_name -> publish.uploadExcelRequest.MetadataEntry
+	0, // 1: publish.publishService.getMethod:input_type -> publish.getRequest
+	2, // 2: publish.publishService.uploadExcelMethod:input_type -> publish.uploadExcelRequest
+	1, // 3: publish.publishService.getMethod:output_type -> publish.getResponse
+	3, // 4: publish.publishService.uploadExcelMethod:output_type -> publish.uploadExcelResponse
+	3, // [3:5] is the sub-list for method output_type
+	1, // [1:3] is the sub-list for method input_type
+	1, // [1:1] is the sub-list for extension type_name
+	1, // [1:1] is the sub-list for extension extendee
+	0, // [0:1] is the sub-list for field type_name
 }
 
 func init() { file_internal_api_publish_grpc_config_proto_init() }
@@ -309,7 +323,7 @@ func file_internal_api_publish_grpc_config_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_api_publish_grpc_config_proto_rawDesc), len(file_internal_api_publish_grpc_config_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

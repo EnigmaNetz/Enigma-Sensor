@@ -320,6 +320,16 @@ The Windows installer sets up Enigma Sensor as a Windows service using NSSM with
 
 ## Installing on Linux
 
+### Supported Ubuntu Versions
+
+The Enigma Sensor has been tested and supports the following Ubuntu LTS versions:
+
+- **Ubuntu 24.04 LTS** (Noble Numbat) - Fully supported
+- **Ubuntu 22.04 LTS** (Jammy Jellyfish) - Fully supported
+- **Ubuntu 20.04 LTS** (Focal Fossa) - Fully supported
+
+### Installation Steps
+
 1. **Download the latest Linux release zip** from the [GitHub Releases](https://github.com/EnigmaNetz/Enigma-Sensor/releases/latest) page. The file will be named like:
 
    ```

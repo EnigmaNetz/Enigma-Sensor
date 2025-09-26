@@ -55,7 +55,7 @@ type uploadResponse struct {
 	err        error
 }
 
-func (m *mockPublishClient) uploadExcelMethod(ctx context.Context, data []byte, employeeId string) (string, int32, string, error) {
+func (m *mockPublishClient) uploadExcelMethod(ctx context.Context, data []byte, employeeId string, metadata map[string]string) (string, int32, string, error) {
 	if m.currentCall >= len(m.uploadResponses) {
 		return "", 0, "", status.Error(codes.Internal, "unexpected call")
 	}

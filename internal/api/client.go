@@ -19,11 +19,12 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	pb "EnigmaNetz/Enigma-Go-Sensor/internal/api/publish"
+	"EnigmaNetz/Enigma-Go-Sensor/internal/metadata"
 )
 
 // grpcClient defines the interface for gRPC operations
 type grpcClient interface {
-	uploadExcelMethod(ctx context.Context, data []byte, employeeId string) (string, int32, string, error)
+	uploadExcelMethod(ctx context.Context, data []byte, employeeId string, metadata map[string]string) (string, int32, string, error)
 }
 
 // LogUploader handles uploading logs to the gRPC server
@@ -96,10 +97,11 @@ func NewLogUploader(serverAddr string, apiKey string, maxPayloadSizeMB int64, bu
 	}, nil
 }
 
-func (c *grpcClientImpl) uploadExcelMethod(ctx context.Context, data []byte, employeeId string) (string, int32, string, error) {
+func (c *grpcClientImpl) uploadExcelMethod(ctx context.Context, data []byte, employeeId string, metadata map[string]string) (string, int32, string, error) {
 	req := &pb.UploadExcelRequest{
 		Data:       data,
 		EmployeeId: employeeId,
+		Metadata:   metadata,
 	}
 
 	// Ensure the message implements proto.Message
@@ -384,7 +386,10 @@ func (u *LogUploader) prepareLogData(files LogFiles) ([]byte, error) {
 
 // upload sends the compressed data to the server
 func (u *LogUploader) upload(ctx context.Context, data []byte) error {
-	_, statusCode, message, err := u.client.uploadExcelMethod(ctx, data, u.apiKey)
+	// Generate metadata for the payload
+	metadataMap := metadata.GenerateMetadata()
+
+	_, statusCode, message, err := u.client.uploadExcelMethod(ctx, data, u.apiKey, metadataMap)
 	if err != nil {
 		return fmt.Errorf("gRPC call failed: %v", err)
 	}

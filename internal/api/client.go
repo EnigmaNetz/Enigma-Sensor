@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -388,6 +389,7 @@ func (u *LogUploader) prepareLogData(files LogFiles) ([]byte, error) {
 func (u *LogUploader) upload(ctx context.Context, data []byte) error {
 	// Generate metadata for the payload
 	metadataMap := metadata.GenerateMetadata()
+	log.Printf("[upload] Sending metadata to API: %+v", metadataMap)
 
 	_, statusCode, message, err := u.client.uploadExcelMethod(ctx, data, u.apiKey, metadataMap)
 	if err != nil {

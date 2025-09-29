@@ -110,6 +110,33 @@ You can send this archive to Enigma support for troubleshooting.
   1. On Windows, edit `C:\ProgramData\EnigmaSensor\config.json` after install if needed.
   2. On Linux, edit `/etc/enigma-sensor/config.json` after install if needed.
 
+### Configuring Network Interface
+
+By default, the sensor captures traffic from all available network interfaces. To capture from a specific interface:
+
+1. **Identify available interfaces:**
+   - **Windows:** Run `pktmon comp list` in Command Prompt as Administrator
+   - **Linux/macOS:** Run `tcpdump -D` or `ip link show`
+
+2. **Edit your configuration file:**
+   ```json
+   {
+     "capture": {
+       "interface": "eth0"
+     }
+   }
+   ```
+
+3. **Common interface examples:**
+   - `"any"` - Capture from all interfaces (default)
+   - `"eth0"` - Primary Ethernet interface (Linux/macOS)
+   - `"Wi-Fi"` - WiFi adapter (Windows)
+   - `"Ethernet"` - Wired network adapter (Windows)
+   - `"wlan0"` - WiFi interface (Linux)
+   - `"en0"` - Primary network interface (macOS)
+
+4. **Restart the sensor** after configuration changes for the new interface setting to take effect.
+
 ### Traffic Sampling
 
 The sensor supports random sampling to reduce processing load. Configure `zeek.sampling_percentage` (0-100) to process a percentage of network connections and DNS queries. Default is 100 (no sampling).

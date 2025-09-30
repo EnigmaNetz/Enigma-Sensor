@@ -112,30 +112,35 @@ You can send this archive to Enigma support for troubleshooting.
 
 ### Configuring Network Interface
 
-By default, the sensor captures traffic from all available network interfaces. To capture from a specific interface:
+By default, the sensor captures traffic from all interfaces (`"any"`). To specify an interface:
 
-1. **Identify available interfaces:**
-   - **Windows:** Run `pktmon comp list` in Command Prompt as Administrator
-   - **Linux/macOS:** Run `tcpdump -D` or `ip link show`
+```json
+{
+  "capture": {
+    "interface": "eth0"
+  }
+}
+```
 
-2. **Edit your configuration file:**
-   ```json
-   {
-     "capture": {
-       "interface": "eth0"
-     }
-   }
-   ```
+You can specify multiple interfaces (comma-separated) to capture from all simultaneously:
 
-3. **Common interface examples:**
-   - `"any"` - Capture from all interfaces (default)
-   - `"eth0"` - Primary Ethernet interface (Linux/macOS)
-   - `"Wi-Fi"` - WiFi adapter (Windows)
-   - `"Ethernet"` - Wired network adapter (Windows)
-   - `"wlan0"` - WiFi interface (Linux)
-   - `"en0"` - Primary network interface (macOS)
+```json
+{
+  "capture": {
+    "interface": "eth0,wlan0,lo"
+  }
+}
+```
 
-4. **Restart the sensor** after configuration changes for the new interface setting to take effect.
+**Platform-specific behavior:**
+- **Linux/macOS**: The sensor captures from each interface in parallel and merges the results. Use interface names like `eth0`, `wlan0`, `en0`
+- **Windows**: The sensor uses pktmon filters to capture from all specified interfaces in a single session. **Must use component IDs (numbers), not friendly names**
+
+**To identify available interfaces:**
+- **Linux/macOS**: Run `tcpdump -D` or `ip link show`
+- **Windows**: Run `pktmon comp list` as Administrator. Use the numeric ID from the first column (e.g., `"interface": "1,2"` for Wi-Fi and Ethernet)
+
+**Restart the sensor** after configuration changes for the new interface setting to take effect.
 
 ### Traffic Sampling
 

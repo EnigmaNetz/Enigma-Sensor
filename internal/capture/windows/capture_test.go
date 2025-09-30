@@ -75,13 +75,13 @@ func TestWindowsCapturer_Capture_Success(t *testing.T) {
 	}
 	found := false
 	for _, args := range winArgsList {
-		if len(args) >= 4 && args[0] == "pktmon" && args[1] == "filter" && args[2] == "add" && args[3] == "-i" && len(args) >= 5 && args[4] == "1" {
+		if len(args) >= 5 && args[0] == "pktmon" && args[1] == "start" && args[2] == "--capture" && args[3] == "--comp" && args[4] == "1" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("expected pktmon filter add command with interface, got %v", winArgsList)
+		t.Errorf("expected pktmon start --capture --comp 1 command, got %v", winArgsList)
 	}
 }
 
@@ -230,6 +230,164 @@ func TestWindowsCapturer_With_Fix_Success(t *testing.T) {
 		if result == "" {
 			t.Errorf("Expected non-empty result path")
 		}
+	}
+}
+
+// TestWindowsCapturer_InterfaceSecurity tests command injection prevention
+func TestWindowsCapturer_InterfaceSecurity(t *testing.T) {
+	c := NewWindowsCapturer()
+	tempDir := t.TempDir()
+
+	// These are the most dangerous command injection patterns that absolutely must be blocked
+	maliciousInputs := []struct {
+		name  string
+		input string
+	}{
+		{"command injection semicolon", "eth0; del /f /q C:\\*.*"},
+		{"command injection ampersand", "eth0 && format C: /fs:ntfs /q"},
+		{"command injection pipe", "eth0|powershell -c Get-Process"},
+		{"command injection backtick", "eth0`dir`"},
+		{"command injection dollar", "eth0$(Get-ChildItem)"},
+		{"newline injection", "eth0\r\ndir"},
+		{"path traversal", "../../../Windows/System32/cmd.exe"},
+		{"invalid characters", "eth0@test#$%"},
+		{"spaces", "eth0 test"},
+		{"quotes", "eth0\"test"},
+	}
+
+	for _, tt := range maliciousInputs {
+		t.Run(tt.name, func(t *testing.T) {
+			config := common.CaptureConfig{
+				Interface:       tt.input,
+				CaptureWindow:   time.Millisecond * 10, // Very short to fail fast
+				CaptureInterval: time.Millisecond * 10,
+				OutputDir:       tempDir,
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*50)
+			defer cancel()
+
+			_, err := c.Capture(ctx, config)
+
+			// Must fail with interface parsing error, not reach command execution
+			if err == nil {
+				t.Fatalf("SECURITY FAILURE: Malicious input %q was not blocked!", tt.input)
+			}
+
+			// Should fail at interface validation, not command execution
+			errMsg := err.Error()
+			if !(containsString(errMsg, "invalid interface") || containsString(errMsg, "failed to parse interface")) {
+				t.Errorf("Expected interface validation error for %q, got: %v", tt.input, err)
+			}
+
+			// The main security check is that the input was rejected at validation
+			// Error messages may contain the input for debugging purposes, which is acceptable
+			// as long as the dangerous input never reaches pktmon command execution
+		})
+	}
+}
+
+// TestWindowsCapturer_ValidInterfaces tests that legitimate interfaces work
+func TestWindowsCapturer_ValidInterfaces(t *testing.T) {
+	c := NewWindowsCapturer()
+	tempDir := t.TempDir()
+
+	validInputs := []struct {
+		name     string
+		input    string
+		expected string // First interface that should be extracted
+	}{
+		{"single interface", "eth0", "eth0"},
+		{"interface with dash", "en0-1", "en0-1"},
+		{"interface with underscore", "eth_0", "eth_0"},
+		{"interface with dot", "eth0.100", "eth0.100"},
+		{"any interface", "any", "any"},
+		{"all interface", "all", "all"},
+		{"comma separated", "eth0,wlan0", "eth0"},
+		{"comma with spaces", "eth0, wlan0, en0", "eth0"},
+		{"empty defaults to any", "", "any"},
+		{"skip empty first", ",eth0,wlan0", "eth0"},
+		{"whitespace handling", " eth0 ", "eth0"},
+	}
+
+	// Mock commandContext to avoid actual pktmon calls
+	origCommandContext := commandContext
+	commandContext = func(name string, arg ...string) *exec.Cmd {
+		return exec.Command("cmd", "/C", "echo")
+	}
+	defer func() { commandContext = origCommandContext }()
+
+	for _, tt := range validInputs {
+		t.Run(tt.name, func(t *testing.T) {
+			config := common.CaptureConfig{
+				Interface:       tt.input,
+				CaptureWindow:   time.Millisecond * 10,
+				CaptureInterval: time.Millisecond * 10,
+				OutputDir:       tempDir,
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*100)
+			defer cancel()
+
+			_, err := c.Capture(ctx, config)
+
+			// Should not fail due to interface parsing
+			if err != nil && (containsString(err.Error(), "invalid interface") || containsString(err.Error(), "failed to parse interface")) {
+				t.Errorf("Valid interface %q should not cause parsing error: %v", tt.input, err)
+			}
+		})
+	}
+}
+
+// TestWindowsCapturer_CommaHandling tests edge cases in comma-separated interface parsing
+func TestWindowsCapturer_CommaHandling(t *testing.T) {
+	c := NewWindowsCapturer()
+	tempDir := t.TempDir()
+
+	// Mock commandContext to avoid actual pktmon calls
+	origCommandContext := commandContext
+	commandContext = func(name string, arg ...string) *exec.Cmd {
+		return exec.Command("cmd", "/C", "echo")
+	}
+	defer func() { commandContext = origCommandContext }()
+
+	edgeCases := []struct {
+		name     string
+		input    string
+		shouldOK bool
+	}{
+		{"empty segments before valid", ",,eth0", true},
+		{"all empty segments", ",,,", true},                 // Should default to "any"
+		{"whitespace only segments", " , , ", true},         // Should default to "any"
+		{"mixed empty and valid", ",eth0,", true},           // Should use "eth0"
+		{"only commas", ",", true},                          // Should default to "any"
+		{"malicious after empty", ",eth0; rm -rf /", false}, // Should block malicious
+	}
+
+	for _, tt := range edgeCases {
+		t.Run(tt.name, func(t *testing.T) {
+			config := common.CaptureConfig{
+				Interface:       tt.input,
+				CaptureWindow:   time.Millisecond * 10,
+				CaptureInterval: time.Millisecond * 10,
+				OutputDir:       tempDir,
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*50)
+			defer cancel()
+
+			_, err := c.Capture(ctx, config)
+
+			hasInterfaceError := err != nil && (containsString(err.Error(), "invalid interface") || containsString(err.Error(), "failed to parse interface"))
+
+			if tt.shouldOK && hasInterfaceError {
+				t.Errorf("Input %q should be valid but got interface error: %v", tt.input, err)
+			}
+
+			if !tt.shouldOK && !hasInterfaceError {
+				t.Errorf("Input %q should be blocked but was accepted", tt.input)
+			}
+		})
 	}
 }
 

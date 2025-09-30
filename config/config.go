@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
+	"strings"
 )
 
 // Config represents the application configuration
@@ -98,6 +100,105 @@ func (config *Config) ValidateAndSetDefaults() {
 	if config.Buffering.MaxAgeHours == 0 {
 		config.Buffering.MaxAgeHours = 2 // Default to 2 hours retention
 	}
+}
+
+// validateInterfaceName validates that an interface name contains only safe characters
+// to prevent command injection attacks when the interface name is passed to system commands
+func validateInterfaceName(name string) error {
+	// Allow only alphanumeric, dash, underscore, and dot characters
+	// This pattern matches common interface naming conventions (eth0, wlan0, en0, etc.)
+	validPattern := regexp.MustCompile(`^[a-zA-Z0-9\-_.]+$`)
+
+	if len(name) == 0 {
+		return fmt.Errorf("interface name cannot be empty")
+	}
+
+	if len(name) > 255 {
+		return fmt.Errorf("interface name too long: %d characters (max 255)", len(name))
+	}
+
+	if !validPattern.MatchString(name) {
+		return fmt.Errorf("interface name contains invalid characters: must contain only letters, numbers, hyphens, underscores, and dots")
+	}
+
+	// Additional check for potentially dangerous sequences
+	forbidden := []string{"..", "/", "\\", "|", "&", ";", "$", "`", "(", ")", "{", "}", "[", "]", "<", ">", "\"", "'", " ", "\t", "\n", "\r"}
+	for _, f := range forbidden {
+		if strings.Contains(name, f) {
+			return fmt.Errorf("interface name contains forbidden sequence: %s", f)
+		}
+	}
+
+	return nil
+}
+
+// GetFirstInterface returns the first valid interface from comma-separated list, or "any" if empty
+func (c *Config) GetFirstInterface() (string, error) {
+	if c.Capture.Interface == "" {
+		return "any", nil
+	}
+
+	// Split by comma and find first non-empty interface
+	interfaces := strings.Split(c.Capture.Interface, ",")
+	for _, iface := range interfaces {
+		trimmed := strings.TrimSpace(iface)
+		if trimmed == "" {
+			continue
+		}
+
+		// Special cases that don't need validation
+		if trimmed == "any" || trimmed == "all" {
+			return trimmed, nil
+		}
+
+		// Validate the interface name for security
+		if err := validateInterfaceName(trimmed); err != nil {
+			return "", fmt.Errorf("invalid interface '%s': %w", trimmed, err)
+		}
+
+		return trimmed, nil
+	}
+
+	// If all interfaces are empty, default to "any"
+	return "any", nil
+}
+
+// GetAllInterfaces returns all valid interfaces from comma-separated list, or ["any"] if empty
+func (c *Config) GetAllInterfaces() ([]string, error) {
+	if c.Capture.Interface == "" {
+		return []string{"any"}, nil
+	}
+
+	// Split by comma and collect all valid interfaces
+	interfaces := strings.Split(c.Capture.Interface, ",")
+	var validInterfaces []string
+
+	for _, iface := range interfaces {
+		trimmed := strings.TrimSpace(iface)
+		if trimmed == "" {
+			continue
+		}
+
+		// Special cases that don't need validation
+		if trimmed == "any" || trimmed == "all" {
+			validInterfaces = append(validInterfaces, trimmed)
+			continue
+		}
+
+		// Validate the interface name for security
+		if err := validateInterfaceName(trimmed); err != nil {
+			return nil, fmt.Errorf("invalid interface '%s': %w", trimmed, err)
+		}
+
+		validInterfaces = append(validInterfaces, trimmed)
+	}
+
+	// If no valid interfaces found, default to "any"
+	if len(validInterfaces) == 0 {
+		return []string{"any"}, nil
+	}
+
+	return validInterfaces, nil
 }
 
 // LoadConfig loads configuration from a JSON file

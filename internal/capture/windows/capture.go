@@ -56,14 +56,8 @@ func (c *WindowsCapturer) runCapture(ctx context.Context, captureConfig common.C
 	// Generate timestamp for consistent naming
 	timestamp := time.Now().Format("20060102_150405")
 
-	// Special case: single interface or "any"/"all"
-	if len(interfaces) == 1 && (interfaces[0] == "any" || interfaces[0] == "all") {
-		return c.runSingleCapture(ctx, interfaces[0], timestamp, captureConfig)
-	}
-
-	// Multi-interface capture: Windows approach differs from Linux
+	// Single interface: use simple single capture
 	if len(interfaces) == 1 {
-		// Single specific interface
 		return c.runSingleCapture(ctx, interfaces[0], timestamp, captureConfig)
 	}
 

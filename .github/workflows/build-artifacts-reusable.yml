@@ -1,0 +1,185 @@
+name: Build Artifacts (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      artifact_prefix:
+        description: 'Prefix for artifact naming (e.g., "v1.0.0" or "PR123-abc1234")'
+        required: true
+        type: string
+      retention_days:
+        description: 'Days to retain artifacts'
+        required: false
+        type: number
+        default: 90
+      upload_to_release:
+        description: 'Whether to upload to GitHub Release'
+        required: false
+        type: boolean
+        default: false
+      build_windows:
+        description: 'Build Windows artifacts'
+        required: false
+        type: boolean
+        default: true
+      build_linux:
+        description: 'Build Linux artifacts'
+        required: false
+        type: boolean
+        default: true
+      build_macos:
+        description: 'Build macOS artifacts'
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  build-windows:
+    name: Build Windows Installer
+    runs-on: windows-latest
+    if: inputs.build_windows
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.24.x'
+          cache: true
+
+      - name: Build Windows binary
+        run: |
+          if (-not (Test-Path bin)) { New-Item -ItemType Directory -Path bin }
+          go build -o bin/enigma-sensor-windows-amd64.exe ./cmd/enigma-sensor
+        shell: powershell
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress
+        shell: powershell
+
+      - name: Build Windows Installer
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer/windows/enigma-sensor-installer.iss
+        shell: powershell
+
+      - name: Rename installer
+        run: |
+          $NEW_NAME = "enigma-sensor-windows-${{ inputs.artifact_prefix }}.exe"
+          Rename-Item -Path installer/windows/Output/enigma-sensor-installer.exe -NewName $NEW_NAME
+        shell: powershell
+
+      - name: Upload Windows Installer Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: enigma-sensor-windows-${{ inputs.artifact_prefix }}
+          path: installer/windows/Output/enigma-sensor-windows-*.exe
+          retention-days: ${{ inputs.retention_days }}
+
+      - name: Upload to GitHub Release
+        if: inputs.upload_to_release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: installer/windows/Output/enigma-sensor-windows-*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-linux:
+    name: Build Linux Package
+    runs-on: ubuntu-latest
+    if: inputs.build_linux
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.24.x'
+          cache: true
+
+      - name: Build Linux binary
+        run: |
+          mkdir -p bin
+          GOOS=linux GOARCH=amd64 go build -o bin/enigma-sensor-linux-amd64 ./cmd/enigma-sensor
+
+      - name: Install packaging dependencies
+        run: sudo apt-get update && sudo apt-get install -y dos2unix fakeroot
+
+      - name: Build .deb package
+        run: |
+          cd installer/debian
+          bash build-deb.sh
+
+      - name: Rename .deb package
+        run: |
+          DEB_FILE=$(ls bin/enigma-sensor_*.deb)
+          NEW_NAME="enigma-sensor-linux-${{ inputs.artifact_prefix }}.deb"
+          cp "$DEB_FILE" "bin/$NEW_NAME"
+
+      - name: Prepare release zip
+        if: inputs.upload_to_release
+        run: |
+          RELEASE_DIR="enigma-sensor-${{ inputs.artifact_prefix }}-linux-release"
+          mkdir "$RELEASE_DIR"
+          cp installer/install-enigma-sensor.sh "$RELEASE_DIR/"
+          cp bin/enigma-sensor_*.deb "$RELEASE_DIR/" || true
+          cd "$RELEASE_DIR"
+          zip -r "../${RELEASE_DIR}.zip" .
+          cd ..
+
+      - name: Upload Linux Package Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: enigma-sensor-linux-${{ inputs.artifact_prefix }}
+          path: bin/enigma-sensor-linux-*.deb
+          retention-days: ${{ inputs.retention_days }}
+
+      - name: Upload to GitHub Release
+        if: inputs.upload_to_release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            enigma-sensor-*-linux-release.zip
+            bin/enigma-sensor-linux-amd64
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-macos:
+    name: Build macOS Binary
+    runs-on: macos-latest
+    if: inputs.build_macos
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.24.x'
+          cache: true
+
+      - name: Build macOS binary
+        run: |
+          mkdir -p bin
+          GOOS=darwin GOARCH=amd64 go build -o bin/enigma-sensor-darwin-${{ inputs.artifact_prefix }} ./cmd/enigma-sensor
+
+      - name: Create tarball
+        run: |
+          cd bin
+          tar -czf enigma-sensor-macos-${{ inputs.artifact_prefix }}.tar.gz enigma-sensor-darwin-*
+
+      - name: Upload macOS Binary Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: enigma-sensor-macos-${{ inputs.artifact_prefix }}
+          path: bin/enigma-sensor-macos-*.tar.gz
+          retention-days: ${{ inputs.retention_days }}
+
+      - name: Upload to GitHub Release
+        if: inputs.upload_to_release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: bin/enigma-sensor-darwin-${{ inputs.artifact_prefix }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

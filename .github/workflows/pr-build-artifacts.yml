@@ -1,0 +1,21 @@
+name: PR Artifact Builds
+
+on:
+  pull_request:
+    types: [opened, synchronize, labeled]
+
+jobs:
+  build:
+    if: |
+      contains(github.event.pull_request.labels.*.name, 'build:windows') ||
+      contains(github.event.pull_request.labels.*.name, 'build:linux') ||
+      contains(github.event.pull_request.labels.*.name, 'build:macos') ||
+      contains(github.event.pull_request.labels.*.name, 'build:all')
+    uses: ./.github/workflows/build-artifacts-reusable.yml
+    with:
+      artifact_prefix: PR${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+      retention_days: 7
+      upload_to_release: false
+      build_windows: ${{ contains(github.event.pull_request.labels.*.name, 'build:windows') || contains(github.event.pull_request.labels.*.name, 'build:all') }}
+      build_linux: ${{ contains(github.event.pull_request.labels.*.name, 'build:linux') || contains(github.event.pull_request.labels.*.name, 'build:all') }}
+      build_macos: ${{ contains(github.event.pull_request.labels.*.name, 'build:macos') || contains(github.event.pull_request.labels.*.name, 'build:all') }}

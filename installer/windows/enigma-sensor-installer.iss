@@ -16,6 +16,7 @@ Source: "..\\..\\bin\\enigma-sensor-windows-amd64.exe"; DestDir: "{app}"; Flags:
 Source: "..\\..\\bin\\nssm.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "zeek-runtime-win64.zip"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\\..\\zeek-scripts\\*"; DestDir: "{app}\\zeek-scripts"; Flags: ignoreversion recursesubdirs
+Source: "..\\..\\config.example.json"; DestDir: "{app}"; Flags: ignoreversion dontcopy
 
 [Dirs]
 Name: "C:\ProgramData\EnigmaSensor\logs"; Flags: uninsalwaysuninstall
@@ -25,8 +26,6 @@ Name: "C:\ProgramData\EnigmaSensor\logs"; Flags: uninsalwaysuninstall
 [Code]
 var
   ApiKeyPage: TInputQueryWizardPage;
-  LoggingLevel, LoggingFile, LoggingMaxSize: String;
-  CaptureOutputDir, CaptureWindowSeconds: String;
   ConfigExists: Boolean;
 
 procedure InitializeWizard;
@@ -36,12 +35,6 @@ begin
   begin
     ApiKeyPage := CreateInputQueryPage(wpSelectDir, 'API Key', 'Enter your Enigma API Key', 'This is required.');
     ApiKeyPage.Add('API Key:', False);
-
-    LoggingLevel := 'info';
-    LoggingFile := 'logs/enigma-sensor.log';
-    LoggingMaxSize := '100';
-    CaptureOutputDir := './captures';
-    CaptureWindowSeconds := '60';
   end;
 end;
 
@@ -55,9 +48,34 @@ begin
   end;
 end;
 
+function FileReplaceString(const FileName, SearchString, ReplaceString: string): boolean;
+var
+  MyFile: TStringList;
+  MyText: string;
+begin
+  MyFile := TStringList.Create;
+  try
+    Result := true;
+    try
+      MyFile.LoadFromFile(FileName);
+      MyText := MyFile.Text;
+      if StringChangeEx(MyText, SearchString, ReplaceString, True) > 0 then
+      begin
+        MyFile.Text := MyText;
+        MyFile.SaveToFile(FileName);
+      end;
+    except
+      Result := false;
+    end;
+  finally
+    MyFile.Free;
+  end;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ExitCode: Integer;
+  ConfigPath: string;
 begin
   if CurStep = ssInstall then
   begin
@@ -66,30 +84,11 @@ begin
   end;
   if (CurStep = ssPostInstall) and (not ConfigExists) then
   begin
-    SaveStringToFile(
-      'C:\\ProgramData\\EnigmaSensor\\config.json',
-      '{' + #13#10 +
-      '  "logging": {' + #13#10 +
-      '    "level": "' + LoggingLevel + '",' + #13#10 +
-      '    "file": "logs/enigma-sensor.log",' + #13#10 +
-      '    "max_size_mb": ' + LoggingMaxSize + #13#10 +
-      '  },' + #13#10 +
-      '  "capture": {' + #13#10 +
-      '    "output_dir": "' + CaptureOutputDir + '",' + #13#10 +
-      '    "window_seconds": ' + CaptureWindowSeconds + ',' + #13#10 +
-      '    "loop": true' + #13#10 +
-      '  },' + #13#10 +
-      '  "enigma_api": {' + #13#10 +
-      '    "server": "api.enigmaai.net:443",' + #13#10 +
-      '    "api_key": "' + ApiKeyPage.Values[0] + '",' + #13#10 +
-      '    "upload": true' + #13#10 +
-      '  },' + #13#10 +
-      '  "zeek": {' + #13#10 +
-      '    "sampling_percentage": 100' + #13#10 +
-      '  }' + #13#10 +
-      '}',
-      False
-    );
+    ConfigPath := 'C:\ProgramData\EnigmaSensor\config.json';
+    ExtractTemporaryFile('config.example.json');
+    FileCopy(ExpandConstant('{tmp}\config.example.json'), ConfigPath, False);
+
+    FileReplaceString(ConfigPath, '"api_key": "REPLACE_WITH_YOUR_API_KEY"', '"api_key": "' + ApiKeyPage.Values[0] + '"');
   end;
 end;
 

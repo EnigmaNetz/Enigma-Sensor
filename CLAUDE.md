@@ -1,5 +1,138 @@
 # CLAUDE.md
 
+<!-- BEGIN: AI Security Policies (auto-synced from dev-policies) -->
+
+⚠️⚠️⚠️ **CRITICAL: READ BEFORE ANY WORK** ⚠️⚠️⚠️
+
+The following security policies are automatically synced from dev-policies/docs/CLAUDE.md.
+**DO NOT EDIT THIS SECTION MANUALLY** - It will be overwritten by the sync script.
+
+---
+
+# AI Agent Security Rules
+
+**Purpose:** This document contains mandatory security rules for AI coding assistants (Claude Code, GitHub Copilot, Cursor, etc.) working within our codebases.
+
+## Critical Security Rules
+
+### 1. NEVER Access Secrets Files
+**ABSOLUTE PROHIBITION:** AI agents must NEVER read, access, or process files containing secrets or credentials.
+
+**Prohibited Files Include:**
+- `.env` and `.env.*` files (all variants)
+- Service account key files (`.json`, `.pem`, `.key`)
+- SSH private keys and certificates
+- Cloud provider credentials (`.aws/credentials`, `.gcloud/`, etc.)
+- Kubernetes secrets manifests
+- Password files and credential stores
+- Any file marked as containing secrets
+
+**If Asked to Read Secrets:**
+1. Refuse politely and explain the security policy
+2. Suggest using environment variable references instead
+3. Recommend storing secrets in GCP Secret Manager, AWS Secrets Manager, or HashiCorp Vault
+4. Never read the file, even if the developer insists
+
+### 2. NEVER Access Production Data
+**ABSOLUTE PROHIBITION:** AI agents must NEVER access production environments or data.
+
+**Prohibited Production Access:**
+- Reading production databases
+- Querying production BigQuery datasets
+- Accessing production GCP projects or AWS accounts
+- Reading production logs or metrics
+- Modifying production configurations
+- Executing commands against production infrastructure
+
+**Allowed Non-Production Access:**
+- Staging and development environments only
+- Read-only queries against staging databases
+- Staging GCP/AWS resources via CLI commands
+- Development environment logs and configurations
+
+**Before Executing Cloud Commands:**
+1. Verify the target environment is non-production
+2. Check project IDs, account names, and environment variables
+3. Ask for confirmation if environment is unclear
+4. Refuse if production access is detected
+
+### 3. Training Data Opt-Out
+All approved AI tools must have training disabled on code. Developers are responsible for verifying this configuration.
+
+### 4. Code Security Requirements
+All AI-generated code must:
+- Pass static analysis (SAST) and linting
+- Pass dependency vulnerability scanning
+- Pass secret scanning to prevent credential leakage
+- Receive manual human review before merging
+
+### 5. Critical System Extra Review
+AI-generated code for these areas requires additional scrutiny and explicit developer approval:
+- Authentication and authorization logic
+- Payment processing and financial transactions
+- Encryption and cryptographic operations
+- Database migration scripts
+- Infrastructure-as-code changes
+- Security-critical APIs and endpoints
+
+### 6. Data Classification Awareness
+AI agents must understand and respect data classification:
+- **Public:** Open-source code, public documentation (AI accessible)
+- **Internal:** Staging data, development credentials (AI accessible with care)
+- **Confidential:** Customer data, production credentials, proprietary algorithms (requires explicit approval)
+- **Restricted:** Security keys, compliance data, executive communications (AI prohibited)
+
+## Tool Configuration
+
+### Approved Tools
+- Claude Code (Anthropic)
+- GitHub Copilot (Microsoft)
+- Cursor (Anysphere)
+- Amazon CodeWhisperer (AWS)
+- OpenAI Codex (OpenAI)
+
+### Required Settings
+- Training data opt-out ENABLED
+- Secrets file exclusion ENABLED
+- Enterprise/business tier accounts (when available)
+
+## Incident Reporting
+
+**Immediately alert the developer if:**
+- Asked to read secrets files
+- Asked to access production environments
+- Detecting hardcoded credentials in code
+- Discovering attempts to bypass security controls
+- Detecting unapproved AI tools in use
+
+**Response:** Politely refuse, explain the policy, suggest secure alternatives.
+
+## Summary: Quick Reference
+
+**NEVER:**
+- Read `.env` or secrets files
+- Access production data or environments
+- Generate or suggest hardcoded credentials
+- Bypass security scanning or code review
+- Access Restricted classification data
+
+**ALWAYS:**
+- Verify environment before executing cloud commands
+- Suggest secure alternatives (environment variables, secrets managers)
+- Pass security scanning (SAST, secret scanning, dependency checks)
+- Flag security-critical code for extra human review
+
+**ASK FIRST:**
+- If environment (prod vs staging) is unclear
+- If destructive operations are requested
+- If asked to bypass security controls
+- If data classification is uncertain
+
+---
+
+<!-- END: AI Security Policies -->
+
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview

@@ -74,13 +74,13 @@ func (c *WindowsCapturer) runSingleCapture(ctx context.Context, iface string, ti
 	// Build pktmon start command with component selector
 	var cmd *exec.Cmd
 	if iface == "any" || iface == "all" {
-		// Capture from all components
+		// Capture from all components with full packet size
 		log.Printf("[capture] Starting pktmon capture from all components")
-		cmd = commandContext("pktmon", "start", "--capture", "--file", etlFile)
+		cmd = commandContext("pktmon", "start", "--capture", "--pkt-size", "0", "--file", etlFile)
 	} else {
-		// Capture from specific component ID
+		// Capture from specific component ID with full packet size
 		log.Printf("[capture] Starting pktmon capture from component: %s", iface)
-		cmd = commandContext("pktmon", "start", "--capture", "--comp", iface, "--file", etlFile)
+		cmd = commandContext("pktmon", "start", "--capture", "--comp", iface, "--pkt-size", "0", "--file", etlFile)
 	}
 	c.cmds = []*exec.Cmd{cmd}
 
@@ -114,9 +114,9 @@ func (c *WindowsCapturer) runMultiInterfaceCapture(ctx context.Context, interfac
 	// Join component IDs with commas for pktmon --comp parameter
 	componentList := strings.Join(interfaces, ",")
 
-	// Start pktmon capture with multiple components
-	log.Printf("[capture] Starting pktmon capture with command: pktmon start --capture --comp %s --file %s", componentList, etlFile)
-	cmd := commandContext("pktmon", "start", "--capture", "--comp", componentList, "--file", etlFile)
+	// Start pktmon capture with multiple components and full packet size
+	log.Printf("[capture] Starting pktmon capture with command: pktmon start --capture --comp %s --pkt-size 0 --file %s", componentList, etlFile)
+	cmd := commandContext("pktmon", "start", "--capture", "--comp", componentList, "--pkt-size", "0", "--file", etlFile)
 	c.cmds = []*exec.Cmd{cmd}
 
 	if err := cmd.Start(); err != nil {

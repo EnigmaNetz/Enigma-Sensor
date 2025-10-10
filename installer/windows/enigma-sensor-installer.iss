@@ -26,15 +26,99 @@ Name: "C:\ProgramData\EnigmaSensor\logs"; Flags: uninsalwaysuninstall
 [Code]
 var
   ApiKeyPage: TInputQueryWizardPage;
+  NpcapPage: TInputOptionWizardPage;
   ConfigExists: Boolean;
+  InstallNpcap: Boolean;
+  NpcapDownloadSuccess: Boolean;
+
+function IsNpcapInstalled: Boolean;
+begin
+  Result := FileExists(ExpandConstant('{sys}\Npcap\wpcap.dll'));
+end;
+
+function ShouldInstallNpcap: Boolean;
+begin
+  Result := InstallNpcap and NpcapDownloadSuccess and not IsNpcapInstalled;
+end;
+
+function DownloadNpcap: Boolean;
+var
+  DownloadPage: TDownloadWizardPage;
+begin
+  Result := False;
+
+  if not InstallNpcap then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  if IsNpcapInstalled then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  DownloadPage := CreateDownloadPage(SetupMessage(msgWizardPreparing), SetupMessage(msgPreparingDesc), nil);
+  DownloadPage.Clear;
+  DownloadPage.Add('https://npcap.com/dist/npcap-1.79.exe', 'npcap-installer.exe', '');
+
+  try
+    try
+      DownloadPage.Show;
+      try
+        DownloadPage.Download;
+        Result := True;
+      except
+        if DownloadPage.AbortedByUser then
+          Log('Npcap download cancelled by user')
+        else
+          SuppressibleMsgBox('Failed to download Npcap installer. The sensor will use pktmon instead.' + #13#10#13#10 +
+            'You can manually install Npcap later from https://npcap.com/', mbError, MB_OK, IDOK);
+        Result := False;
+      end;
+    finally
+      DownloadPage.Hide;
+    end;
+  except
+    Result := False;
+  end;
+end;
 
 procedure InitializeWizard;
 begin
   ConfigExists := FileExists('C:\\ProgramData\\EnigmaSensor\\config.json');
+
   if not ConfigExists then
   begin
     ApiKeyPage := CreateInputQueryPage(wpSelectDir, 'API Key', 'Enter your Enigma API Key', 'This is required.');
     ApiKeyPage.Add('API Key:', False);
+  end;
+
+  NpcapPage := CreateInputOptionPage(wpSelectDir, 'Enhanced Network Capture',
+    'Install Npcap for improved packet capture',
+    'Npcap enables full network visibility with promiscuous mode. ' +
+    'This is recommended for comprehensive network monitoring.' + #13#10#13#10 +
+    'Without Npcap, the sensor will use pktmon, which captures only traffic processed by this computer.' + #13#10#13#10 +
+    'If you choose to install Npcap, you will see the Npcap installer after this setup completes. ' +
+    'Please accept the defaults in the Npcap installer.',
+    False, False);
+  NpcapPage.Add('Install Npcap (Recommended)');
+  NpcapPage.Values[0] := False;
+end;
+
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := False;
+
+  // Skip Npcap page if already installed
+  if PageID = NpcapPage.ID then
+  begin
+    if IsNpcapInstalled then
+    begin
+      Result := True;
+      InstallNpcap := False; // Don't try to install if already there
+    end;
   end;
 end;
 
@@ -45,6 +129,11 @@ begin
   begin
     if CurPageID = ApiKeyPage.ID then
       Result := ApiKeyPage.Values[0] <> '';
+  end;
+
+  if CurPageID = NpcapPage.ID then
+  begin
+    InstallNpcap := NpcapPage.Values[0];
   end;
 end;
 
@@ -94,10 +183,24 @@ end;
 
 function InitializeSetup(): Boolean;
 begin
+  NpcapDownloadSuccess := False;
   Result := True;
 end;
 
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := '';
+  if InstallNpcap and not IsNpcapInstalled then
+  begin
+    if DownloadNpcap then
+      NpcapDownloadSuccess := True
+    else
+      NpcapDownloadSuccess := False;
+  end;
+end;
+
 [Run]
+Filename: "{tmp}\npcap-installer.exe"; StatusMsg: "Launching Npcap installer..."; Check: ShouldInstallNpcap; Flags: waituntilterminated
 Filename: "{app}\nssm.exe"; Parameters: "install EnigmaSensor enigma-sensor-windows-amd64.exe"; WorkingDir: "{app}"
 Filename: "{app}\nssm.exe"; Parameters: "set EnigmaSensor AppDirectory {app}"; WorkingDir: "{app}"
 Filename: "{app}\nssm.exe"; Parameters: "set EnigmaSensor AppStdout C:\\ProgramData\\EnigmaSensor\\logs\\enigma-sensor.log"; WorkingDir: "{app}"

@@ -14,12 +14,14 @@ import (
 	"github.com/google/gopacket/pcap"
 	"github.com/google/gopacket/pcapgo"
 
+	globalConfig "EnigmaNetz/Enigma-Go-Sensor/config"
 	"EnigmaNetz/Enigma-Go-Sensor/internal/capture/common"
 )
 
 // NpcapCapturer implements packet capture using Npcap library with promiscuous mode
 type NpcapCapturer struct {
 	outputDir string
+	mapper    *InterfaceMapper
 }
 
 // NewNpcapCapturer creates a new Npcap-based capturer
@@ -49,8 +51,9 @@ func IsNpcapAvailable() bool {
 
 // Capture runs Npcap capture with promiscuous mode and returns the output file path
 // If interface is "any" or "all", captures from all active interfaces in parallel
-func (c *NpcapCapturer) Capture(ctx context.Context, config common.CaptureConfig) (string, error) {
-	c.outputDir = config.OutputDir
+// Supports comma-separated interface list (e.g., "iface1,iface2") for multi-interface capture
+func (c *NpcapCapturer) Capture(ctx context.Context, captureConfig common.CaptureConfig) (string, error) {
+	c.outputDir = captureConfig.OutputDir
 
 	// Clean output directory of .pcap files before capture
 	entries, err := os.ReadDir(c.outputDir)
@@ -62,14 +65,42 @@ func (c *NpcapCapturer) Capture(ctx context.Context, config common.CaptureConfig
 		}
 	}
 
-	// Get device names for Npcap
-	deviceNames, err := getDeviceNamesForInterface(config.Interface)
+	// Parse all valid interfaces from comma-separated list (same as pktmon)
+	cfg := &globalConfig.Config{}
+	cfg.Capture.Interface = captureConfig.Interface
+	interfaces, err := cfg.GetAllInterfaces()
 	if err != nil {
-		return "", fmt.Errorf("failed to find devices for interface %s: %w", config.Interface, err)
+		return "", fmt.Errorf("failed to parse interface configuration: %w", err)
+	}
+
+	// Initialize interface mapper to translate pktmon IDs to Npcap device names
+	if c.mapper == nil {
+		mapper, err := NewInterfaceMapper()
+		if err != nil {
+			log.Printf("[capture] WARNING: Failed to create interface mapper: %v (will try direct lookup)", err)
+		} else {
+			c.mapper = mapper
+		}
+	}
+
+	// Translate pktmon interface IDs to Npcap device names
+	translatedInterfaces := make([]string, len(interfaces))
+	for i, iface := range interfaces {
+		if c.mapper != nil && iface != "any" && iface != "all" {
+			translatedInterfaces[i] = c.mapper.TranslateToNpcapDevice(iface)
+		} else {
+			translatedInterfaces[i] = iface
+		}
+	}
+
+	// Get device names for all requested interfaces
+	deviceNames, err := getDeviceNamesForInterfaces(translatedInterfaces)
+	if err != nil {
+		return "", fmt.Errorf("failed to find devices for interfaces %v: %w", translatedInterfaces, err)
 	}
 
 	if len(deviceNames) == 0 {
-		return "", fmt.Errorf("no suitable devices found for interface %s", config.Interface)
+		return "", fmt.Errorf("no suitable devices found for interfaces %v", interfaces)
 	}
 
 	// Create output PCAP file
@@ -91,8 +122,8 @@ func (c *NpcapCapturer) Capture(ctx context.Context, config common.CaptureConfig
 
 	if len(deviceNames) == 1 {
 		// Single interface capture
-		log.Printf("[capture] Starting Npcap capture on device: %s (interface: %s)", deviceNames[0].Name, config.Interface)
-		err := c.captureSingleInterface(ctx, deviceNames[0].Name, writer, config.CaptureWindow)
+		log.Printf("[capture] Starting Npcap capture on device: %s (interface: %s)", deviceNames[0].Name, captureConfig.Interface)
+		err := c.captureSingleInterface(ctx, deviceNames[0].Name, writer, captureConfig.CaptureWindow)
 		return pcapFile, err
 	}
 
@@ -102,7 +133,7 @@ func (c *NpcapCapturer) Capture(ctx context.Context, config common.CaptureConfig
 		log.Printf("[capture]   - %s (%s)", dev.Name, dev.Description)
 	}
 
-	return c.captureMultipleInterfaces(ctx, deviceNames, writer, config.CaptureWindow, pcapFile)
+	return c.captureMultipleInterfaces(ctx, deviceNames, writer, captureConfig.CaptureWindow, pcapFile)
 }
 
 // captureSingleInterface captures from a single device
@@ -249,7 +280,31 @@ type deviceInfo struct {
 	Description string
 }
 
-// getDeviceNamesForInterface converts an interface identifier to Npcap device name(s)
+// getDeviceNamesForInterfaces converts interface identifiers to Npcap device names
+// Handles "any", "all", and specific device names (supports comma-separated list)
+func getDeviceNamesForInterfaces(interfaces []string) ([]deviceInfo, error) {
+	var allDeviceNames []deviceInfo
+	seen := make(map[string]bool) // Deduplicate devices
+
+	for _, interfaceID := range interfaces {
+		devices, err := getDeviceNamesForInterface(interfaceID)
+		if err != nil {
+			return nil, err
+		}
+
+		// Add devices, avoiding duplicates
+		for _, dev := range devices {
+			if !seen[dev.Name] {
+				allDeviceNames = append(allDeviceNames, dev)
+				seen[dev.Name] = true
+			}
+		}
+	}
+
+	return allDeviceNames, nil
+}
+
+// getDeviceNamesForInterface converts a single interface identifier to Npcap device name(s)
 // Returns multiple devices for "any" or "all", single device otherwise
 func getDeviceNamesForInterface(interfaceID string) ([]deviceInfo, error) {
 	// If interfaceID is "any" or "all", return ALL active devices

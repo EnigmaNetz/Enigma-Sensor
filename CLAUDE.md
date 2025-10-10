@@ -135,6 +135,18 @@ AI agents must understand and respect data classification:
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Git Workflow
+**Branch naming convention:**
+- Format: `task/[TICKET-ID]-[short-description]`
+- Example: `task/B1CF-1234-add-user-authentication`
+- Use lowercase with hyphens for description
+- Always include ticket ID in branch name
+
+**Commit message requirements:**
+- MUST include ticket reference at end: `Ref [TICKET-ID]`
+- Example: `Ref B1CF-1234`
+- If branch name contains no numbers, do not reference any ticket
+
 ## Project Overview
 
 The Enigma Sensor is a **cross-platform network capture and processing tool** written in Go that:
@@ -213,7 +225,7 @@ golangci-lint run
 - `internal/sensor/` - Main sensor orchestration logic and interfaces
 - `internal/capture/` - Platform-specific network capture implementations
   - `capture/common/` - Shared capture configuration and types
-  - `capture/windows/` - Windows pktmon implementation  
+  - `capture/windows/` - Windows pktmon implementation
   - `capture/linux/` - Linux/macOS tcpdump implementation
 - `internal/processor/` - PCAP to Zeek log conversion
   - `processor/common/` - Processing types and interfaces
@@ -282,7 +294,7 @@ cd installer/debian
 - Wrap errors with context using `fmt.Errorf`
 - Never ignore errors from file operations, network calls, or subprocesses
 
-### Security Requirements  
+### Security Requirements
 - Never log API keys or sensitive configuration
 - Set restrictive file permissions (0600) for config and logs
 - Validate all user input and configuration values
@@ -309,7 +321,7 @@ cd installer/debian
 
 ### Windows Development Notes
 - Zeek runtime auto-extracts from bundled zip to `zeek-windows/`
-- ETL files converted to PCAP for processing  
+- ETL files converted to PCAP for processing
 - Service installation handled by NSSM
 
 ### Linux Development Notes

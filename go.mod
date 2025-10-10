@@ -4,6 +4,7 @@ go 1.24
 
 require (
 	github.com/golang/protobuf v1.5.4
+	github.com/google/gopacket v1.1.19
 	github.com/google/uuid v1.6.0
 	github.com/stretchr/testify v1.8.4
 	google.golang.org/grpc v1.72.0

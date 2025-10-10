@@ -118,6 +118,62 @@ func TestNpcapCapturer_Capture_ContextCancellation(t *testing.T) {
 	assert.FileExists(t, pcapFile)
 }
 
+func TestGetDeviceNamesForInterfaces(t *testing.T) {
+	// Skip if Npcap is not installed
+	if !IsNpcapAvailable() {
+		t.Skip("Npcap not installed, skipping device enumeration test")
+	}
+
+	tests := []struct {
+		name          string
+		interfaces    []string
+		shouldSucceed bool
+		expectMin     int // Minimum expected devices
+	}{
+		{
+			name:          "Single any interface",
+			interfaces:    []string{"any"},
+			shouldSucceed: true,
+			expectMin:     1, // Should have at least one active interface
+		},
+		{
+			name:          "Multiple specific interfaces",
+			interfaces:    []string{"15", "16"},
+			shouldSucceed: true,
+			expectMin:     1, // At least one should resolve
+		},
+		{
+			name:          "Mixed any and specific",
+			interfaces:    []string{"any", "12"},
+			shouldSucceed: true,
+			expectMin:     1,
+		},
+		{
+			name:          "Duplicate interfaces",
+			interfaces:    []string{"any", "any"},
+			shouldSucceed: true,
+			expectMin:     1, // Should deduplicate
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			devices, err := getDeviceNamesForInterfaces(tt.interfaces)
+
+			if tt.shouldSucceed {
+				assert.NoError(t, err)
+				assert.GreaterOrEqual(t, len(devices), tt.expectMin)
+				t.Logf("Interfaces %v mapped to %d devices", tt.interfaces, len(devices))
+				for _, dev := range devices {
+					t.Logf("  - %s (%s)", dev.Name, dev.Description)
+				}
+			} else {
+				assert.Error(t, err)
+			}
+		})
+	}
+}
+
 func TestGetDeviceNameForInterface(t *testing.T) {
 	// Skip if Npcap is not installed
 	if !IsNpcapAvailable() {
@@ -128,32 +184,44 @@ func TestGetDeviceNameForInterface(t *testing.T) {
 		name          string
 		interfaceID   string
 		shouldSucceed bool
+		expectMulti   bool // Expect multiple devices
 	}{
 		{
 			name:          "any interface",
 			interfaceID:   "any",
 			shouldSucceed: true,
+			expectMulti:   true, // Should return all active interfaces
 		},
 		{
 			name:          "all interfaces",
 			interfaceID:   "all",
 			shouldSucceed: true,
+			expectMulti:   true, // Should return all active interfaces
 		},
 		{
 			name:          "numeric interface",
 			interfaceID:   "12",
 			shouldSucceed: true, // Should fall back to first device
+			expectMulti:   false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			deviceName, err := getDeviceNameForInterface(tt.interfaceID)
+			devices, err := getDeviceNamesForInterface(tt.interfaceID)
 
 			if tt.shouldSucceed {
 				assert.NoError(t, err)
-				assert.NotEmpty(t, deviceName)
-				t.Logf("Interface %s mapped to device: %s", tt.interfaceID, deviceName)
+				assert.NotEmpty(t, devices)
+
+				if tt.expectMulti {
+					t.Logf("Interface %s mapped to %d devices", tt.interfaceID, len(devices))
+					for _, dev := range devices {
+						t.Logf("  - %s (%s)", dev.Name, dev.Description)
+					}
+				} else {
+					t.Logf("Interface %s mapped to device: %s (%s)", tt.interfaceID, devices[0].Name, devices[0].Description)
+				}
 			} else {
 				assert.Error(t, err)
 			}

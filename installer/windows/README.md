@@ -213,7 +213,7 @@ Update the version number in `enigma-sensor-installer.iss`:
 
 ```ini
 [Setup]
-AppVersion=1.4.2    ← Update this
+AppVersion=x.y.z    ← Update this
 ```
 
 ## References

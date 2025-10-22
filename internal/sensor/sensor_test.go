@@ -1,12 +1,9 @@
 package sensor
 
 import (
-	"archive/zip"
-	"bytes"
 	"context"
 	"errors"
 	"os"
-	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -245,43 +242,5 @@ func TestValidateZipPath_RejectsPathTraversal(t *testing.T) {
 				t.Errorf("validateZipPath(%q) error = %v, wantErr %v", tt.path, err, tt.wantErr)
 			}
 		})
-	}
-}
-
-func TestEnsureZeekWindows_RejectsZipSlip(t *testing.T) {
-	if true {
-		t.Skip("Skipping actual zip extraction test - testing validateZipPath is sufficient")
-	}
-	// This test creates a malicious zip file with path traversal
-	tmpDir := t.TempDir()
-	oldWd, _ := os.Getwd()
-	defer os.Chdir(oldWd)
-	os.Chdir(tmpDir)
-
-	// Create a malicious zip with a path traversal entry
-	buf := new(bytes.Buffer)
-	w := zip.NewWriter(buf)
-
-	// Add a file with path traversal
-	_, err := w.Create("../malicious.txt")
-	if err != nil {
-		t.Fatalf("Failed to create zip entry: %v", err)
-	}
-	w.Close()
-
-	// Write the malicious zip
-	maliciousZip := filepath.Join(tmpDir, "zeek-runtime-win64.zip")
-	err = os.WriteFile(maliciousZip, buf.Bytes(), 0644)
-	if err != nil {
-		t.Fatalf("Failed to write malicious zip: %v", err)
-	}
-
-	// Try to extract it - should fail
-	err = ensureZeekWindows()
-	if err == nil {
-		t.Error("Expected ensureZeekWindows to reject malicious zip, but it succeeded")
-	}
-	if err != nil && !bytes.Contains([]byte(err.Error()), []byte("..")) {
-		t.Errorf("Expected error message to mention '..' but got: %v", err)
 	}
 }

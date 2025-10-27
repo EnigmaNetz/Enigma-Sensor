@@ -47,7 +47,14 @@ func validateZipPath(path string) error {
 		return fmt.Errorf("path contains '..' element: %s", path)
 	}
 	// Check for absolute paths (should be relative)
+	// This needs to check for both OS-specific absolute paths and Unix-style paths
+	// since zip files can contain Unix paths even on Windows
 	if filepath.IsAbs(path) {
+		return fmt.Errorf("path is absolute: %s", path)
+	}
+	// Also check for Unix-style absolute paths (starting with /)
+	// which filepath.IsAbs may not catch on Windows
+	if len(path) > 0 && path[0] == '/' {
 		return fmt.Errorf("path is absolute: %s", path)
 	}
 	return nil

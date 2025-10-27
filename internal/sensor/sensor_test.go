@@ -218,3 +218,29 @@ func TestRunSensor_StopsOnAPIGone(t *testing.T) {
 	}
 	t.Log("TestRunSensor_StopsOnAPIGone end reached")
 }
+
+func TestValidateZipPath_RejectsPathTraversal(t *testing.T) {
+	tests := []struct {
+		name    string
+		path    string
+		wantErr bool
+	}{
+		{"safe relative path", "file.txt", false},
+		{"safe nested path", "dir/file.txt", false},
+		{"safe deep path", "dir1/dir2/dir3/file.txt", false},
+		{"dot dot in path", "../file.txt", true},
+		{"dot dot in middle", "dir/../file.txt", true},
+		{"dot dot at end", "dir/..", true},
+		{"double dot dot", "../../file.txt", true},
+		{"absolute path unix", "/etc/passwd", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateZipPath(tt.path)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateZipPath(%q) error = %v, wantErr %v", tt.path, err, tt.wantErr)
+			}
+		})
+	}
+}

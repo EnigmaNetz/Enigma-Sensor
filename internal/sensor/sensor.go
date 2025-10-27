@@ -40,6 +40,26 @@ type Uploader interface {
 	UploadLogs(ctx context.Context, files api.LogFiles) error
 }
 
+// validateZipPath checks if a zip entry path is safe from directory traversal attacks
+func validateZipPath(path string) error {
+	// Check for ".." path traversal elements
+	if strings.Contains(path, "..") {
+		return fmt.Errorf("path contains '..' element: %s", path)
+	}
+	// Check for absolute paths (should be relative)
+	// This needs to check for both OS-specific absolute paths and Unix-style paths
+	// since zip files can contain Unix paths even on Windows
+	if filepath.IsAbs(path) {
+		return fmt.Errorf("path is absolute: %s", path)
+	}
+	// Also check for Unix-style absolute paths (starting with /)
+	// which filepath.IsAbs may not catch on Windows
+	if len(path) > 0 && path[0] == '/' {
+		return fmt.Errorf("path is absolute: %s", path)
+	}
+	return nil
+}
+
 // ensureZeekWindows extracts Zeek for Windows, always overwriting the directory to ensure the latest version is used
 func ensureZeekWindows() error {
 	zeekDir := "zeek-windows"
@@ -65,7 +85,27 @@ func ensureZeekWindows() error {
 		return err
 	}
 	for _, f := range zr.File {
+		// Prevent zip slip vulnerability: validate file path
+		if err := validateZipPath(f.Name); err != nil {
+			return fmt.Errorf("invalid file path in zip archive: %w", err)
+		}
+
 		fpath := filepath.Join(zeekDir, f.Name)
+
+		// Additional security check: ensure the resolved path is within zeekDir
+		cleanPath := filepath.Clean(fpath)
+		absZeekDir, err := filepath.Abs(zeekDir)
+		if err != nil {
+			return fmt.Errorf("failed to resolve zeek directory: %w", err)
+		}
+		absPath, err := filepath.Abs(cleanPath)
+		if err != nil {
+			return fmt.Errorf("failed to resolve file path: %w", err)
+		}
+		if !strings.HasPrefix(absPath, absZeekDir+string(filepath.Separator)) && absPath != absZeekDir {
+			return fmt.Errorf("zip slip attempt detected: %s", f.Name)
+		}
+
 		if f.FileInfo().IsDir() {
 			if err := os.MkdirAll(fpath, f.Mode()); err != nil {
 				return err

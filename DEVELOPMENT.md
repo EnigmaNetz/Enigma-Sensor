@@ -89,6 +89,19 @@ cd installer/debian
 
 ---
 
+## Version Management
+
+Bump version across all files:
+```sh
+./scripts/bump-version.sh patch   # 1.5.0 -> 1.5.1
+./scripts/bump-version.sh minor   # 1.5.0 -> 1.6.0
+./scripts/bump-version.sh major   # 1.5.0 -> 2.0.0
+```
+
+Updates `internal/version/version.go`, `installer/debian/DEBIAN/control`, and `installer/windows/enigma-sensor-installer.iss`, then commits and creates a git tag.
+
+---
+
 ## Notes and Standards
 
 - Follow existing code patterns and conventions

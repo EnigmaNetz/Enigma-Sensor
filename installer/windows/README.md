@@ -209,12 +209,13 @@ Write-Host "Installer created: Output/enigma-sensor-installer.exe"
 
 ## Version Management
 
-Update the version number in `enigma-sensor-installer.iss`:
+Use the version bump script from the repo root:
 
-```ini
-[Setup]
-AppVersion=x.y.z    ← Update this
+```sh
+./scripts/bump-version.sh patch   # or minor/major
 ```
+
+This updates `enigma-sensor-installer.iss`, `internal/version/version.go`, and `installer/debian/DEBIAN/control`, then commits and tags.
 
 ## References
 

@@ -16,10 +16,12 @@ type Config struct {
 		Level string `json:"level"`
 		// File is the path to the log file. If empty, logs to stdout only
 		File string `json:"file"`
-		// MaxSizeMB is the maximum size of log file before rotation
+		// MaxSizeMB is the maximum size of log file before rotation (min 10MB, max 500MB)
 		MaxSizeMB int64 `json:"max_size_mb"`
-		// LogRetentionDays is the number of days to keep log files
+		// LogRetentionDays is the number of days to keep log files (min 1, max 30)
 		LogRetentionDays int `json:"log_retention_days"`
+		// MaxBackups is the maximum number of old log files to retain (min 1, max 10)
+		MaxBackups int `json:"max_backups"`
 	} `json:"logging"`
 
 	// Capture configuration
@@ -64,15 +66,34 @@ type Config struct {
 }
 
 // ValidateAndSetDefaults normalizes the configuration and sets defaults
-func (config *Config) ValidateAndSetDefaults() {
+// Returns an error if any explicit values are out of bounds (0/missing values get defaults)
+func (config *Config) ValidateAndSetDefaults() error {
 	if config.Logging.Level == "" {
 		config.Logging.Level = "info"
 	}
+	// Validate and set MaxSizeMB with bounds: min 10MB, max 500MB, default 50MB
 	if config.Logging.MaxSizeMB == 0 {
-		config.Logging.MaxSizeMB = 100 // 100MB default
+		config.Logging.MaxSizeMB = 50 // 50MB default
+	} else if config.Logging.MaxSizeMB < 10 {
+		return fmt.Errorf("logging.max_size_mb must be at least 10MB, got %d", config.Logging.MaxSizeMB)
+	} else if config.Logging.MaxSizeMB > 500 {
+		return fmt.Errorf("logging.max_size_mb must be at most 500MB, got %d", config.Logging.MaxSizeMB)
 	}
+	// Validate and set LogRetentionDays with bounds: min 1, max 30, default 7
 	if config.Logging.LogRetentionDays == 0 {
-		config.Logging.LogRetentionDays = 1 // 1 day default
+		config.Logging.LogRetentionDays = 7 // 7 days default
+	} else if config.Logging.LogRetentionDays < 1 {
+		return fmt.Errorf("logging.log_retention_days must be at least 1, got %d", config.Logging.LogRetentionDays)
+	} else if config.Logging.LogRetentionDays > 30 {
+		return fmt.Errorf("logging.log_retention_days must be at most 30, got %d", config.Logging.LogRetentionDays)
+	}
+	// Validate and set MaxBackups with bounds: min 1, max 10, default 5
+	if config.Logging.MaxBackups == 0 {
+		config.Logging.MaxBackups = 5 // 5 backups default
+	} else if config.Logging.MaxBackups < 1 {
+		return fmt.Errorf("logging.max_backups must be at least 1, got %d", config.Logging.MaxBackups)
+	} else if config.Logging.MaxBackups > 10 {
+		return fmt.Errorf("logging.max_backups must be at most 10, got %d", config.Logging.MaxBackups)
 	}
 	if config.EnigmaAPI.Server == "" {
 		config.EnigmaAPI.Server = "api.enigmaai.net:443"
@@ -100,6 +121,7 @@ func (config *Config) ValidateAndSetDefaults() {
 	if config.Buffering.MaxAgeHours == 0 {
 		config.Buffering.MaxAgeHours = 2 // Default to 2 hours retention
 	}
+	return nil
 }
 
 // validateInterfaceName validates that an interface name contains only safe characters
@@ -221,7 +243,9 @@ func LoadConfig(configPath string) (*Config, error) {
 	}
 
 	// Normalize and apply defaults in one place
-	config.ValidateAndSetDefaults()
+	if err := config.ValidateAndSetDefaults(); err != nil {
+		return nil, fmt.Errorf("invalid configuration: %w", err)
+	}
 
 	return &config, nil
 }

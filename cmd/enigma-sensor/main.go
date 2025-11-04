@@ -110,10 +110,11 @@ func main() {
 			Filename:   cfg.Logging.File,
 			MaxSize:    int(cfg.Logging.MaxSizeMB),   // megabytes
 			MaxAge:     cfg.Logging.LogRetentionDays, // days
-			MaxBackups: 3,                            // keep up to 3 old log files
+			MaxBackups: cfg.Logging.MaxBackups,       // number of old log files to retain
 			Compress:   true,                         // compress rotated logs
 		}
 		log.SetOutput(io.MultiWriter(os.Stdout, logWriter))
+		log.Printf("Log rotation configured: max size %dMB, retention %d days, max backups %d", cfg.Logging.MaxSizeMB, cfg.Logging.LogRetentionDays, cfg.Logging.MaxBackups)
 	}
 
 	log.Printf("Loaded config: %+v", cfg)

@@ -2,8 +2,9 @@
   "logging": {
     "level": "info",
     "file": "logs/enigma-sensor.log",
-    "max_size_mb": 100,
-    "log_retention_days": 1
+    "max_size_mb": 50,
+    "log_retention_days": 7,
+    "max_backups": 5
   },
   "capture": {
     "output_dir": "./captures",

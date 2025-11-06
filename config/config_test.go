@@ -234,7 +234,10 @@ func TestGetAllInterfaces(t *testing.T) {
 
 func TestConfig_ValidateAndSetDefaults(t *testing.T) {
 	cfg := &Config{}
-	cfg.ValidateAndSetDefaults()
+	err := cfg.ValidateAndSetDefaults()
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 
 	// Test that defaults are set correctly
 	if cfg.Capture.Interface != "any" {
@@ -243,5 +246,137 @@ func TestConfig_ValidateAndSetDefaults(t *testing.T) {
 
 	if cfg.Logging.Level != "info" {
 		t.Errorf("Expected default log level to be 'info', got %q", cfg.Logging.Level)
+	}
+
+	// Test logging defaults
+	if cfg.Logging.MaxSizeMB != 50 {
+		t.Errorf("Expected default MaxSizeMB to be 50, got %d", cfg.Logging.MaxSizeMB)
+	}
+	if cfg.Logging.LogRetentionDays != 7 {
+		t.Errorf("Expected default LogRetentionDays to be 7, got %d", cfg.Logging.LogRetentionDays)
+	}
+	if cfg.Logging.MaxBackups != 5 {
+		t.Errorf("Expected default MaxBackups to be 5, got %d", cfg.Logging.MaxBackups)
+	}
+}
+
+func TestConfig_ValidateAndSetDefaults_MaxSizeMB(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       int64
+		expected    int64
+		expectError bool
+		errorMsg    string
+	}{
+		{"zero defaults to 50", 0, 50, false, ""},
+		{"below minimum errors", 5, 5, true, "must be at least 10MB"},
+		{"at minimum preserved", 10, 10, false, ""},
+		{"valid value preserved", 50, 50, false, ""},
+		{"valid value preserved", 200, 200, false, ""},
+		{"at maximum preserved", 500, 500, false, ""},
+		{"above maximum errors", 6000, 6000, true, "must be at most 500MB"},
+		{"above maximum errors", 10000, 10000, true, "must be at most 500MB"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{}
+			cfg.Logging.MaxSizeMB = tt.input
+			err := cfg.ValidateAndSetDefaults()
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("Expected error for MaxSizeMB=%d, got nil", tt.input)
+				} else if tt.errorMsg != "" && !strings.Contains(err.Error(), tt.errorMsg) {
+					t.Errorf("Expected error to contain %q, got %q", tt.errorMsg, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error for MaxSizeMB=%d: %v", tt.input, err)
+				} else if cfg.Logging.MaxSizeMB != tt.expected {
+					t.Errorf("MaxSizeMB: input %d, expected %d, got %d", tt.input, tt.expected, cfg.Logging.MaxSizeMB)
+				}
+			}
+		})
+	}
+}
+
+func TestConfig_ValidateAndSetDefaults_LogRetentionDays(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       int
+		expected    int
+		expectError bool
+		errorMsg    string
+	}{
+		{"zero defaults to 7", 0, 7, false, ""},
+		{"below minimum errors", -1, -1, true, "must be at least 1"},
+		{"at minimum preserved", 1, 1, false, ""},
+		{"valid value preserved", 7, 7, false, ""},
+		{"valid value preserved", 14, 14, false, ""},
+		{"at maximum preserved", 30, 30, false, ""},
+		{"above maximum errors", 60, 60, true, "must be at most 30"},
+		{"above maximum errors", 365, 365, true, "must be at most 30"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{}
+			cfg.Logging.LogRetentionDays = tt.input
+			err := cfg.ValidateAndSetDefaults()
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("Expected error for LogRetentionDays=%d, got nil", tt.input)
+				} else if tt.errorMsg != "" && !strings.Contains(err.Error(), tt.errorMsg) {
+					t.Errorf("Expected error to contain %q, got %q", tt.errorMsg, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error for LogRetentionDays=%d: %v", tt.input, err)
+				} else if cfg.Logging.LogRetentionDays != tt.expected {
+					t.Errorf("LogRetentionDays: input %d, expected %d, got %d", tt.input, tt.expected, cfg.Logging.LogRetentionDays)
+				}
+			}
+		})
+	}
+}
+
+func TestConfig_ValidateAndSetDefaults_MaxBackups(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       int
+		expected    int
+		expectError bool
+		errorMsg    string
+	}{
+		{"zero defaults to 5", 0, 5, false, ""},
+		{"below minimum errors", -1, -1, true, "must be at least 1"},
+		{"at minimum preserved", 1, 1, false, ""},
+		{"valid value preserved", 3, 3, false, ""},
+		{"default value preserved", 5, 5, false, ""},
+		{"valid value preserved", 7, 7, false, ""},
+		{"at maximum preserved", 10, 10, false, ""},
+		{"above maximum errors", 20, 20, true, "must be at most 10"},
+		{"above maximum errors", 100, 100, true, "must be at most 10"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{}
+			cfg.Logging.MaxBackups = tt.input
+			err := cfg.ValidateAndSetDefaults()
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("Expected error for MaxBackups=%d, got nil", tt.input)
+				} else if tt.errorMsg != "" && !strings.Contains(err.Error(), tt.errorMsg) {
+					t.Errorf("Expected error to contain %q, got %q", tt.errorMsg, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error for MaxBackups=%d: %v", tt.input, err)
+				} else if cfg.Logging.MaxBackups != tt.expected {
+					t.Errorf("MaxBackups: input %d, expected %d, got %d", tt.input, tt.expected, cfg.Logging.MaxBackups)
+				}
+			}
+		})
 	}
 }

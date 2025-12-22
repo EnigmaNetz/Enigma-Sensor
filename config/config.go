@@ -10,6 +10,9 @@ import (
 
 // Config represents the application configuration
 type Config struct {
+	// SensorID is a user-defined identifier for this sensor (required)
+	SensorID string `json:"sensor_id"`
+
 	// Logging configuration
 	Logging struct {
 		// Level is the minimum log level to output (debug, info, warn, error)
@@ -65,9 +68,41 @@ type Config struct {
 	} `json:"zeek"`
 }
 
+// validateSensorID validates the sensor_id format
+// Rules: 1-64 chars, alphanumeric + spaces/hyphens/underscores, must start/end with alphanumeric
+func validateSensorID(sensorID string) error {
+	sensorID = strings.TrimSpace(sensorID)
+
+	if sensorID == "" {
+		return fmt.Errorf("sensor_id is required in config.json")
+	}
+
+	if sensorID == "REPLACE_WITH_YOUR_SENSOR_ID" {
+		return fmt.Errorf("sensor_id must be set to a real value (not the placeholder from config.example.json)")
+	}
+
+	if len(sensorID) > 64 {
+		return fmt.Errorf("sensor_id must be 64 characters or less, got %d", len(sensorID))
+	}
+
+	// Must start and end with alphanumeric, can contain letters, numbers, spaces, hyphens, underscores
+	validPattern := regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9\-_ ]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$`)
+	if !validPattern.MatchString(sensorID) {
+		return fmt.Errorf("sensor_id must start and end with a letter or number, and can only contain letters, numbers, spaces, hyphens, and underscores")
+	}
+
+	return nil
+}
+
 // ValidateAndSetDefaults normalizes the configuration and sets defaults
 // Returns an error if any explicit values are out of bounds (0/missing values get defaults)
 func (config *Config) ValidateAndSetDefaults() error {
+	// Validate sensor_id (required, no default)
+	if err := validateSensorID(config.SensorID); err != nil {
+		return err
+	}
+	config.SensorID = strings.TrimSpace(config.SensorID)
+
 	if config.Logging.Level == "" {
 		config.Logging.Level = "info"
 	}

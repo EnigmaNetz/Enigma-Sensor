@@ -17,10 +17,11 @@ import (
 )
 
 // GenerateMetadata creates the metadata map for sensor uploads
-func GenerateMetadata() map[string]string {
+func GenerateMetadata(sensorID string) map[string]string {
 	metadata := make(map[string]string)
 
 	// Essential Fields
+	metadata["sensor_id"] = sensorID
 	metadata["machine_id"] = generateMachineID()
 	metadata["sensor_version"] = version.Version
 	metadata["os_name"] = runtime.GOOS

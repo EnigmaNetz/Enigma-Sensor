@@ -4,7 +4,38 @@ set -eu
 # --- User-provided variables ---
 ENIGMA_API_KEY="${ENIGMA_API_KEY:-}"
 ENIGMA_API_URL="${ENIGMA_API_URL:-api.enigmaai.net:443}"
+ENIGMA_SENSOR_ID="${ENIGMA_SENSOR_ID:-}"
 
+# --- Validation function for sensor ID ---
+validate_sensor_id() {
+  local sensor_id="$1"
+  local len=${#sensor_id}
+
+  # Check length (1-64)
+  if [ "$len" -lt 1 ] || [ "$len" -gt 64 ]; then
+    return 1
+  fi
+
+  # Check format: alphanumeric start/end, allows letters, numbers, spaces, hyphens, underscores
+  # Must start with alphanumeric
+  if ! echo "$sensor_id" | grep -q '^[a-zA-Z0-9]'; then
+    return 1
+  fi
+
+  # Must end with alphanumeric
+  if ! echo "$sensor_id" | grep -q '[a-zA-Z0-9]$'; then
+    return 1
+  fi
+
+  # Must contain only allowed characters (letters, numbers, spaces, hyphens, underscores)
+  if echo "$sensor_id" | grep -q '[^a-zA-Z0-9 _-]'; then
+    return 1
+  fi
+
+  return 0
+}
+
+# --- Prompt for API Key if not set ---
 if [ -z "$ENIGMA_API_KEY" ]; then
   echo "ENIGMA_API_KEY environment variable not set."
   read -r -s -p "Enter your Enigma API Key: " ENIGMA_API_KEY
@@ -13,6 +44,31 @@ if [ -z "$ENIGMA_API_KEY" ]; then
     echo "ERROR: API key is required."
     exit 1
   fi
+fi
+
+# --- Prompt for Sensor ID if not set ---
+if [ -z "$ENIGMA_SENSOR_ID" ]; then
+  echo "ENIGMA_SENSOR_ID environment variable not set."
+  echo "Sensor ID requirements:"
+  echo "  - 1 to 64 characters"
+  echo "  - Letters, numbers, spaces, hyphens, and underscores only"
+  echo "  - Must start and end with a letter or number"
+  echo "  - Example: HQ-Firewall-01"
+  read -r -p "Enter your Sensor ID: " ENIGMA_SENSOR_ID
+  if [ -z "$ENIGMA_SENSOR_ID" ]; then
+    echo "ERROR: Sensor ID is required."
+    exit 1
+  fi
+fi
+
+# --- Validate Sensor ID ---
+if ! validate_sensor_id "$ENIGMA_SENSOR_ID"; then
+  echo "ERROR: Invalid Sensor ID '$ENIGMA_SENSOR_ID'."
+  echo "Requirements:"
+  echo "  - 1 to 64 characters"
+  echo "  - Letters, numbers, spaces, hyphens, and underscores only"
+  echo "  - Must start and end with a letter or number"
+  exit 1
 fi
 
 # --- Detect OS ---
@@ -85,6 +141,7 @@ mkdir -p /etc/enigma-sensor
 if [ ! -f /etc/enigma-sensor/config.json ]; then
   cat > /etc/enigma-sensor/config.json <<EOF
 {
+  "sensor_id": "$ENIGMA_SENSOR_ID",
   "logging": {
     "level": "info",
     "file": "/var/log/enigma-sensor/enigma-sensor.log",

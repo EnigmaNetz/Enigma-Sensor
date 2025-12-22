@@ -1,0 +1,15 @@
+# Default behavior
+* text=auto
+
+# Shell scripts must have Unix line endings
+*.sh text eol=lf
+
+# Batch files must have Windows line endings
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary files
+*.exe binary
+*.zip binary
+*.deb binary
+*.rpm binary

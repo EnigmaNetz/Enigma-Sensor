@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -93,6 +94,11 @@ func main() {
 		cfg, err = config.LoadConfig(path)
 		if err == nil {
 			break
+		}
+		// If the file exists but has validation errors, stop and report the error
+		// rather than trying the next config path
+		if !errors.Is(err, os.ErrNotExist) {
+			log.Fatalf("Failed to load config from %s: %v", path, err)
 		}
 	}
 	if cfg == nil {

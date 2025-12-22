@@ -22,6 +22,7 @@ go test -i ./...
 2) Create `config.json` from example and adjust as needed:
 ```json
 {
+  "sensor_id": "YOUR_SENSOR_ID",
   "logging": { "file": "logs/enigma-sensor.log" },
   "capture": { "output_dir": "./captures", "window_seconds": 60, "loop": true, "interface": "any" },
   "enigma_api": { "server": "api.enigmaai.net:443", "api_key": "YOUR_API_KEY", "upload": true },

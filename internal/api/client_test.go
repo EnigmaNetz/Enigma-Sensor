@@ -154,7 +154,7 @@ func TestLogUploader_UploadLogs(t *testing.T) {
 			uploader := &LogUploader{
 				client:       mock,
 				apiKey:       "test-key",
-				sensorID:     "Test-Sensor-01",
+				networkID:    "Test-Network-01",
 				retryCount:   3,
 				retryDelay:   time.Millisecond, // Short delay for tests
 				compressFunc: compressData,
@@ -193,7 +193,7 @@ func TestLogUploader_PrepareLogData(t *testing.T) {
 
 	uploader := &LogUploader{
 		apiKey:       "test-key",
-		sensorID:     "Test-Sensor-01",
+		networkID:    "Test-Network-01",
 		retryCount:   3,
 		retryDelay:   time.Second,
 		compressFunc: compressData,
@@ -232,7 +232,7 @@ func TestUploadLogs_ReadFileError(t *testing.T) {
 	uploader := &LogUploader{
 		client:       mock,
 		apiKey:       "test-key",
-		sensorID:     "Test-Sensor-01",
+		networkID:    "Test-Network-01",
 		retryCount:   1,
 		retryDelay:   time.Millisecond,
 		compressFunc: compressData,
@@ -259,7 +259,7 @@ func TestUploadLogs_ReadFileError(t *testing.T) {
 func TestUploadLogs_CompressError(t *testing.T) {
 	uploader := &LogUploader{
 		apiKey:       "test-key",
-		sensorID:     "Test-Sensor-01",
+		networkID:    "Test-Network-01",
 		retryCount:   1,
 		retryDelay:   time.Millisecond,
 		compressFunc: func(_ []byte) ([]byte, error) { return nil, fmt.Errorf("compress error") },
@@ -290,7 +290,7 @@ func TestUploadLogs_UploadNon200(t *testing.T) {
 	uploader := &LogUploader{
 		client:       mock,
 		apiKey:       "test-key",
-		sensorID:     "Test-Sensor-01",
+		networkID:    "Test-Network-01",
 		retryCount:   1,
 		retryDelay:   time.Millisecond,
 		compressFunc: compressData,
@@ -315,7 +315,7 @@ func TestUploadLogs_ContextCancelled(t *testing.T) {
 	uploader := &LogUploader{
 		client:       mock,
 		apiKey:       "test-key",
-		sensorID:     "Test-Sensor-01",
+		networkID:    "Test-Network-01",
 		retryCount:   1,
 		retryDelay:   time.Millisecond,
 		compressFunc: compressData,
@@ -342,7 +342,7 @@ func TestUploadLogs_410Gone(t *testing.T) {
 	uploader := &LogUploader{
 		client:       mock,
 		apiKey:       "test-key",
-		sensorID:     "Test-Sensor-01",
+		networkID:    "Test-Network-01",
 		retryCount:   1,
 		retryDelay:   time.Millisecond,
 		compressFunc: compressData,
@@ -470,7 +470,7 @@ func TestUploadLogsChunking(t *testing.T) {
 	uploader := &LogUploader{
 		client:           mockClient,
 		apiKey:           "test-key",
-		sensorID:         "Test-Sensor-01",
+		networkID:        "Test-Network-01",
 		retryCount:       1,
 		retryDelay:       time.Millisecond,
 		compressFunc:     compressData,
@@ -512,7 +512,7 @@ func TestUploadLogsSinglePath(t *testing.T) {
 	uploader := &LogUploader{
 		client:           mockClient,
 		apiKey:           "test-key",
-		sensorID:         "Test-Sensor-01",
+		networkID:        "Test-Network-01",
 		retryCount:       1,
 		retryDelay:       time.Millisecond,
 		compressFunc:     compressData,

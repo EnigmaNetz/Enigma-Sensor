@@ -36,7 +36,7 @@ begin
   Result := FileExists(ExpandConstant('{sys}\Npcap\wpcap.dll'));
 end;
 
-function IsValidSensorId(const SensorId: string): Boolean;
+function IsValidNetworkId(const NetworkId: string): Boolean;
 var
   I: Integer;
   C: Char;
@@ -44,23 +44,23 @@ begin
   Result := False;
 
   // Check length (1-64)
-  if (Length(SensorId) < 1) or (Length(SensorId) > 64) then
+  if (Length(NetworkId) < 1) or (Length(NetworkId) > 64) then
     Exit;
 
   // Check first character is alphanumeric
-  C := SensorId[1];
+  C := NetworkId[1];
   if not (((C >= 'a') and (C <= 'z')) or ((C >= 'A') and (C <= 'Z')) or ((C >= '0') and (C <= '9'))) then
     Exit;
 
   // Check last character is alphanumeric
-  C := SensorId[Length(SensorId)];
+  C := NetworkId[Length(NetworkId)];
   if not (((C >= 'a') and (C <= 'z')) or ((C >= 'A') and (C <= 'Z')) or ((C >= '0') and (C <= '9'))) then
     Exit;
 
   // Check all characters are valid (alphanumeric, space, hyphen, underscore)
-  for I := 1 to Length(SensorId) do
+  for I := 1 to Length(NetworkId) do
   begin
-    C := SensorId[I];
+    C := NetworkId[I];
     if not (((C >= 'a') and (C <= 'z')) or ((C >= 'A') and (C <= 'Z')) or ((C >= '0') and (C <= '9')) or (C = ' ') or (C = '-') or (C = '_')) then
       Exit;
   end;
@@ -123,9 +123,9 @@ begin
 
   if not ConfigExists then
   begin
-    UserConfigPage := CreateInputQueryPage(wpSelectDir, 'Configuration', 'Enter your Enigma API Key and Sensor ID', 'This is required.');
+    UserConfigPage := CreateInputQueryPage(wpSelectDir, 'Configuration', 'Enter your Enigma API Key and Network ID', 'This is required.');
     UserConfigPage.Add('API Key (from Enigma dashboard):', False);
-    UserConfigPage.Add('Sensor ID (1-64 chars, letters/numbers/spaces/hyphens, e.g. "HQ-Firewall-01"):', False);
+    UserConfigPage.Add('A unique ID for this network (1-64 characters, letters/numbers/spaces/hyphens, e.g. "HQ-Firewall-01"):', False);
   end;
 
   NpcapPage := CreateInputOptionPage(wpSelectDir, 'Enhanced Network Capture',
@@ -157,7 +157,7 @@ end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
-  SensorId: string;
+  NetworkId: string;
 begin
   Result := True;
   if not ConfigExists then
@@ -172,19 +172,19 @@ begin
         Exit;
       end;
 
-      // Check Sensor ID is not empty
-      SensorId := UserConfigPage.Values[1];
-      if SensorId = '' then
+      // Check Network ID is not empty
+      NetworkId := UserConfigPage.Values[1];
+      if NetworkId = '' then
       begin
-        MsgBox('Please enter a Sensor ID.', mbError, MB_OK);
+        MsgBox('Please enter a Network ID.', mbError, MB_OK);
         Result := False;
         Exit;
       end;
 
-      // Validate Sensor ID format
-      if not IsValidSensorId(SensorId) then
+      // Validate Network ID format
+      if not IsValidNetworkId(NetworkId) then
       begin
-        MsgBox('Invalid Sensor ID. Requirements:' + #13#10 +
+        MsgBox('Invalid Network ID. Requirements:' + #13#10 +
           '- 1 to 64 characters' + #13#10 +
           '- Letters, numbers, spaces, hyphens, and underscores only' + #13#10 +
           '- Must start and end with a letter or number', mbError, MB_OK);
@@ -241,7 +241,7 @@ begin
     FileCopy(ExpandConstant('{tmp}\config.example.json'), ConfigPath, False);
 
     FileReplaceString(ConfigPath, '"api_key": "REPLACE_WITH_YOUR_API_KEY"', '"api_key": "' + UserConfigPage.Values[0] + '"');
-    FileReplaceString(ConfigPath, '"sensor_id": "REPLACE_WITH_YOUR_SENSOR_ID"', '"sensor_id": "' + UserConfigPage.Values[1] + '"');
+    FileReplaceString(ConfigPath, '"network_id": "REPLACE_WITH_YOUR_NETWORK_ID"', '"network_id": "' + UserConfigPage.Values[1] + '"');
   end;
 end;
 

@@ -32,7 +32,7 @@ type grpcClient interface {
 type LogUploader struct {
 	client           grpcClient
 	apiKey           string
-	sensorID         string
+	networkID        string
 	retryCount       int
 	retryDelay       time.Duration
 	compressFunc     func([]byte) ([]byte, error) // for DI/testing
@@ -68,7 +68,7 @@ type grpcClientImpl struct {
 }
 
 // NewLogUploader creates a new log uploader instance
-func NewLogUploader(serverAddr string, apiKey string, sensorID string, maxPayloadSizeMB int64, bufferDir string, bufferMaxAgeHours int) (*LogUploader, error) {
+func NewLogUploader(serverAddr string, apiKey string, networkID string, maxPayloadSizeMB int64, bufferDir string, bufferMaxAgeHours int) (*LogUploader, error) {
 	var opts []grpc.DialOption
 
 	// Always use SSL credentials with system trust store
@@ -90,7 +90,7 @@ func NewLogUploader(serverAddr string, apiKey string, sensorID string, maxPayloa
 	return &LogUploader{
 		client:           &grpcClientImpl{client: pb.NewPublishServiceClient(conn)},
 		apiKey:           apiKey,
-		sensorID:         sensorID,
+		networkID:        networkID,
 		retryCount:       3,
 		retryDelay:       5 * time.Second,
 		compressFunc:     compressData,
@@ -390,7 +390,7 @@ func (u *LogUploader) prepareLogData(files LogFiles) ([]byte, error) {
 // upload sends the compressed data to the server
 func (u *LogUploader) upload(ctx context.Context, data []byte) error {
 	// Generate metadata for the payload
-	metadataMap := metadata.GenerateMetadata(u.sensorID)
+	metadataMap := metadata.GenerateMetadata(u.networkID)
 	log.Printf("[upload] Sending metadata to API: %+v", metadataMap)
 
 	_, statusCode, message, err := u.client.uploadExcelMethod(ctx, data, u.apiKey, metadataMap)

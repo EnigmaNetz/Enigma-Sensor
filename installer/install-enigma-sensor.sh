@@ -4,12 +4,12 @@ set -eu
 # --- User-provided variables ---
 ENIGMA_API_KEY="${ENIGMA_API_KEY:-}"
 ENIGMA_API_URL="${ENIGMA_API_URL:-api.enigmaai.net:443}"
-ENIGMA_SENSOR_ID="${ENIGMA_SENSOR_ID:-}"
+ENIGMA_NETWORK_ID="${ENIGMA_NETWORK_ID:-}"
 
-# --- Validation function for sensor ID ---
-validate_sensor_id() {
-  local sensor_id="$1"
-  local len=${#sensor_id}
+# --- Validation function for network ID ---
+validate_network_id() {
+  local network_id="$1"
+  local len=${#network_id}
 
   # Check length (1-64)
   if [ "$len" -lt 1 ] || [ "$len" -gt 64 ]; then
@@ -18,17 +18,17 @@ validate_sensor_id() {
 
   # Check format: alphanumeric start/end, allows letters, numbers, spaces, hyphens, underscores
   # Must start with alphanumeric
-  if ! echo "$sensor_id" | grep -q '^[a-zA-Z0-9]'; then
+  if ! echo "$network_id" | grep -q '^[a-zA-Z0-9]'; then
     return 1
   fi
 
   # Must end with alphanumeric
-  if ! echo "$sensor_id" | grep -q '[a-zA-Z0-9]$'; then
+  if ! echo "$network_id" | grep -q '[a-zA-Z0-9]$'; then
     return 1
   fi
 
   # Must contain only allowed characters (letters, numbers, spaces, hyphens, underscores)
-  if echo "$sensor_id" | grep -q '[^a-zA-Z0-9 _-]'; then
+  if echo "$network_id" | grep -q '[^a-zA-Z0-9 _-]'; then
     return 1
   fi
 
@@ -46,24 +46,24 @@ if [ -z "$ENIGMA_API_KEY" ]; then
   fi
 fi
 
-# --- Prompt for Sensor ID if not set ---
-if [ -z "$ENIGMA_SENSOR_ID" ]; then
-  echo "ENIGMA_SENSOR_ID environment variable not set."
-  echo "Sensor ID requirements:"
+# --- Prompt for Network ID if not set ---
+if [ -z "$ENIGMA_NETWORK_ID" ]; then
+  echo "ENIGMA_NETWORK_ID environment variable not set."
+  echo "Network ID requirements:"
   echo "  - 1 to 64 characters"
   echo "  - Letters, numbers, spaces, hyphens, and underscores only"
   echo "  - Must start and end with a letter or number"
   echo "  - Example: HQ-Firewall-01"
-  read -r -p "Enter your Sensor ID: " ENIGMA_SENSOR_ID
-  if [ -z "$ENIGMA_SENSOR_ID" ]; then
-    echo "ERROR: Sensor ID is required."
+  read -r -p "Enter your Network ID: " ENIGMA_NETWORK_ID
+  if [ -z "$ENIGMA_NETWORK_ID" ]; then
+    echo "ERROR: Network ID is required."
     exit 1
   fi
 fi
 
-# --- Validate Sensor ID ---
-if ! validate_sensor_id "$ENIGMA_SENSOR_ID"; then
-  echo "ERROR: Invalid Sensor ID '$ENIGMA_SENSOR_ID'."
+# --- Validate Network ID ---
+if ! validate_network_id "$ENIGMA_NETWORK_ID"; then
+  echo "ERROR: Invalid Network ID '$ENIGMA_NETWORK_ID'."
   echo "Requirements:"
   echo "  - 1 to 64 characters"
   echo "  - Letters, numbers, spaces, hyphens, and underscores only"
@@ -141,7 +141,7 @@ mkdir -p /etc/enigma-sensor
 if [ ! -f /etc/enigma-sensor/config.json ]; then
   cat > /etc/enigma-sensor/config.json <<EOF
 {
-  "sensor_id": "$ENIGMA_SENSOR_ID",
+  "network_id": "$ENIGMA_NETWORK_ID",
   "logging": {
     "level": "info",
     "file": "/var/log/enigma-sensor/enigma-sensor.log",

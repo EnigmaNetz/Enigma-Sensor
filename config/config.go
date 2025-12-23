@@ -10,8 +10,8 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-	// SensorID is a user-defined identifier for this sensor (required)
-	SensorID string `json:"sensor_id"`
+	// NetworkID is a user-defined identifier for this network/sensor (required)
+	NetworkID string `json:"network_id"`
 
 	// Logging configuration
 	Logging struct {
@@ -68,27 +68,27 @@ type Config struct {
 	} `json:"zeek"`
 }
 
-// validateSensorID validates the sensor_id format
-// Rules: 1-64 chars, alphanumeric + spaces/hyphens/underscores, must start/end with alphanumeric
-func validateSensorID(sensorID string) error {
-	sensorID = strings.TrimSpace(sensorID)
+// validateNetworkID validates the network_id format
+// Rules: 1-64 characters, alphanumeric + spaces/hyphens/underscores, must start/end with alphanumeric
+func validateNetworkID(networkID string) error {
+	networkID = strings.TrimSpace(networkID)
 
-	if sensorID == "" {
-		return fmt.Errorf("sensor_id is required in config.json")
+	if networkID == "" {
+		return fmt.Errorf("network_id is required in config.json")
 	}
 
-	if sensorID == "REPLACE_WITH_YOUR_SENSOR_ID" {
-		return fmt.Errorf("sensor_id must be set to a real value (not the placeholder from config.example.json)")
+	if networkID == "REPLACE_WITH_YOUR_NETWORK_ID" {
+		return fmt.Errorf("network_id must be set to a real value (not the placeholder from config.example.json)")
 	}
 
-	if len(sensorID) > 64 {
-		return fmt.Errorf("sensor_id must be 64 characters or less, got %d", len(sensorID))
+	if len(networkID) > 64 {
+		return fmt.Errorf("network_id must be 64 characters or less, got %d", len(networkID))
 	}
 
 	// Must start and end with alphanumeric, can contain letters, numbers, spaces, hyphens, underscores
 	validPattern := regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9\-_ ]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$`)
-	if !validPattern.MatchString(sensorID) {
-		return fmt.Errorf("sensor_id must start and end with a letter or number, and can only contain letters, numbers, spaces, hyphens, and underscores")
+	if !validPattern.MatchString(networkID) {
+		return fmt.Errorf("network_id must start and end with a letter or number, and can only contain letters, numbers, spaces, hyphens, and underscores")
 	}
 
 	return nil
@@ -97,11 +97,11 @@ func validateSensorID(sensorID string) error {
 // ValidateAndSetDefaults normalizes the configuration and sets defaults
 // Returns an error if any explicit values are out of bounds (0/missing values get defaults)
 func (config *Config) ValidateAndSetDefaults() error {
-	// Validate sensor_id (required, no default)
-	if err := validateSensorID(config.SensorID); err != nil {
+	// Validate network_id (required, no default)
+	if err := validateNetworkID(config.NetworkID); err != nil {
 		return err
 	}
-	config.SensorID = strings.TrimSpace(config.SensorID)
+	config.NetworkID = strings.TrimSpace(config.NetworkID)
 
 	if config.Logging.Level == "" {
 		config.Logging.Level = "info"

@@ -8,9 +8,11 @@ import (
 )
 
 func TestGenerateMetadata(t *testing.T) {
-	metadata := GenerateMetadata()
+	testNetworkID := "Test-Network-01"
+	metadata := GenerateMetadata(testNetworkID)
 
 	// Test that all essential fields are present
+	assert.Equal(t, testNetworkID, metadata["network_id"], "network_id should match input")
 	assert.NotEmpty(t, metadata["machine_id"], "machine_id should be present")
 	assert.NotEmpty(t, metadata["sensor_version"], "sensor_version should be present")
 	assert.NotEmpty(t, metadata["os_name"], "os_name should be present")

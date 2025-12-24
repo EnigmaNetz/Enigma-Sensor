@@ -10,6 +10,9 @@ import (
 
 // Config represents the application configuration
 type Config struct {
+	// NetworkID is a user-defined identifier for this network/sensor (required)
+	NetworkID string `json:"network_id"`
+
 	// Logging configuration
 	Logging struct {
 		// Level is the minimum log level to output (debug, info, warn, error)
@@ -65,9 +68,41 @@ type Config struct {
 	} `json:"zeek"`
 }
 
+// validateNetworkID validates the network_id format
+// Rules: 1-64 characters, alphanumeric + spaces/hyphens/underscores, must start/end with alphanumeric
+func validateNetworkID(networkID string) error {
+	networkID = strings.TrimSpace(networkID)
+
+	if networkID == "" {
+		return fmt.Errorf("network_id is required in config.json")
+	}
+
+	if networkID == "REPLACE_WITH_YOUR_NETWORK_ID" {
+		return fmt.Errorf("network_id must be set to a real value (not the placeholder from config.example.json)")
+	}
+
+	if len(networkID) > 64 {
+		return fmt.Errorf("network_id must be 64 characters or less, got %d", len(networkID))
+	}
+
+	// Must start and end with alphanumeric, can contain letters, numbers, spaces, hyphens, underscores
+	validPattern := regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9\-_ ]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$`)
+	if !validPattern.MatchString(networkID) {
+		return fmt.Errorf("network_id must start and end with a letter or number, and can only contain letters, numbers, spaces, hyphens, and underscores")
+	}
+
+	return nil
+}
+
 // ValidateAndSetDefaults normalizes the configuration and sets defaults
 // Returns an error if any explicit values are out of bounds (0/missing values get defaults)
 func (config *Config) ValidateAndSetDefaults() error {
+	// Validate network_id (required, no default)
+	if err := validateNetworkID(config.NetworkID); err != nil {
+		return err
+	}
+	config.NetworkID = strings.TrimSpace(config.NetworkID)
+
 	if config.Logging.Level == "" {
 		config.Logging.Level = "info"
 	}
@@ -233,7 +268,7 @@ func LoadConfig(configPath string) (*Config, error) {
 	// Read config file
 	data, err := os.ReadFile(configPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read config file: %v", err)
+		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
 	// Parse config

@@ -20,8 +20,11 @@ Cross-platform sensor that captures network traffic, converts it to Zeek-style l
 
 ```sh
 export ENIGMA_API_KEY=YOUR_API_KEY
+export ENIGMA_NETWORK_ID="HQ-Firewall-01"
 sudo bash install-enigma-sensor.sh
 ```
+
+The `ENIGMA_NETWORK_ID` uniquely identifies the network the sensor is deployed in (1-64 characters, letters/numbers/spaces/hyphens).
 
 - Config: `/etc/enigma-sensor/config.json`
 - Logs: `/var/log/enigma-sensor/enigma-sensor.log`

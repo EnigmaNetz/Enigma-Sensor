@@ -30,6 +30,7 @@ func TestLogUploader_BufferAndFlush(t *testing.T) {
 	uploader := &LogUploader{
 		client:           mock,
 		apiKey:           "k",
+		networkID:        "Test-Network-01",
 		retryCount:       1,
 		retryDelay:       time.Millisecond,
 		compressFunc:     compressData,
@@ -66,6 +67,7 @@ func TestLogUploader_BufferPurgeOld(t *testing.T) {
 
 	uploader := &LogUploader{
 		apiKey:       "k",
+		networkID:    "Test-Network-01",
 		retryCount:   1,
 		retryDelay:   time.Millisecond,
 		compressFunc: compressData,

@@ -233,7 +233,7 @@ func TestGetAllInterfaces(t *testing.T) {
 }
 
 func TestConfig_ValidateAndSetDefaults(t *testing.T) {
-	cfg := &Config{}
+	cfg := &Config{NetworkID: "Test-Network-01"}
 	err := cfg.ValidateAndSetDefaults()
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -280,7 +280,7 @@ func TestConfig_ValidateAndSetDefaults_MaxSizeMB(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &Config{}
+			cfg := &Config{NetworkID: "Test-Network-01"}
 			cfg.Logging.MaxSizeMB = tt.input
 			err := cfg.ValidateAndSetDefaults()
 			if tt.expectError {
@@ -320,7 +320,7 @@ func TestConfig_ValidateAndSetDefaults_LogRetentionDays(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &Config{}
+			cfg := &Config{NetworkID: "Test-Network-01"}
 			cfg.Logging.LogRetentionDays = tt.input
 			err := cfg.ValidateAndSetDefaults()
 			if tt.expectError {
@@ -361,7 +361,7 @@ func TestConfig_ValidateAndSetDefaults_MaxBackups(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &Config{}
+			cfg := &Config{NetworkID: "Test-Network-01"}
 			cfg.Logging.MaxBackups = tt.input
 			err := cfg.ValidateAndSetDefaults()
 			if tt.expectError {
@@ -378,5 +378,85 @@ func TestConfig_ValidateAndSetDefaults_MaxBackups(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestValidateNetworkID(t *testing.T) {
+	tests := []struct {
+		name        string
+		networkID   string
+		expectError bool
+		errorMsg    string
+	}{
+		// Valid network IDs
+		{"valid simple", "Network1", false, ""},
+		{"valid with hyphen", "HQ-Firewall-01", false, ""},
+		{"valid with underscore", "Branch_Office_1", false, ""},
+		{"valid with space", "Main Office Network", false, ""},
+		{"valid single char", "A", false, ""},
+		{"valid numbers only", "12345", false, ""},
+		{"valid max length", strings.Repeat("a", 64), false, ""},
+		{"starts with space gets trimmed", " Valid", false, ""},
+		{"ends with space gets trimmed", "Valid ", false, ""},
+
+		// Invalid network IDs
+		{"empty string", "", true, "network_id is required"},
+		{"whitespace only", "   ", true, "network_id is required"},
+		{"placeholder value", "REPLACE_WITH_YOUR_NETWORK_ID", true, "not the placeholder"},
+		{"too long", strings.Repeat("a", 65), true, "must be 64 characters or less"},
+		{"starts with hyphen", "-Invalid", true, "must start and end with a letter or number"},
+		{"ends with hyphen", "Invalid-", true, "must start and end with a letter or number"},
+		{"starts with underscore", "_Invalid", true, "must start and end with a letter or number"},
+		{"ends with underscore", "Invalid_", true, "must start and end with a letter or number"},
+		{"contains special char @", "Network@Home", true, "can only contain letters"},
+		{"contains special char #", "Network#1", true, "can only contain letters"},
+		{"contains special char !", "Network!", true, "can only contain letters"},
+		{"contains newline", "Network\n1", true, "can only contain letters"},
+		{"contains tab", "Network\t1", true, "can only contain letters"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateNetworkID(tt.networkID)
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("validateNetworkID(%q) expected error but got nil", tt.networkID)
+				} else if tt.errorMsg != "" && !strings.Contains(err.Error(), tt.errorMsg) {
+					t.Errorf("validateNetworkID(%q) error = %v, expected to contain %q", tt.networkID, err, tt.errorMsg)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("validateNetworkID(%q) unexpected error = %v", tt.networkID, err)
+				}
+			}
+		})
+	}
+}
+
+func TestConfig_ValidateAndSetDefaults_NetworkID(t *testing.T) {
+	// Test that missing network_id causes error
+	cfg := &Config{}
+	err := cfg.ValidateAndSetDefaults()
+	if err == nil {
+		t.Error("Expected error for missing network_id, got nil")
+	} else if !strings.Contains(err.Error(), "network_id is required") {
+		t.Errorf("Expected error to contain 'network_id is required', got %q", err.Error())
+	}
+
+	// Test that valid network_id passes
+	cfg = &Config{NetworkID: "Valid-Network-01"}
+	err = cfg.ValidateAndSetDefaults()
+	if err != nil {
+		t.Errorf("Unexpected error for valid network_id: %v", err)
+	}
+
+	// Test that network_id is trimmed
+	cfg = &Config{NetworkID: "  Trimmed-Network  "}
+	err = cfg.ValidateAndSetDefaults()
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if cfg.NetworkID != "Trimmed-Network" {
+		t.Errorf("Expected network_id to be trimmed to 'Trimmed-Network', got %q", cfg.NetworkID)
 	}
 }

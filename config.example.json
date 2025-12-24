@@ -1,4 +1,5 @@
 {
+  "network_id": "REPLACE_WITH_YOUR_NETWORK_ID",
   "logging": {
     "level": "info",
     "file": "logs/enigma-sensor.log",

@@ -16,8 +16,61 @@ import (
 	"EnigmaNetz/Enigma-Go-Sensor/internal/version"
 )
 
+// getHostIPAddresses returns private IP addresses for the sensor host.
+// If a specific capture interface is configured, returns that interface's IP first.
+// Falls back to all private IPs on non-loopback, up interfaces.
+func getHostIPAddresses(captureInterface string) []string {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+
+	// If specific interface configured (not "any"/"all"), try to get its IP first
+	if captureInterface != "" && captureInterface != "any" && captureInterface != "all" {
+		// Handle comma-separated list - use first one
+		firstIface := strings.Split(captureInterface, ",")[0]
+		firstIface = strings.TrimSpace(firstIface)
+
+		for _, iface := range interfaces {
+			if iface.Name == firstIface && iface.Flags&net.FlagUp != 0 {
+				addrs, _ := iface.Addrs()
+				for _, addr := range addrs {
+					if ipnet, ok := addr.(*net.IPNet); ok {
+						if ip := ipnet.IP.To4(); ip != nil && ip.IsPrivate() {
+							return []string{ip.String()}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Fallback: collect all private IPs from up, non-loopback interfaces
+	var ips []string
+	seen := make(map[string]bool)
+
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
+			continue
+		}
+		addrs, _ := iface.Addrs()
+		for _, addr := range addrs {
+			if ipnet, ok := addr.(*net.IPNet); ok {
+				if ip := ipnet.IP.To4(); ip != nil && ip.IsPrivate() {
+					ipStr := ip.String()
+					if !seen[ipStr] {
+						seen[ipStr] = true
+						ips = append(ips, ipStr)
+					}
+				}
+			}
+		}
+	}
+	return ips
+}
+
 // GenerateMetadata creates the metadata map for sensor uploads
-func GenerateMetadata(networkID string) map[string]string {
+func GenerateMetadata(networkID string, captureInterface string) map[string]string {
 	metadata := make(map[string]string)
 
 	// Essential Fields
@@ -27,6 +80,12 @@ func GenerateMetadata(networkID string) map[string]string {
 	metadata["os_name"] = runtime.GOOS
 	metadata["os_version"] = getOSVersion()
 	metadata["architecture"] = runtime.GOARCH
+
+	// Host IPs (comma-separated)
+	hostIPs := getHostIPAddresses(captureInterface)
+	if len(hostIPs) > 0 {
+		metadata["host_ips"] = strings.Join(hostIPs, ",")
+	}
 
 	// Additional Fields
 	metadata["session_id"] = uuid.New().String()

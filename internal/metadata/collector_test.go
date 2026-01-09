@@ -123,3 +123,17 @@ func TestGenerateMetadata_IncludesHostIPs(t *testing.T) {
 		}
 	}
 }
+
+func TestGetHostIPAddresses_RespectsMaxLimit(t *testing.T) {
+	// Get IPs with "any" interface - should never exceed maxHostIPs
+	ips := getHostIPAddresses("any")
+
+	// Verify the limit is respected
+	assert.LessOrEqual(t, len(ips), maxHostIPs,
+		"Number of IPs should not exceed maxHostIPs limit of %d", maxHostIPs)
+}
+
+func TestMaxHostIPsConstant(t *testing.T) {
+	// Verify the constant is set to a reasonable value
+	assert.Equal(t, 10, maxHostIPs, "maxHostIPs should be 10")
+}

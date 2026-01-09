@@ -16,9 +16,16 @@ import (
 	"EnigmaNetz/Enigma-Go-Sensor/internal/version"
 )
 
+// maxHostIPs limits the number of IP addresses collected to avoid
+// excessive metadata size (Cloud Storage has 8KB metadata limit per value).
+// 10 IPs is sufficient for identifying sensor hosts while handling
+// systems with multiple NICs, VPNs, or a few Docker networks.
+const maxHostIPs = 10
+
 // getHostIPAddresses returns private IP addresses for the sensor host.
 // If a specific capture interface is configured, returns that interface's IP first.
 // Falls back to all private IPs on non-loopback, up interfaces.
+// Results are capped at maxHostIPs to prevent metadata size issues.
 func getHostIPAddresses(captureInterface string) []string {
 	interfaces, err := net.Interfaces()
 	if err != nil {
@@ -61,6 +68,10 @@ func getHostIPAddresses(captureInterface string) []string {
 					if !seen[ipStr] {
 						seen[ipStr] = true
 						ips = append(ips, ipStr)
+						// Stop collecting if we've reached the limit
+						if len(ips) >= maxHostIPs {
+							return ips
+						}
 					}
 				}
 			}

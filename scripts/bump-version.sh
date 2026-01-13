@@ -24,4 +24,8 @@ sed -i "s/^AppVersion=[0-9]*\.[0-9]*\.[0-9]*/AppVersion=$NEW/" installer/windows
 
 git add internal/version/version.go installer/debian/DEBIAN/control installer/windows/enigma-sensor-installer.iss
 git commit -m "Version bump to v$NEW"
-git tag "v$NEW"
+
+# Removing Git Tagging from this action.
+# We now have to create a PR to bump the version number
+# so after that PR is merged in we would then push a new git tag
+# git tag "v$NEW"

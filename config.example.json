@@ -24,5 +24,11 @@
   },
   "zeek": {
     "sampling_percentage": 100
+  },
+  "pcap_ingest": {
+    "enabled": false,
+    "watch_dir": "./pcap-ingest",
+    "poll_interval_seconds": 10,
+    "file_stable_seconds": 5
   }
 }

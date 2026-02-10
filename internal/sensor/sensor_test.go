@@ -104,6 +104,12 @@ func minimalConfig(loop bool) *config.Config {
 			Upload           bool   `json:"upload"`
 			MaxPayloadSizeMB int64  `json:"max_payload_size_mb"`
 		}{},
+		PcapIngest: struct {
+			Enabled             bool   `json:"enabled"`
+			WatchDir            string `json:"watch_dir"`
+			PollIntervalSeconds int    `json:"poll_interval_seconds"`
+			FileStableSeconds   int    `json:"file_stable_seconds"`
+		}{},
 	}
 }
 

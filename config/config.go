@@ -66,6 +66,18 @@ type Config struct {
 		// SamplingPercentage is the percentage of traffic to process (0-100)
 		SamplingPercentage float64 `json:"sampling_percentage"`
 	} `json:"zeek"`
+
+	// PcapIngest configuration for offline PCAP file processing
+	PcapIngest struct {
+		// Enabled controls whether the PCAP ingest watcher is active
+		Enabled bool `json:"enabled"`
+		// WatchDir is the directory to watch for incoming PCAP files
+		WatchDir string `json:"watch_dir"`
+		// PollIntervalSeconds is how often to poll for new files (default: 10, min: 1, max: 300)
+		PollIntervalSeconds int `json:"poll_interval_seconds"`
+		// FileStableSeconds is how long a file's size must be unchanged before processing (default: 5, min: 1, max: 60)
+		FileStableSeconds int `json:"file_stable_seconds"`
+	} `json:"pcap_ingest"`
 }
 
 // validateNetworkID validates the network_id format
@@ -155,6 +167,24 @@ func (config *Config) ValidateAndSetDefaults() error {
 	}
 	if config.Buffering.MaxAgeHours == 0 {
 		config.Buffering.MaxAgeHours = 2 // Default to 2 hours retention
+	}
+	// Defaults and validation for PcapIngest
+	if config.PcapIngest.Enabled && config.PcapIngest.WatchDir == "" {
+		return fmt.Errorf("pcap_ingest.watch_dir is required when pcap_ingest is enabled")
+	}
+	if config.PcapIngest.PollIntervalSeconds == 0 {
+		config.PcapIngest.PollIntervalSeconds = 10
+	} else if config.PcapIngest.PollIntervalSeconds < 1 {
+		config.PcapIngest.PollIntervalSeconds = 1
+	} else if config.PcapIngest.PollIntervalSeconds > 300 {
+		config.PcapIngest.PollIntervalSeconds = 300
+	}
+	if config.PcapIngest.FileStableSeconds == 0 {
+		config.PcapIngest.FileStableSeconds = 5
+	} else if config.PcapIngest.FileStableSeconds < 1 {
+		config.PcapIngest.FileStableSeconds = 1
+	} else if config.PcapIngest.FileStableSeconds > 60 {
+		config.PcapIngest.FileStableSeconds = 60
 	}
 	return nil
 }

@@ -433,6 +433,89 @@ func TestValidateNetworkID(t *testing.T) {
 	}
 }
 
+func TestConfig_PcapIngest_Defaults(t *testing.T) {
+	cfg := &Config{NetworkID: "Test-Network-01"}
+	err := cfg.ValidateAndSetDefaults()
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if cfg.PcapIngest.PollIntervalSeconds != 10 {
+		t.Errorf("Expected default PollIntervalSeconds to be 10, got %d", cfg.PcapIngest.PollIntervalSeconds)
+	}
+	if cfg.PcapIngest.FileStableSeconds != 5 {
+		t.Errorf("Expected default FileStableSeconds to be 5, got %d", cfg.PcapIngest.FileStableSeconds)
+	}
+	if cfg.PcapIngest.Enabled {
+		t.Error("Expected PcapIngest.Enabled to default to false")
+	}
+}
+
+func TestConfig_PcapIngest_Validation(t *testing.T) {
+	// Enabled without WatchDir should fail
+	cfg := &Config{NetworkID: "Test-Network-01"}
+	cfg.PcapIngest.Enabled = true
+	err := cfg.ValidateAndSetDefaults()
+	if err == nil {
+		t.Error("Expected error when PcapIngest enabled without WatchDir")
+	} else if !strings.Contains(err.Error(), "watch_dir is required") {
+		t.Errorf("Expected error about watch_dir, got: %v", err)
+	}
+
+	// Enabled with WatchDir should succeed
+	cfg = &Config{NetworkID: "Test-Network-01"}
+	cfg.PcapIngest.Enabled = true
+	cfg.PcapIngest.WatchDir = "/tmp/pcap-ingest"
+	err = cfg.ValidateAndSetDefaults()
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	// Disabled without WatchDir should succeed
+	cfg = &Config{NetworkID: "Test-Network-01"}
+	cfg.PcapIngest.Enabled = false
+	err = cfg.ValidateAndSetDefaults()
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+}
+
+func TestConfig_PcapIngest_Bounds(t *testing.T) {
+	tests := []struct {
+		name         string
+		pollInterval int
+		fileStable   int
+		expectPoll   int
+		expectStable int
+	}{
+		{"defaults when zero", 0, 0, 10, 5},
+		{"clamp poll below min", -5, 0, 1, 5},
+		{"clamp poll above max", 500, 0, 300, 5},
+		{"clamp stable below min", 0, -3, 10, 1},
+		{"clamp stable above max", 0, 100, 10, 60},
+		{"valid values preserved", 30, 10, 30, 10},
+		{"min values preserved", 1, 1, 1, 1},
+		{"max values preserved", 300, 60, 300, 60},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{NetworkID: "Test-Network-01"}
+			cfg.PcapIngest.PollIntervalSeconds = tt.pollInterval
+			cfg.PcapIngest.FileStableSeconds = tt.fileStable
+			err := cfg.ValidateAndSetDefaults()
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+			if cfg.PcapIngest.PollIntervalSeconds != tt.expectPoll {
+				t.Errorf("PollIntervalSeconds: input %d, expected %d, got %d", tt.pollInterval, tt.expectPoll, cfg.PcapIngest.PollIntervalSeconds)
+			}
+			if cfg.PcapIngest.FileStableSeconds != tt.expectStable {
+				t.Errorf("FileStableSeconds: input %d, expected %d, got %d", tt.fileStable, tt.expectStable, cfg.PcapIngest.FileStableSeconds)
+			}
+		})
+	}
+}
+
 func TestConfig_ValidateAndSetDefaults_NetworkID(t *testing.T) {
 	// Test that missing network_id causes error
 	cfg := &Config{}

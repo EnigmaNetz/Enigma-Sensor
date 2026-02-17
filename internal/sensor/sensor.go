@@ -17,6 +17,7 @@ import (
 	"EnigmaNetz/Enigma-Go-Sensor/config"
 	"EnigmaNetz/Enigma-Go-Sensor/internal/api"
 	"EnigmaNetz/Enigma-Go-Sensor/internal/capture/common"
+	"EnigmaNetz/Enigma-Go-Sensor/internal/pcapingest"
 	types "EnigmaNetz/Enigma-Go-Sensor/internal/processor/common"
 	"archive/zip"
 	"runtime"
@@ -318,6 +319,27 @@ func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, proce
 		}
 		log.Printf("[worker] Exiting worker goroutine")
 	}()
+
+	// Start PCAP ingest watcher if enabled
+	if cfg.PcapIngest.Enabled {
+		watcher := pcapingest.NewWatcher(pcapingest.WatcherConfig{
+			WatchDir:          cfg.PcapIngest.WatchDir,
+			PollInterval:      time.Duration(cfg.PcapIngest.PollIntervalSeconds) * time.Second,
+			FileStableSeconds: cfg.PcapIngest.FileStableSeconds,
+			SamplingPct:       cfg.Zeek.SamplingPercentage,
+		}, processor, uploader)
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := watcher.Run(ctx); err != nil {
+				if errors.Is(err, api.ErrAPIGone) {
+					shutdownCh <- struct{}{}
+				}
+				log.Printf("[pcap-ingest] Watcher exited: %v", err)
+			}
+		}()
+	}
 
 	// Optionally handle Ctrl+C for graceful shutdown
 	doSignals := true

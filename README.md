@@ -9,6 +9,7 @@ Cross-platform sensor that captures network traffic, converts it to Zeek-style l
 - **Linux** (Ubuntu 20.04/22.04/24.04 LTS)
 - **Windows 10 1809+**
 - **macOS**
+- **Docker** (any Linux distribution with Docker installed)
 
 ---
 
@@ -38,6 +39,47 @@ sudo systemctl status enigma-sensor
 
 ### Windows
 - Run the packaged installer or binary. Config lives at `C:\ProgramData\EnigmaSensor\config.json` and logs at `C:\ProgramData\EnigmaSensor\logs\enigma-sensor.log`.
+
+### Docker (any Linux distribution)
+
+Docker is the recommended approach for non-Ubuntu Linux distributions (RHEL, CentOS, Fedora, Arch, etc.).
+
+```sh
+docker run -d \
+  --name enigma-sensor \
+  --network=host \
+  --restart=unless-stopped \
+  -e ENIGMA_API_KEY=YOUR_API_KEY \
+  -e ENIGMA_NETWORK_ID="HQ-Firewall-01" \
+  ghcr.io/enigmanetz/enigma-sensor:latest
+```
+
+**Environment variables:**
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `ENIGMA_API_KEY` | Yes | | Your Enigma API key |
+| `ENIGMA_NETWORK_ID` | No | `enigma-sensor-docker` | Identifies the monitored network |
+| `ENIGMA_API_URL` | No | `api.enigmaai.net:443` | Enigma API endpoint |
+
+View logs:
+```sh
+docker logs -f enigma-sensor
+```
+
+For persistent logs, mount a volume:
+```sh
+docker run -d \
+  --name enigma-sensor \
+  --network=host \
+  --restart=unless-stopped \
+  -e ENIGMA_API_KEY=YOUR_API_KEY \
+  -e ENIGMA_NETWORK_ID="HQ-Firewall-01" \
+  -v /var/log/enigma-sensor:/var/log/enigma-sensor \
+  ghcr.io/enigmanetz/enigma-sensor:latest
+```
+
+> **Note:** `--network=host` is required so the sensor can capture traffic on the host network interfaces. The container runs as root to allow tcpdump packet capture.
 
 ---
 

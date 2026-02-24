@@ -108,8 +108,9 @@ case "$OS_ID" in
       apt update
     fi
     # --- Install Zeek, tcpdump, and dependencies ---
+    # Pin Zeek to 8.0.5 to avoid breaking changes from new releases
     export DEBIAN_FRONTEND=noninteractive
-    apt install -y zeek tcpdump
+    apt install -y zeek=8.0.5-0 tcpdump
     # --- Find and install Enigma Sensor .deb package ---
     PKG=$(ls ./*.deb 2>/dev/null | head -n1)
     if [ -z "$PKG" ]; then
@@ -120,8 +121,9 @@ case "$OS_ID" in
     ;;
   centos|rhel|fedora)
     # --- Install Zeek, tcpdump, and dependencies ---
+    # Pin Zeek to 8.0.5 to avoid breaking changes from new releases
     yum install -y epel-release || true
-    yum install -y zeek tcpdump || dnf install -y zeek tcpdump
+    yum install -y zeek-8.0.5-0 tcpdump || dnf install -y zeek-8.0.5-0 tcpdump
     # --- Find and install Enigma Sensor .rpm package ---
     PKG=$(ls ./*.rpm 2>/dev/null | head -n1)
     if [ -z "$PKG" ]; then

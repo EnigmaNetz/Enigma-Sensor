@@ -5,7 +5,7 @@ set -e
 if [ -z "$ENIGMA_API_KEY" ]; then
     echo "ERROR: ENIGMA_API_KEY is required"
     echo ""
-    echo "Usage: docker run -e ENIGMA_API_KEY=<your_api_key> enigma-sensor"
+    echo "Usage: docker run -e ENIGMA_API_KEY=<your_api_key> ghcr.io/enigmanetz/enigma-sensor:latest"
     echo ""
     echo "Optional environment variables:"
     echo "  ENIGMA_NETWORK_ID   Network identifier (default: enigma-sensor-docker)"

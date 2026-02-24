@@ -74,6 +74,7 @@ docker run -d \
   --network=host \
   --restart=unless-stopped \
   -e ENIGMA_API_KEY=YOUR_API_KEY \
+  -e ENIGMA_NETWORK_ID="HQ-Firewall-01" \
   -v /var/log/enigma-sensor:/var/log/enigma-sensor \
   ghcr.io/enigmanetz/enigma-sensor:latest
 ```

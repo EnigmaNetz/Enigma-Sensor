@@ -1,0 +1,14 @@
+.git
+.github
+bin/
+captures/
+logs/
+config.json
+*.exe
+*.deb
+*.rpm
+*.zip
+loadtest/
+.claude/
+results/
+installer/

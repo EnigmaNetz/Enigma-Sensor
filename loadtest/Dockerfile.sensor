@@ -17,10 +17,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Zeek from official repository
+# Pin Zeek to 8.0.5 to avoid breaking changes from new releases
 RUN curl -fsSL https://download.opensuse.org/repositories/security:zeek/xUbuntu_22.04/Release.key | gpg --dearmor | tee /etc/apt/trusted.gpg.d/security_zeek.gpg \
     && echo "deb http://download.opensuse.org/repositories/security:/zeek/xUbuntu_22.04/ /" | tee /etc/apt/sources.list.d/security:zeek.list \
     && apt-get update \
-    && apt-get install -y --no-install-recommends zeek \
+    && apt-get install -y --no-install-recommends zeek=8.0.5-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create app directory

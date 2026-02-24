@@ -42,13 +42,14 @@ RUN apt-get update \
 
 # Install Zeek from the official OpenSUSE security repository for Ubuntu 22.04.
 # This matches the pattern used in loadtest/Dockerfile.sensor.
+# Pin Zeek to 8.0.5 to avoid breaking changes from new releases
 RUN curl -fsSL https://download.opensuse.org/repositories/security:zeek/xUbuntu_22.04/Release.key \
         | gpg --dearmor \
         | tee /etc/apt/trusted.gpg.d/security_zeek.gpg \
     && echo "deb http://download.opensuse.org/repositories/security:/zeek/xUbuntu_22.04/ /" \
         | tee /etc/apt/sources.list.d/security:zeek.list \
     && apt-get update \
-    && apt-get install -y --no-install-recommends zeek \
+    && apt-get install -y --no-install-recommends zeek=8.0.5-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create runtime directories used by the sensor.

@@ -307,6 +307,11 @@ func LoadConfig(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("failed to parse config file: %v", err)
 	}
 
+	// Apply environment variable overrides (SENSOR_* prefix)
+	if err := ApplyEnvOverrides(&config); err != nil {
+		return nil, fmt.Errorf("environment override error: %w", err)
+	}
+
 	// Normalize and apply defaults in one place
 	if err := config.ValidateAndSetDefaults(); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)

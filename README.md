@@ -58,9 +58,15 @@ docker run -d \
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `ENIGMA_API_KEY` | Yes | | Your Enigma API key |
-| `ENIGMA_NETWORK_ID` | No | `enigma-sensor-docker` | Identifies the monitored network |
-| `ENIGMA_API_URL` | No | `api.enigmaai.net:443` | Enigma API endpoint |
+| `ENIGMA_API_KEY` | Yes | | Your Enigma API key (alias for `SENSOR_ENIGMA_API_API_KEY`) |
+| `ENIGMA_NETWORK_ID` | No | `enigma-sensor-docker` | Network identifier (alias for `SENSOR_NETWORK_ID`) |
+| `ENIGMA_API_URL` | No | `api.enigmaai.net:443` | API endpoint (alias for `SENSOR_ENIGMA_API_SERVER`) |
+| `SENSOR_CAPTURE_WINDOW_SECONDS` | No | `60` | Duration of each capture window in seconds |
+| `SENSOR_CAPTURE_INTERFACE` | No | `any` | Network interface to capture from |
+| `SENSOR_ZEEK_SAMPLING_PERCENTAGE` | No | `100` | Percentage of traffic to process (0 to 100) |
+| `SENSOR_LOGGING_LEVEL` | No | `info` | Log level (debug, info, warn, error) |
+
+Any config field in `config.json` can be overridden via environment variables using the pattern `SENSOR_<SECTION>_<FIELD>`, where section and field names come from the JSON keys, uppercased. For example, `logging.max_size_mb` becomes `SENSOR_LOGGING_MAX_SIZE_MB`. See `config.example.json` for all available fields.
 
 View logs:
 ```sh

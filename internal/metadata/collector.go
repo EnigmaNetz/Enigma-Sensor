@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -96,6 +97,11 @@ func GenerateMetadata(networkID string, captureInterface string) map[string]stri
 	hostIPs := getHostIPAddresses(captureInterface)
 	if len(hostIPs) > 0 {
 		metadata["host_ips"] = strings.Join(hostIPs, ",")
+	}
+
+	// Zeek version (optional, only if Zeek is installed)
+	if zeekVersion := getZeekVersion(); zeekVersion != "" {
+		metadata["zeek_version"] = zeekVersion
 	}
 
 	// Additional Fields
@@ -222,4 +228,31 @@ func getMacOSVersion() string {
 	}
 	version := strings.TrimSpace(string(output))
 	return "macOS " + version
+}
+
+func getZeekVersion() string {
+	var zeekPath string
+	switch runtime.GOOS {
+	case "windows":
+		zeekPath = filepath.Join("zeek-windows", "zeek-runtime-win64", "bin", "zeek.exe")
+	default:
+		zeekPath = "/opt/zeek/bin/zeek"
+	}
+
+	cmd := exec.Command(zeekPath, "--version")
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+
+	// Zeek outputs something like "zeek version 6.0.0"
+	line := strings.TrimSpace(string(output))
+	if strings.Contains(line, "version") {
+		parts := strings.SplitAfter(line, "version ")
+		if len(parts) > 1 {
+			return strings.TrimSpace(parts[1])
+		}
+	}
+
+	return line
 }

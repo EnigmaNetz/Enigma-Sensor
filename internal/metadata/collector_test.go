@@ -124,6 +124,15 @@ func TestGenerateMetadata_IncludesHostIPs(t *testing.T) {
 	}
 }
 
+func TestGenerateMetadata_IncludesZeekVersion(t *testing.T) {
+	metadata := GenerateMetadata("Test-Network-03", "any")
+
+	// zeek_version may or may not be present depending on whether Zeek is installed
+	if zeekVersion, ok := metadata["zeek_version"]; ok {
+		assert.NotEmpty(t, zeekVersion, "zeek_version should not be empty if present")
+	}
+}
+
 func TestGetHostIPAddresses_RespectsMaxLimit(t *testing.T) {
 	// Get IPs with "any" interface - should never exceed maxHostIPs
 	ips := getHostIPAddresses("any")

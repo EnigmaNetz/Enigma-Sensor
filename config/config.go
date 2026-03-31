@@ -37,6 +37,8 @@ type Config struct {
 		Loop bool `json:"loop"`
 		// Interface specifies which network interface to capture from. "any" captures on every interface
 		Interface string `json:"interface"`
+		// MaxProcessingWorkers is the max number of concurrent PCAP processing workers (default: 10, min: 1, max: 20)
+		MaxProcessingWorkers int `json:"max_processing_workers"`
 	} `json:"capture"`
 
 	// Enigma API configuration
@@ -156,6 +158,11 @@ func (config *Config) ValidateAndSetDefaults() error {
 	}
 	if config.Capture.Interface == "" {
 		config.Capture.Interface = "any"
+	}
+	if config.Capture.MaxProcessingWorkers == 0 {
+		config.Capture.MaxProcessingWorkers = 10
+	} else if config.Capture.MaxProcessingWorkers < 1 || config.Capture.MaxProcessingWorkers > 20 {
+		return fmt.Errorf("capture.max_processing_workers must be between 1 and 20, got %d", config.Capture.MaxProcessingWorkers)
 	}
 	// Zeek path can be empty by default
 	if config.Zeek.SamplingPercentage == 0 {

@@ -205,20 +205,20 @@ func addSamplingScriptToMainZeek(mainZeekPath string) error {
 }
 
 // deletePCAPFile deletes the given PCAP file and logs the result.
-func deletePCAPFile(pcapPath string) {
+func deletePCAPFile(pcapPath string, logPrefix string) {
 	if err := os.Remove(pcapPath); err != nil {
-		log.Printf("[worker] Failed to delete processed PCAP file %s: %v", pcapPath, err)
+		log.Printf("%s Failed to delete processed PCAP file %s: %v", logPrefix, pcapPath, err)
 	} else {
-		log.Printf("[worker] Deleted processed PCAP file: %s", pcapPath)
+		log.Printf("%s Deleted processed PCAP file: %s", logPrefix, pcapPath)
 	}
 
 	// Also try to delete a corresponding .etl file if it exists (Windows)
 	etlPath := pcapPath[:len(pcapPath)-len(filepath.Ext(pcapPath))] + ".etl"
 	if _, err := os.Stat(etlPath); err == nil {
 		if err := os.Remove(etlPath); err != nil {
-			log.Printf("[worker] Failed to delete corresponding ETL file %s: %v", etlPath, err)
+			log.Printf("%s Failed to delete corresponding ETL file %s: %v", logPrefix, etlPath, err)
 		} else {
-			log.Printf("[worker] Deleted corresponding ETL file: %s", etlPath)
+			log.Printf("%s Deleted corresponding ETL file: %s", logPrefix, etlPath)
 		}
 	}
 }
@@ -226,7 +226,7 @@ func deletePCAPFile(pcapPath string) {
 // RunSensor orchestrates capture, processing, and upload with graceful shutdown
 // If disableSignals is true, signal handling is skipped (for tests)
 // If skipEnsureZeek is true, ensureZeekWindows is not called (for tests)
-func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, processor Processor, uploader Uploader, disableSignalsAndSkipZeek ...bool) error {
+func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, processor Processor, uploader Uploader, disableSignalsAndSkipZeek ...bool) (retErr error) {
 	skipEnsureZeek := false
 	disableSignals := false
 	if len(disableSignalsAndSkipZeek) > 0 {
@@ -246,33 +246,43 @@ func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, proce
 	window := time.Duration(cfg.Capture.WindowSeconds) * time.Second
 	loop := cfg.Capture.Loop
 
-	pcapQueue := make(chan string, 4)
+	maxWorkers := cfg.Capture.MaxProcessingWorkers
+	if maxWorkers < 1 {
+		maxWorkers = 10
+	}
+	pcapQueue := make(chan string, maxWorkers)
 	var wg sync.WaitGroup
 
-	// Processing worker
-	shutdownCh := make(chan struct{}, 1)
-	wg.Add(1)
-	go func() {
+	// Shutdown signaling: close the channel so all workers can detect it
+	shutdownCh := make(chan struct{})
+	var shutdownOnce sync.Once
+	triggerShutdown := func() {
+		shutdownOnce.Do(func() { close(shutdownCh) })
+	}
+
+	// Processing worker function
+	worker := func(id int) {
 		defer wg.Done()
+		prefix := fmt.Sprintf("[worker-%d]", id)
 		for pcapPath := range pcapQueue {
 			absPCAPPath, err := filepath.Abs(pcapPath)
 			if err != nil {
-				log.Printf("[worker] Failed to get absolute path for PCAP: %v", err)
+				log.Printf("%s Failed to get absolute path for PCAP: %v", prefix, err)
 				continue
 			}
 			if _, err := os.Stat(absPCAPPath); err != nil {
-				log.Printf("[worker] PCAP file does not exist or is not accessible: %v", err)
+				log.Printf("%s PCAP file does not exist or is not accessible: %v", prefix, err)
 				continue
 			}
-			log.Printf("[worker] Processing PCAP file at absolute path: %s", absPCAPPath)
+			log.Printf("%s Processing PCAP file at absolute path: %s", prefix, absPCAPPath)
 
 			result, err := processor.ProcessPCAP(absPCAPPath, cfg.Zeek.SamplingPercentage)
 			if err != nil {
-				log.Printf("[worker] Processing failed: %v", err)
+				log.Printf("%s Processing failed: %v", prefix, err)
 				// Do not delete the PCAP file on processing error
 				continue
 			}
-			log.Printf("[worker] Processing complete. Conn XLSX: %s, DNS XLSX: %s, DHCP XLSX: %s, JA3JA4 XLSX: %s, JA4S XLSX: %s, Metadata: %+v", result.ConnPath, result.DNSPath, result.DHCPPath, result.JA3JA4Path, result.JA4SPath, result.Metadata)
+			log.Printf("%s Processing complete. Conn XLSX: %s, DNS XLSX: %s, DHCP XLSX: %s, JA3JA4 XLSX: %s, JA4S XLSX: %s, Metadata: %+v", prefix, result.ConnPath, result.DNSPath, result.DHCPPath, result.JA3JA4Path, result.JA4SPath, result.Metadata)
 
 			if uploader != nil {
 				uploadErr := uploader.UploadLogs(ctx, api.LogFiles{
@@ -285,40 +295,24 @@ func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, proce
 				if uploadErr != nil {
 					if uploadErr == api.ErrAPIGone {
 						log.Printf("[sensor] Received 410 Gone from API because the API key is invalid. Stopping sensor and service as instructed.")
-						// Signal main loop to shutdown
-						shutdownCh <- struct{}{}
+						triggerShutdown()
 						return
 					}
-					log.Printf("[worker] Log upload failed: %v", uploadErr)
+					log.Printf("%s Log upload failed: %v", prefix, uploadErr)
 				} else {
-					log.Printf("[worker] Log upload successful.")
+					log.Printf("%s Log upload successful.", prefix)
 				}
 			}
 			// Only delete the capture file after successful processing and upload attempt
-			deletePCAPFile(absPCAPPath)
-			// Clean up any other .pcap and .etl files in the output directory
-			dir := filepath.Dir(absPCAPPath)
-			entries, err := os.ReadDir(dir)
-			if err == nil {
-				for _, entry := range entries {
-					if !entry.IsDir() {
-						ext := filepath.Ext(entry.Name())
-						if (ext == ".pcap" || ext == ".etl") && entry.Name() != filepath.Base(absPCAPPath) {
-							orphanPath := filepath.Join(dir, entry.Name())
-							if err := os.Remove(orphanPath); err != nil {
-								log.Printf("[worker] Failed to delete orphaned file %s: %v", orphanPath, err)
-							} else {
-								log.Printf("[worker] Deleted orphaned file: %s", orphanPath)
-							}
-						}
-					}
-				}
-			} else {
-				log.Printf("[worker] Failed to scan directory for orphaned files: %v", err)
-			}
+			deletePCAPFile(absPCAPPath, prefix)
 		}
-		log.Printf("[worker] Exiting worker goroutine")
-	}()
+		log.Printf("[worker-%d] Exiting worker goroutine", id)
+	}
+
+	for i := 0; i < maxWorkers; i++ {
+		wg.Add(1)
+		go worker(i)
+	}
 
 	// Start PCAP ingest watcher if enabled
 	if cfg.PcapIngest.Enabled {
@@ -334,7 +328,7 @@ func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, proce
 			defer wg.Done()
 			if err := watcher.Run(ctx); err != nil {
 				if errors.Is(err, api.ErrAPIGone) {
-					shutdownCh <- struct{}{}
+					triggerShutdown()
 				}
 				log.Printf("[pcap-ingest] Watcher exited: %v", err)
 			}
@@ -358,6 +352,12 @@ func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, proce
 	defer func() {
 		closeQueue()
 		wg.Wait()
+		// Check if any worker signaled API Gone during processing
+		select {
+		case <-shutdownCh:
+			retErr = ErrAPIGone
+		default:
+		}
 	}()
 
 	// cleanOldZeekOutFolders deletes zeek_out_* folders older than retentionDays in the given outputDir.
@@ -402,7 +402,7 @@ func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, proce
 				}
 			}
 		}
-		timestamp := time.Now().UTC().Format("20060102T150405Z")
+		timestamp := time.Now().UTC().Format("20060102T150405.000000000Z")
 		zeekOutDir := filepath.Join(outputDir, "zeek_out_"+timestamp)
 		if err := os.MkdirAll(zeekOutDir, 0755); err != nil {
 			closeQueue()

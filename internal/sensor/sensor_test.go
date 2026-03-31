@@ -3,6 +3,7 @@ package sensor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"sync/atomic"
 	"testing"
@@ -20,17 +21,19 @@ type mockCapturer struct {
 }
 
 func (m *mockCapturer) Capture(ctx context.Context, cfg common.CaptureConfig) (string, error) {
-	atomic.AddInt32(m.calls, 1)
+	n := atomic.AddInt32(m.calls, 1)
 	if m.fail {
 		return "", errors.New("capture failed")
 	}
 	// Create the fake file so the worker can stat it
-	f, _ := os.Create("/tmp/fake.pcap")
+	pcapPath := fmt.Sprintf("/tmp/fake_%d.pcap", n)
+	f, _ := os.Create(pcapPath)
 	f.Close()
 	// Also create a fake .etl file to test deletion
-	etl, _ := os.Create("/tmp/fake.etl")
+	etlPath := fmt.Sprintf("/tmp/fake_%d.etl", n)
+	etl, _ := os.Create(etlPath)
 	etl.Close()
-	return "/tmp/fake.pcap", nil
+	return pcapPath, nil
 }
 
 type mockProcessor struct {
@@ -63,6 +66,21 @@ func (m *mockUploader) UploadLogs(ctx context.Context, files api.LogFiles) error
 	return nil
 }
 
+type slowProcessor struct {
+	calls *int32
+	delay time.Duration
+}
+
+func (m *slowProcessor) ProcessPCAP(pcapPath string, samplingPercentage float64) (types.ProcessedData, error) {
+	atomic.AddInt32(m.calls, 1)
+	time.Sleep(m.delay)
+	return types.ProcessedData{
+		ConnPath: "/tmp/conn.xlsx",
+		DNSPath:  "/tmp/dns.xlsx",
+		Metadata: map[string]interface{}{"test": true},
+	}, nil
+}
+
 type goneUploader struct {
 	calls *int32
 }
@@ -75,15 +93,17 @@ func (m *goneUploader) UploadLogs(ctx context.Context, files api.LogFiles) error
 func minimalConfig(loop bool) *config.Config {
 	return &config.Config{
 		Capture: struct {
-			OutputDir     string `json:"output_dir"`
-			WindowSeconds int    `json:"window_seconds"`
-			Loop          bool   `json:"loop"`
-			Interface     string `json:"interface"`
+			OutputDir            string `json:"output_dir"`
+			WindowSeconds        int    `json:"window_seconds"`
+			Loop                 bool   `json:"loop"`
+			Interface            string `json:"interface"`
+			MaxProcessingWorkers int    `json:"max_processing_workers"`
 		}{
-			OutputDir:     "/tmp",
-			WindowSeconds: 0,
-			Loop:          loop,
-			Interface:     "any",
+			OutputDir:            "/tmp",
+			WindowSeconds:        0,
+			Loop:                 loop,
+			Interface:            "any",
+			MaxProcessingWorkers: 10,
 		},
 		Logging: struct {
 			Level            string `json:"level"`
@@ -133,11 +153,11 @@ func TestRunSensor_SingleIteration_Success(t *testing.T) {
 		t.Errorf("Expected 1 call each, got: cap=%d proc=%d up=%d", capCalls, procCalls, upCalls)
 	}
 	// Check that the capture file was deleted
-	if _, err := os.Stat("/tmp/fake.pcap"); !os.IsNotExist(err) {
+	if _, err := os.Stat("/tmp/fake_1.pcap"); !os.IsNotExist(err) {
 		t.Errorf("Expected capture file to be deleted, but it still exists or another error occurred: %v", err)
 	}
 	// Check that the corresponding .etl file was deleted
-	if _, err := os.Stat("/tmp/fake.etl"); !os.IsNotExist(err) {
+	if _, err := os.Stat("/tmp/fake_1.etl"); !os.IsNotExist(err) {
 		t.Errorf("Expected ETL file to be deleted, but it still exists or another error occurred: %v", err)
 	}
 	t.Log("TestRunSensor_SingleIteration_Success end reached")
@@ -218,13 +238,41 @@ func TestRunSensor_StopsOnAPIGone(t *testing.T) {
 		&goneUploader{calls: &upCalls},
 		true, true,
 	)
-	if err != nil {
-		t.Fatalf("RunSensor should not return error on 410 Gone, got: %v", err)
+	if !errors.Is(err, ErrAPIGone) {
+		t.Fatalf("Expected ErrAPIGone, got: %v", err)
 	}
 	if capCalls != 1 || procCalls != 1 || upCalls != 1 {
 		t.Errorf("Expected 1 call each, got: cap=%d proc=%d up=%d", capCalls, procCalls, upCalls)
 	}
 	t.Log("TestRunSensor_StopsOnAPIGone end reached")
+}
+
+func TestRunSensor_ConcurrentWorkers(t *testing.T) {
+	defer t.Log("TestRunSensor_ConcurrentWorkers completed")
+	var capCalls, procCalls int32
+	cfg := minimalConfig(true)
+
+	// Use a slow processor to verify concurrency
+	slowProc := &slowProcessor{calls: &procCalls, delay: 20 * time.Millisecond}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	err := RunSensor(ctx, cfg,
+		&mockCapturer{calls: &capCalls},
+		slowProc,
+		&mockUploader{calls: new(int32)},
+		true, true,
+	)
+	if err != nil {
+		t.Fatalf("RunSensor failed: %v", err)
+	}
+	finalProcCalls := atomic.LoadInt32(&procCalls)
+	if finalProcCalls < 2 {
+		t.Errorf("Expected at least 2 processed PCAPs with concurrent workers, got: %d", finalProcCalls)
+	}
+	t.Logf("Concurrent workers processed %d PCAPs", finalProcCalls)
+	t.Log("TestRunSensor_ConcurrentWorkers end reached")
 }
 
 func TestValidateZipPath_RejectsPathTraversal(t *testing.T) {

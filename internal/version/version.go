@@ -1,4 +1,4 @@
 package version
 
 // Version is the current release version of the Enigma Go Sensor.
-const Version = "v1.8.1"
+const Version = "v1.9.0"

@@ -279,7 +279,7 @@ func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, proce
 			result, err := processor.ProcessPCAP(absPCAPPath, cfg.Zeek.SamplingPercentage)
 			if err != nil {
 				log.Printf("%s Processing failed: %v", prefix, err)
-				// Do not delete the PCAP file on processing error
+				deletePCAPFile(absPCAPPath, prefix)
 				continue
 			}
 			log.Printf("%s Processing complete. Conn XLSX: %s, DNS XLSX: %s, DHCP XLSX: %s, JA3JA4 XLSX: %s, JA4S XLSX: %s, Metadata: %+v", prefix, result.ConnPath, result.DNSPath, result.DHCPPath, result.JA3JA4Path, result.JA4SPath, result.Metadata)
@@ -429,6 +429,12 @@ func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, proce
 			return nil
 		default:
 			log.Printf("[warning] PCAP queue full, dropping capture: %s", pcapPath)
+			deletePCAPFile(pcapPath, "[drop-cleanup]")
+			if err := os.RemoveAll(zeekOutDir); err != nil {
+				log.Printf("[drop-cleanup] Failed to delete zeek output directory %s: %v", zeekOutDir, err)
+			} else {
+				log.Printf("[drop-cleanup] Deleted zeek output directory: %s", zeekOutDir)
+			}
 		}
 		if !loop {
 			break

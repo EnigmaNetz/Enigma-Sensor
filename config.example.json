@@ -11,7 +11,8 @@
     "output_dir": "./captures",
     "window_seconds": 60,
     "loop": true,
-    "interface": "any"
+    "interface": "any",
+    "retention_hours": 24
   },
   "enigma_api": {
     "server": "api.enigmaai.net:443",

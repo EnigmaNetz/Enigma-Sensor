@@ -99,6 +99,12 @@ func setFieldFromString(field reflect.Value, value string) error {
 			return err
 		}
 		field.SetBool(b)
+	case reflect.Ptr:
+		// Handle pointer types by allocating and setting the underlying value
+		if field.IsNil() {
+			field.Set(reflect.New(field.Type().Elem()))
+		}
+		return setFieldFromString(field.Elem(), value)
 	default:
 		return fmt.Errorf("unsupported type %s", field.Kind())
 	}

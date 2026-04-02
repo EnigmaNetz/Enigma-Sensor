@@ -15,6 +15,8 @@ import (
 	types "EnigmaNetz/Enigma-Go-Sensor/internal/processor/common"
 )
 
+func intPtr(v int) *int { return &v }
+
 type mockCapturer struct {
 	calls *int32
 	fail  bool
@@ -98,12 +100,14 @@ func minimalConfig(loop bool) *config.Config {
 			Loop                 bool   `json:"loop"`
 			Interface            string `json:"interface"`
 			MaxProcessingWorkers int    `json:"max_processing_workers"`
+			RetentionHours       *int   `json:"retention_hours,omitempty"`
 		}{
 			OutputDir:            "/tmp",
 			WindowSeconds:        0,
 			Loop:                 loop,
 			Interface:            "any",
 			MaxProcessingWorkers: 10,
+			RetentionHours:       intPtr(24),
 		},
 		Logging: struct {
 			Level            string `json:"level"`

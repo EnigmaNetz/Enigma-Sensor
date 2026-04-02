@@ -223,6 +223,20 @@ func deletePCAPFile(pcapPath string, logPrefix string) {
 	}
 }
 
+// deleteZeekOutDir removes the zeek output directory containing the given PCAP file.
+func deleteZeekOutDir(pcapPath string, logPrefix string) {
+	zeekDir := filepath.Dir(pcapPath)
+	if !strings.HasPrefix(filepath.Base(zeekDir), "zeek_out_") {
+		log.Printf("%s Refusing to delete directory %s: not a zeek_out_* folder", logPrefix, zeekDir)
+		return
+	}
+	if err := os.RemoveAll(zeekDir); err != nil {
+		log.Printf("%s Failed to delete zeek output directory %s: %v", logPrefix, zeekDir, err)
+	} else {
+		log.Printf("%s Deleted zeek output directory: %s", logPrefix, zeekDir)
+	}
+}
+
 // RunSensor orchestrates capture, processing, and upload with graceful shutdown
 // If disableSignals is true, signal handling is skipped (for tests)
 // If skipEnsureZeek is true, ensureZeekWindows is not called (for tests)
@@ -280,6 +294,9 @@ func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, proce
 			if err != nil {
 				log.Printf("%s Processing failed: %v", prefix, err)
 				deletePCAPFile(absPCAPPath, prefix)
+				if cfg.Capture.RetentionHours != nil && *cfg.Capture.RetentionHours == 0 {
+					deleteZeekOutDir(absPCAPPath, prefix)
+				}
 				continue
 			}
 			log.Printf("%s Processing complete. Conn XLSX: %s, DNS XLSX: %s, DHCP XLSX: %s, JA3JA4 XLSX: %s, JA4S XLSX: %s, Metadata: %+v", prefix, result.ConnPath, result.DNSPath, result.DHCPPath, result.JA3JA4Path, result.JA4SPath, result.Metadata)
@@ -305,6 +322,9 @@ func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, proce
 			}
 			// Only delete the capture file after successful processing and upload attempt
 			deletePCAPFile(absPCAPPath, prefix)
+			if cfg.Capture.RetentionHours != nil && *cfg.Capture.RetentionHours == 0 {
+				deleteZeekOutDir(absPCAPPath, prefix)
+			}
 		}
 		log.Printf("[worker-%d] Exiting worker goroutine", id)
 	}
@@ -360,14 +380,14 @@ func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, proce
 		}
 	}()
 
-	// cleanOldZeekOutFolders deletes zeek_out_* folders older than retentionDays in the given outputDir.
-	cleanOldZeekOutFolders := func(outputDir string, retentionDays int) {
+	// cleanOldZeekOutFolders deletes zeek_out_* folders older than retentionHours in the given outputDir.
+	cleanOldZeekOutFolders := func(outputDir string, retentionHours int) {
 		if outputDir == "" {
 			return
 		}
 		entries, err := os.ReadDir(outputDir)
 		if err == nil {
-			cutoff := time.Now().AddDate(0, 0, -retentionDays)
+			cutoff := time.Now().Add(-time.Duration(retentionHours) * time.Hour)
 			for _, entry := range entries {
 				if entry.IsDir() && len(entry.Name()) > 9 && entry.Name()[:9] == "zeek_out_" {
 					fullPath := filepath.Join(outputDir, entry.Name())
@@ -382,7 +402,11 @@ func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, proce
 
 	for {
 		// Clean up old zeek_out_* folders every iteration
-		cleanOldZeekOutFolders(cfg.Capture.OutputDir, cfg.Logging.LogRetentionDays)
+		if cfg.Capture.RetentionHours != nil {
+			cleanOldZeekOutFolders(cfg.Capture.OutputDir, *cfg.Capture.RetentionHours)
+		} else {
+			cleanOldZeekOutFolders(cfg.Capture.OutputDir, cfg.Logging.LogRetentionDays*24)
+		}
 		select {
 		case <-ctx.Done():
 			log.Printf("Context canceled, shutting down after current capture...")

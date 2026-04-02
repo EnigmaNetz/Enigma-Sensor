@@ -340,6 +340,54 @@ func TestConfig_ValidateAndSetDefaults_LogRetentionDays(t *testing.T) {
 	}
 }
 
+func TestConfig_ValidateAndSetDefaults_CaptureRetentionHours(t *testing.T) {
+	intPtr := func(v int) *int { return &v }
+	tests := []struct {
+		name        string
+		input       *int
+		expected    *int
+		expectError bool
+		errorMsg    string
+	}{
+		{"nil stays nil", nil, nil, false, ""},
+		{"zero means immediate cleanup", intPtr(0), intPtr(0), false, ""},
+		{"valid 1 hour", intPtr(1), intPtr(1), false, ""},
+		{"valid 24 hours", intPtr(24), intPtr(24), false, ""},
+		{"valid 168 hours", intPtr(168), intPtr(168), false, ""},
+		{"at maximum preserved", intPtr(720), intPtr(720), false, ""},
+		{"negative errors", intPtr(-1), nil, true, "must be at least 0"},
+		{"above maximum errors", intPtr(721), nil, true, "must be at most 720"},
+		{"way above maximum errors", intPtr(10000), nil, true, "must be at most 720"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{NetworkID: "Test-Network-01"}
+			cfg.Capture.RetentionHours = tt.input
+			err := cfg.ValidateAndSetDefaults()
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("Expected error for RetentionHours=%v, got nil", tt.input)
+				} else if tt.errorMsg != "" && !strings.Contains(err.Error(), tt.errorMsg) {
+					t.Errorf("Expected error to contain %q, got %q", tt.errorMsg, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error for RetentionHours=%v: %v", tt.input, err)
+				} else if tt.expected == nil {
+					if cfg.Capture.RetentionHours != nil {
+						t.Errorf("RetentionHours: expected nil, got %d", *cfg.Capture.RetentionHours)
+					}
+				} else if cfg.Capture.RetentionHours == nil {
+					t.Errorf("RetentionHours: expected %d, got nil", *tt.expected)
+				} else if *cfg.Capture.RetentionHours != *tt.expected {
+					t.Errorf("RetentionHours: expected %d, got %d", *tt.expected, *cfg.Capture.RetentionHours)
+				}
+			}
+		})
+	}
+}
+
 func TestConfig_ValidateAndSetDefaults_MaxBackups(t *testing.T) {
 	tests := []struct {
 		name        string

@@ -154,7 +154,8 @@ if [ ! -f /etc/enigma-sensor/config.json ]; then
     "output_dir": "/var/lib/enigma-sensor/captures",
     "window_seconds": 60,
     "loop": true,
-    "interface": "any"
+    "interface": "any",
+    "retention_hours": 24
   },
   "enigma_api": {
     "api_key": "$ENIGMA_API_KEY",

@@ -39,6 +39,8 @@ type Config struct {
 		Interface string `json:"interface"`
 		// MaxProcessingWorkers is the max number of concurrent PCAP processing workers (default: 10, min: 1, max: 20)
 		MaxProcessingWorkers int `json:"max_processing_workers"`
+		// RetentionHours is how long to keep zeek_out folders after processing (0 = delete immediately after upload, max 720)
+		RetentionHours *int `json:"retention_hours,omitempty"`
 	} `json:"capture"`
 
 	// Enigma API configuration
@@ -163,6 +165,14 @@ func (config *Config) ValidateAndSetDefaults() error {
 		config.Capture.MaxProcessingWorkers = 10
 	} else if config.Capture.MaxProcessingWorkers < 1 || config.Capture.MaxProcessingWorkers > 20 {
 		return fmt.Errorf("capture.max_processing_workers must be between 1 and 20, got %d", config.Capture.MaxProcessingWorkers)
+	}
+	// Validate Capture RetentionHours: nil means "not configured" (fall back to log_retention_days), 0 = immediate cleanup, max 720
+	if config.Capture.RetentionHours != nil {
+		if *config.Capture.RetentionHours < 0 {
+			return fmt.Errorf("capture.retention_hours must be at least 0, got %d", *config.Capture.RetentionHours)
+		} else if *config.Capture.RetentionHours > 720 {
+			return fmt.Errorf("capture.retention_hours must be at most 720, got %d", *config.Capture.RetentionHours)
+		}
 	}
 	// Zeek path can be empty by default
 	if config.Zeek.SamplingPercentage == 0 {

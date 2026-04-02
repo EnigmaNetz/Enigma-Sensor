@@ -401,10 +401,10 @@ func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, proce
 	}
 
 	for {
-		// Clean up old zeek_out_* folders every iteration
-		if cfg.Capture.RetentionHours != nil {
+		// Clean up old zeek_out_* folders every iteration (skip when 0; worker handles immediate cleanup)
+		if cfg.Capture.RetentionHours != nil && *cfg.Capture.RetentionHours > 0 {
 			cleanOldZeekOutFolders(cfg.Capture.OutputDir, *cfg.Capture.RetentionHours)
-		} else {
+		} else if cfg.Capture.RetentionHours == nil {
 			cleanOldZeekOutFolders(cfg.Capture.OutputDir, cfg.Logging.LogRetentionDays*24)
 		}
 		select {

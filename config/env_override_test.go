@@ -7,6 +7,8 @@ import (
 	"testing"
 )
 
+func intPtr(v int) *int { return &v }
+
 // newBaseConfig returns a fully populated Config for use in tests.
 // Each field has a recognizable non-zero value so we can detect unwanted changes.
 func newBaseConfig() Config {
@@ -21,6 +23,7 @@ func newBaseConfig() Config {
 	cfg.Capture.WindowSeconds = 60
 	cfg.Capture.Loop = false
 	cfg.Capture.Interface = "eth0"
+	cfg.Capture.RetentionHours = intPtr(24)
 	cfg.EnigmaAPI.Server = "api.enigmaai.net:443"
 	cfg.EnigmaAPI.APIKey = "original-key"
 	cfg.EnigmaAPI.Upload = true
@@ -419,6 +422,15 @@ func TestApplyEnvOverrides_AllFieldEnvVarNames(t *testing.T) {
 					sentinel = "false"
 				} else {
 					sentinel = "true"
+				}
+			case reflect.Ptr:
+				// Dereference to get the element kind
+				elemKind := fieldVal.Type().Elem().Kind()
+				switch elemKind {
+				case reflect.Int:
+					sentinel = "99999"
+				default:
+					t.Fatalf("unsupported pointer element type %v for %s", elemKind, spec.description)
 				}
 			default:
 				t.Fatalf("unsupported field type %v for %s", fieldVal.Kind(), spec.description)

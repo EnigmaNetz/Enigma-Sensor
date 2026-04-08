@@ -13,6 +13,25 @@ Cross-platform sensor that captures network traffic, converts it to Zeek-style l
 
 ---
 
+## Requirements
+
+Size the sensor to the peak traffic volume it will inspect. The table below lists a bare-minimum floor plus three recommended tiers aligned to common network link speeds.
+
+| Tier                    | Cores | RAM   | Disk   |
+|-------------------------|-------|-------|--------|
+| Minimum                 | 2     | 4 GB  | 20 GB  |
+| Small (up to 100 Mbps)  | 4     | 8 GB  | 100 GB |
+| Medium (up to 1 Gbps)   | 8     | 16 GB | 500 GB |
+| Large (up to 10 Gbps)   | 16    | 32 GB | 1 TB   |
+
+Disk figures are general guidance and are not tied to a specific PCAP retention window; large deployments should tune PCAP retention to keep local disk usage minimal.
+
+**Network**: one NIC for management plus one capture source (SPAN or mirror port, network TAP, or a NIC in promiscuous mode). On Windows, Npcap is strongly recommended over pktmon for capture throughput.
+
+**Platform guidance**: Linux is the preferred platform for production deployments; Windows with Npcap is supported across all sizing tiers.
+
+---
+
 ## Quick Install
 
 ### Linux (recommended)

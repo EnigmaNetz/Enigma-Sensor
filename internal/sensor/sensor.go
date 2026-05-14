@@ -172,6 +172,42 @@ func ensureZeekWindows() error {
 		log.Printf("[sensor] Warning: Sampling script not found at %s", samplingScriptSrc)
 	}
 
+	// Copy DHCP fingerprint script to the custom-scripts directory if it exists
+	fingerprintScriptSrc := "zeek-scripts/dhcp-fingerprint.zeek"
+	fingerprintScriptDst := filepath.Join(zeekDir, "zeek-runtime-win64", "share", "zeek", "site", "custom-scripts", "dhcp-fingerprint.zeek")
+
+	if _, err := os.Stat(fingerprintScriptSrc); err == nil {
+		srcFile, err := os.Open(fingerprintScriptSrc)
+		if err != nil {
+			log.Printf("[sensor] Warning: Failed to open DHCP fingerprint script source: %v", err)
+		} else {
+			defer srcFile.Close()
+
+			if err := os.MkdirAll(filepath.Dir(fingerprintScriptDst), 0755); err != nil {
+				log.Printf("[sensor] Warning: Failed to create DHCP fingerprint script destination directory: %v", err)
+			} else {
+				dstFile, err := os.Create(fingerprintScriptDst)
+				if err != nil {
+					log.Printf("[sensor] Warning: Failed to create DHCP fingerprint script destination: %v", err)
+				} else {
+					defer dstFile.Close()
+					if _, err := io.Copy(dstFile, srcFile); err != nil {
+						log.Printf("[sensor] Warning: Failed to copy DHCP fingerprint script: %v", err)
+					} else {
+						log.Printf("[sensor] Successfully copied DHCP fingerprint script to Windows Zeek runtime")
+
+						mainZeekPath := filepath.Join(zeekDir, "zeek-runtime-win64", "share", "zeek", "site", "custom-scripts", "main.zeek")
+						if err := addFingerprintScriptToMainZeek(mainZeekPath); err != nil {
+							log.Printf("[sensor] Warning: Failed to update main.zeek for DHCP fingerprint: %v", err)
+						}
+					}
+				}
+			}
+		}
+	} else {
+		log.Printf("[sensor] Warning: DHCP fingerprint script not found at %s", fingerprintScriptSrc)
+	}
+
 	return nil
 }
 
@@ -201,6 +237,31 @@ func addSamplingScriptToMainZeek(mainZeekPath string) error {
 	}
 
 	log.Printf("[sensor] Added sampling script load directive to main.zeek")
+	return nil
+}
+
+// addFingerprintScriptToMainZeek adds the DHCP fingerprint script load directive to main.zeek if not already present
+func addFingerprintScriptToMainZeek(mainZeekPath string) error {
+	content, err := os.ReadFile(mainZeekPath)
+	if err != nil {
+		return fmt.Errorf("failed to read main.zeek: %w", err)
+	}
+
+	contentStr := string(content)
+	fingerprintLoadDirective := "@load ./dhcp-fingerprint.zeek"
+
+	if strings.Contains(contentStr, fingerprintLoadDirective) {
+		log.Printf("[sensor] DHCP fingerprint script already loaded in main.zeek")
+		return nil
+	}
+
+	updatedContent := contentStr + "\n" + fingerprintLoadDirective + "\n"
+
+	if err := os.WriteFile(mainZeekPath, []byte(updatedContent), 0644); err != nil {
+		return fmt.Errorf("failed to write updated main.zeek: %w", err)
+	}
+
+	log.Printf("[sensor] Added DHCP fingerprint script load directive to main.zeek")
 	return nil
 }
 

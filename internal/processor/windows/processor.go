@@ -94,6 +94,15 @@ func (p *Processor) ProcessPCAP(pcapPath string, samplingPercentage float64) (ty
 	}
 	log.Printf("[processor] Zeek execution completed successfully.")
 
+	// Enrich dhcp.log with DHCP option 55 (parameter request list).
+	// The Zeek build bundled in zeek-runtime-win64.zip does not expose
+	// DHCP::Options$param_req_list at script level, so we extract it here
+	// directly from the pcap using gopacket.
+	dhcpLogPath := filepath.Join(runDir, "dhcp.log")
+	if err := enrichDHCPLog(pcapPath, dhcpLogPath); err != nil {
+		log.Printf("[processor] Warning: DHCP enrichment failed: %v", err)
+	}
+
 	logFiles := []string{"conn.log", "dns.log", "dhcp.log", "ja3_ja4.log", "ja4s.log"}
 	paths, err := types.RenameZeekLogsToXLSX(p.fs, runDir, logFiles)
 	if err != nil {

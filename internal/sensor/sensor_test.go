@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -277,6 +278,52 @@ func TestRunSensor_ConcurrentWorkers(t *testing.T) {
 	}
 	t.Logf("Concurrent workers processed %d PCAPs", finalProcCalls)
 	t.Log("TestRunSensor_ConcurrentWorkers end reached")
+}
+
+func TestAddFingerprintScriptToMainZeek_AddsDirective(t *testing.T) {
+	f, err := os.CreateTemp("", "main-*.zeek")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(f.Name())
+	f.WriteString("@load base/protocols/dhcp\n")
+	f.Close()
+
+	if err := addFingerprintScriptToMainZeek(f.Name()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	content, _ := os.ReadFile(f.Name())
+	if !strings.Contains(string(content), "@load ./dhcp-fingerprint.zeek") {
+		t.Errorf("expected directive in main.zeek, got:\n%s", content)
+	}
+}
+
+func TestAddFingerprintScriptToMainZeek_Idempotent(t *testing.T) {
+	f, err := os.CreateTemp("", "main-*.zeek")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(f.Name())
+	f.WriteString("@load base/protocols/dhcp\n@load ./dhcp-fingerprint.zeek\n")
+	f.Close()
+
+	if err := addFingerprintScriptToMainZeek(f.Name()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	content, _ := os.ReadFile(f.Name())
+	count := strings.Count(string(content), "@load ./dhcp-fingerprint.zeek")
+	if count != 1 {
+		t.Errorf("expected directive exactly once, found %d times", count)
+	}
+}
+
+func TestAddFingerprintScriptToMainZeek_MissingFile(t *testing.T) {
+	err := addFingerprintScriptToMainZeek("/nonexistent/path/main.zeek")
+	if err == nil {
+		t.Error("expected error for missing file, got nil")
+	}
 }
 
 func TestValidateZipPath_RejectsPathTraversal(t *testing.T) {

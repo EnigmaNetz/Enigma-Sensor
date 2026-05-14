@@ -92,6 +92,20 @@ func (p *Processor) ProcessPCAP(pcapPath string, samplingPercentage float64) (ty
 	baseArgs := []string{"-r", pcapPath, fmt.Sprintf("Log::default_logdir=%s", runDir), "-C"}
 	zeekArgs := types.PrepareZeekArgsWithSampling(pcapPath, runDir, samplingPercentage, baseArgs)
 
+	// Add DHCP fingerprint script if available so param_req_list appears in dhcp.log
+	fingerprintScriptPaths := []string{
+		"zeek-scripts/dhcp-fingerprint.zeek",
+		filepath.Join("..", "..", "zeek-scripts", "dhcp-fingerprint.zeek"),
+		filepath.Join(filepath.Dir(pcapPath), "..", "..", "zeek-scripts", "dhcp-fingerprint.zeek"),
+	}
+	for _, path := range fingerprintScriptPaths {
+		if _, err := os.Stat(path); err == nil {
+			zeekArgs = append(zeekArgs, path)
+			log.Printf("[processor] Added DHCP fingerprint script from %s", path)
+			break
+		}
+	}
+
 	log.Printf("[processor] Running Zeek: %s %v", p.zeekPath, zeekArgs)
 	cmd := p.cmdRunner.Command(p.zeekPath, zeekArgs...)
 	cmdStdout, ok := cmd.(*realCmd)
@@ -104,6 +118,11 @@ func (p *Processor) ProcessPCAP(pcapPath string, samplingPercentage float64) (ty
 		return types.ProcessedData{}, fmt.Errorf("zeek failed: %w", err)
 	}
 	log.Printf("[processor] Zeek execution completed successfully.")
+
+	dhcpLogPath := filepath.Join(runDir, "dhcp.log")
+	if err := types.EnrichDHCPLog(pcapPath, dhcpLogPath); err != nil {
+		log.Printf("[processor] Warning: DHCP enrichment failed: %v", err)
+	}
 
 	paths, err := types.RenameZeekLogsToXLSX(p.fs, runDir, zeekLogFiles)
 	if err != nil {

@@ -49,6 +49,8 @@ type Config struct {
 		Server string `json:"server"`
 		// APIKey is the Enigma API key
 		APIKey string `json:"api_key"`
+		// CACertFile is an optional PEM CA certificate file for gRPC TLS
+		CACertFile string `json:"ca_cert_file"`
 		// Upload is whether to upload captured data to the Enigma API
 		Upload bool `json:"upload"`
 		// MaxPayloadSizeMB is the maximum size of payload before chunking (default: 25MB)

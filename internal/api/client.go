@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/zlib"
 	"context"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -69,15 +70,27 @@ type grpcClientImpl struct {
 }
 
 // NewLogUploader creates a new log uploader instance
-func NewLogUploader(serverAddr string, apiKey string, networkID string, captureInterface string, maxPayloadSizeMB int64, bufferDir string, bufferMaxAgeHours int) (*LogUploader, error) {
+func NewLogUploader(serverAddr string, apiKey string, networkID string, captureInterface string, maxPayloadSizeMB int64, bufferDir string, bufferMaxAgeHours int, caCertFile string) (*LogUploader, error) {
 	var opts []grpc.DialOption
 
-	// Always use SSL credentials with system trust store
 	host := serverAddr
 	if idx := strings.LastIndex(serverAddr, ":"); idx >= 0 {
 		host = serverAddr[:idx]
 	}
-	creds := credentials.NewClientTLSFromCert(nil, host)
+	var creds credentials.TransportCredentials
+	if caCertFile == "" {
+		creds = credentials.NewClientTLSFromCert(nil, host)
+	} else {
+		pem, err := os.ReadFile(caCertFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read CA certificate file %s: %w", caCertFile, err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(pem) {
+			return nil, fmt.Errorf("failed to parse CA certificate file %s", caCertFile)
+		}
+		creds = credentials.NewClientTLSFromCert(pool, host)
+	}
 	opts = append(opts, grpc.WithTransportCredentials(creds))
 
 	// Add keepalive options

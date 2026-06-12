@@ -126,6 +126,7 @@ func minimalConfig(loop bool) *config.Config {
 		EnigmaAPI: struct {
 			Server           string `json:"server"`
 			APIKey           string `json:"api_key"`
+			CACertFile       string `json:"ca_cert_file"`
 			Upload           bool   `json:"upload"`
 			MaxPayloadSizeMB int64  `json:"max_payload_size_mb"`
 		}{},

@@ -4,17 +4,23 @@ import (
 	"bytes"
 	"compress/zlib"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
-	"errors"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -62,6 +68,83 @@ func (m *mockPublishClient) uploadExcelMethod(ctx context.Context, data []byte, 
 	resp := m.uploadResponses[m.currentCall]
 	m.currentCall++
 	return resp.status, resp.statusCode, resp.message, resp.err
+}
+
+func TestNewLogUploaderCACertFile(t *testing.T) {
+	tests := []struct {
+		name       string
+		certFile   func(t *testing.T) string
+		wantErr    bool
+		errContain string
+	}{
+		{
+			name: "empty cert file uses system trust store",
+			certFile: func(t *testing.T) string {
+				return ""
+			},
+		},
+		{
+			name: "valid cert file succeeds",
+			certFile: func(t *testing.T) string {
+				path := filepath.Join(t.TempDir(), "ca.pem")
+				require.NoError(t, os.WriteFile(path, generateTestCACertPEM(t), 0644))
+				return path
+			},
+		},
+		{
+			name: "missing cert file errors",
+			certFile: func(t *testing.T) string {
+				return filepath.Join(t.TempDir(), "missing.pem")
+			},
+			wantErr:    true,
+			errContain: "failed to read CA certificate file",
+		},
+		{
+			name: "invalid cert file errors",
+			certFile: func(t *testing.T) string {
+				path := filepath.Join(t.TempDir(), "ca.pem")
+				require.NoError(t, os.WriteFile(path, []byte("not a PEM certificate"), 0644))
+				return path
+			},
+			wantErr:    true,
+			errContain: "failed to parse CA certificate file",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			uploader, err := NewLogUploader("api.example.test:443", "test-key", "Test-Network-01", "any", 25, t.TempDir(), 24, tt.certFile(t))
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errContain)
+				assert.Nil(t, uploader)
+				return
+			}
+			require.NoError(t, err)
+			assert.NotNil(t, uploader)
+		})
+	}
+}
+
+func generateTestCACertPEM(t *testing.T) []byte {
+	t.Helper()
+
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	template := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "test CA"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &privateKey.PublicKey, privateKey)
+	require.NoError(t, err)
+
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
 }
 
 // TestLogUploader_UploadLogs verifies the LogUploader's UploadLogs method for various scenarios:

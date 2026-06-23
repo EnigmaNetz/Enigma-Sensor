@@ -40,7 +40,7 @@ jobs:
     if: inputs.build_windows
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -70,7 +70,7 @@ jobs:
         shell: powershell
 
       - name: Upload Windows Installer Artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: enigma-sensor-windows-${{ inputs.artifact_prefix }}
           path: installer/windows/Output/enigma-sensor-windows-*.exe
@@ -90,7 +90,7 @@ jobs:
     if: inputs.build_linux
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -129,7 +129,7 @@ jobs:
           cd ..
 
       - name: Upload Linux Package Artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: enigma-sensor-linux-${{ inputs.artifact_prefix }}
           path: bin/enigma-sensor-linux-*.deb
@@ -151,7 +151,7 @@ jobs:
     if: inputs.build_macos
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -170,7 +170,7 @@ jobs:
           tar -czf enigma-sensor-macos-${{ inputs.artifact_prefix }}.tar.gz enigma-sensor-darwin-*
 
       - name: Upload macOS Binary Artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: enigma-sensor-macos-${{ inputs.artifact_prefix }}
           path: bin/enigma-sensor-macos-*.tar.gz

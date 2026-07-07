@@ -10,8 +10,25 @@ import (
 // Processor defines the interface for platform-agnostic PCAP processing using Zeek.
 // Implementations should process the given PCAP file and return XLSX file paths for both con.log and dns.log.
 type Processor interface {
-	ProcessPCAP(pcapPath string, samplingPercentage float64) (ProcessedData, error)
+	ProcessPCAP(pcapPath string, opts ProcessOptions) (ProcessedData, error)
 }
+
+// ProcessOptions carries the per-run knobs for ProcessPCAP. Bundling them keeps
+// the ProcessPCAP signature stable as new knobs are added.
+type ProcessOptions struct {
+	// SamplingPercentage is the percentage of traffic to process (0-100).
+	SamplingPercentage float64
+	// ExcludedSubnets is the list of CIDRs whose flows/records must be dropped
+	// from the produced logs before upload. Empty = no filtering.
+	ExcludedSubnets []string
+}
+
+// ZeekLogFiles is the single source of truth for the Zeek logs the sensor
+// uploads. Both FilterExcludedSubnets and RenameZeekLogsToXLSX key off this
+// list so "what we filter" and "what we upload" can never drift apart — adding
+// a sixth uploaded log here automatically brings it under subnet filtering on
+// every platform.
+var ZeekLogFiles = []string{"conn.log", "dns.log", "dhcp.log", "ja3_ja4.log", "ja4s.log"}
 
 // ProcessedData represents the output of PCAP processing.
 type ProcessedData struct {

@@ -18,7 +18,7 @@ type mockProcessor struct {
 	result types.ProcessedData
 }
 
-func (m *mockProcessor) ProcessPCAP(pcapPath string, samplingPercentage float64) (types.ProcessedData, error) {
+func (m *mockProcessor) ProcessPCAP(pcapPath string, opts types.ProcessOptions) (types.ProcessedData, error) {
 	m.calls++
 	if m.fail {
 		return types.ProcessedData{}, errors.New("process failed")

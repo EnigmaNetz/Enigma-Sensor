@@ -17,7 +17,7 @@ import (
 
 // Processor processes a PCAP file and returns structured log data.
 type Processor interface {
-	ProcessPCAP(pcapPath string, samplingPercentage float64) (types.ProcessedData, error)
+	ProcessPCAP(pcapPath string, opts types.ProcessOptions) (types.ProcessedData, error)
 }
 
 // Uploader uploads processed log files to the API.
@@ -31,6 +31,7 @@ type WatcherConfig struct {
 	PollInterval      time.Duration
 	FileStableSeconds int
 	SamplingPct       float64
+	ExcludedSubnets   []string
 }
 
 // Watcher polls a directory for incoming PCAP files and feeds them through
@@ -42,6 +43,7 @@ type Watcher struct {
 	processor         Processor
 	uploader          Uploader
 	samplingPct       float64
+	excludedSubnets   []string
 }
 
 // NewWatcher creates a new PCAP directory watcher.
@@ -53,6 +55,7 @@ func NewWatcher(cfg WatcherConfig, proc Processor, uploader Uploader) *Watcher {
 		processor:         proc,
 		uploader:          uploader,
 		samplingPct:       cfg.SamplingPct,
+		excludedSubnets:   cfg.ExcludedSubnets,
 	}
 }
 
@@ -171,7 +174,10 @@ func (w *Watcher) processFile(ctx context.Context, srcPath, processingDir, proce
 
 	log.Printf("[pcap-ingest] Processing %s", fileName)
 
-	result, err := w.processor.ProcessPCAP(procPath, w.samplingPct)
+	result, err := w.processor.ProcessPCAP(procPath, types.ProcessOptions{
+		SamplingPercentage: w.samplingPct,
+		ExcludedSubnets:    w.excludedSubnets,
+	})
 	if err != nil {
 		log.Printf("[pcap-ingest] Processing failed for %s: %v", fileName, err)
 		// Move to failed

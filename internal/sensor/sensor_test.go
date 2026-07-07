@@ -44,7 +44,7 @@ type mockProcessor struct {
 	fail  bool
 }
 
-func (m *mockProcessor) ProcessPCAP(pcapPath string, samplingPercentage float64) (types.ProcessedData, error) {
+func (m *mockProcessor) ProcessPCAP(pcapPath string, opts types.ProcessOptions) (types.ProcessedData, error) {
 	atomic.AddInt32(m.calls, 1)
 	if m.fail {
 		return types.ProcessedData{}, errors.New("process failed")
@@ -74,7 +74,7 @@ type slowProcessor struct {
 	delay time.Duration
 }
 
-func (m *slowProcessor) ProcessPCAP(pcapPath string, samplingPercentage float64) (types.ProcessedData, error) {
+func (m *slowProcessor) ProcessPCAP(pcapPath string, opts types.ProcessOptions) (types.ProcessedData, error) {
 	atomic.AddInt32(m.calls, 1)
 	time.Sleep(m.delay)
 	return types.ProcessedData{

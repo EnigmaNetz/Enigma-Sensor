@@ -255,7 +255,7 @@ type Capturer interface {
 }
 
 type Processor interface {
-    ProcessPCAP(pcapPath string, samplingPercentage float64) (types.ProcessedData, error)
+    ProcessPCAP(pcapPath string, opts types.ProcessOptions) (types.ProcessedData, error)
 }
 
 type Uploader interface {

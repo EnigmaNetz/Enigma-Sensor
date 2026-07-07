@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	types "EnigmaNetz/Enigma-Go-Sensor/internal/processor/common"
 )
 
 // mockCmd simulates exec.Cmd behavior for testing.
@@ -87,7 +89,7 @@ func TestProcessPCAP(t *testing.T) {
 	}
 	p := NewTestProcessor(mockExecCmd, fs)
 
-	result, err := p.ProcessPCAP(pcapPath, 100)
+	result, err := p.ProcessPCAP(pcapPath, types.ProcessOptions{SamplingPercentage: 100})
 	if err != nil {
 		t.Fatalf("ProcessPCAP failed: %v", err)
 	}

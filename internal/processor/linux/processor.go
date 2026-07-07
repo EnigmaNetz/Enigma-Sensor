@@ -16,9 +16,6 @@ import (
 // zeekBinary is the path to the Zeek executable
 const zeekBinary = "/opt/zeek/bin/zeek"
 
-// zeekLogFiles are the Zeek logs we care about
-var zeekLogFiles = []string{"conn.log", "dns.log", "dhcp.log", "ja3_ja4.log", "ja4s.log"}
-
 // Dependency interfaces for testability
 // FS abstracts file system operations
 //go:generate mockgen -destination=fs_mock.go -package=linux . FS
@@ -83,14 +80,14 @@ func NewProcessorWithDeps(fs FS, cmdRunner CmdRunner, zeekPath string) *Processo
 }
 
 // ProcessPCAP runs Zeek on the given PCAP, converts logs to XLSX, and returns their paths
-func (p *Processor) ProcessPCAP(pcapPath string, samplingPercentage float64) (types.ProcessedData, error) {
+func (p *Processor) ProcessPCAP(pcapPath string, opts types.ProcessOptions) (types.ProcessedData, error) {
 	// Use the directory containing the PCAP as the run directory
 	runDir := filepath.Dir(pcapPath)
 	log.Printf("[processor] Run directory: %s", runDir)
 
 	// Prepare Zeek command with sampling if needed
 	baseArgs := []string{"-r", pcapPath, fmt.Sprintf("Log::default_logdir=%s", runDir), "-C"}
-	zeekArgs := types.PrepareZeekArgsWithSampling(pcapPath, runDir, samplingPercentage, baseArgs)
+	zeekArgs := types.PrepareZeekArgsWithSampling(pcapPath, runDir, opts.SamplingPercentage, baseArgs)
 
 	// Add DHCP fingerprint script if available so param_req_list appears in dhcp.log
 	fingerprintScriptPaths := []string{
@@ -124,7 +121,15 @@ func (p *Processor) ProcessPCAP(pcapPath string, samplingPercentage float64) (ty
 		log.Printf("[processor] Warning: DHCP enrichment failed: %v", err)
 	}
 
-	paths, err := types.RenameZeekLogsToXLSX(p.fs, runDir, zeekLogFiles)
+	// Drop any flows/records in an excluded subnet before the logs are renamed
+	// and uploaded. Fatal on failure: uploading unfiltered data would violate
+	// the "do not upload it" guarantee.
+	if err := types.FilterExcludedSubnets(runDir, types.ZeekLogFiles, opts.ExcludedSubnets); err != nil {
+		log.Printf("[processor] Subnet exclusion filtering failed: %v", err)
+		return types.ProcessedData{}, fmt.Errorf("subnet exclusion filtering failed: %w", err)
+	}
+
+	paths, err := types.RenameZeekLogsToXLSX(p.fs, runDir, types.ZeekLogFiles)
 	if err != nil {
 		log.Printf("[processor] Failed to rename Zeek logs: %v", err)
 		return types.ProcessedData{}, err
@@ -134,7 +139,7 @@ func (p *Processor) ProcessPCAP(pcapPath string, samplingPercentage float64) (ty
 		"zeek_out_dir":        runDir,
 		"timestamp":           time.Now().UTC().Format("20060102T150405Z"),
 		"pcap_path":           pcapPath,
-		"sampling_percentage": samplingPercentage,
+		"sampling_percentage": opts.SamplingPercentage,
 	}
 	log.Printf("[processor] Returning results: conn.xlsx=%s, dns.xlsx=%s, dhcp.xlsx=%s, ja3_ja4.xlsx=%s, ja4s.xlsx=%s, metadata=%v", paths["conn.log"], paths["dns.log"], paths["dhcp.log"], paths["ja3_ja4.log"], paths["ja4s.log"], metadata)
 

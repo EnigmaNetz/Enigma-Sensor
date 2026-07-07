@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"regexp"
 	"strings"
@@ -71,6 +72,13 @@ type Config struct {
 		Path string `json:"path"`
 		// SamplingPercentage is the percentage of traffic to process (0-100)
 		SamplingPercentage float64 `json:"sampling_percentage"`
+		// ExcludedSubnets is a comma-delimited list of CIDRs (e.g.
+		// "10.0.0.0/8,172.20.10.0/24"). Any flow/record whose source or
+		// destination IP falls inside one of these subnets is dropped from the
+		// produced logs and never uploaded. Stored as a single string (not an
+		// array) so it flows through the reflection-based SENSOR_ env overrides
+		// (SENSOR_ZEEK_EXCLUDED_SUBNETS). Empty = feature off.
+		ExcludedSubnets string `json:"excluded_subnets"`
 	} `json:"zeek"`
 
 	// PcapIngest configuration for offline PCAP file processing
@@ -84,6 +92,24 @@ type Config struct {
 		// FileStableSeconds is how long a file's size must be unchanged before processing (default: 5, min: 1, max: 60)
 		FileStableSeconds int `json:"file_stable_seconds"`
 	} `json:"pcap_ingest"`
+}
+
+// splitCSV splits a comma-delimited string into trimmed, non-empty entries.
+func splitCSV(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// ExcludedSubnetList returns the configured excluded subnet CIDRs as a trimmed,
+// non-empty slice. Returns nil when the feature is off. Entries are validated by
+// ValidateAndSetDefaults at load time.
+func (c *Config) ExcludedSubnetList() []string {
+	return splitCSV(c.Zeek.ExcludedSubnets)
 }
 
 // validateNetworkID validates the network_id format
@@ -179,6 +205,13 @@ func (config *Config) ValidateAndSetDefaults() error {
 	// Zeek path can be empty by default
 	if config.Zeek.SamplingPercentage == 0 {
 		config.Zeek.SamplingPercentage = 100 // Default to 100% (process all traffic)
+	}
+	// Validate excluded_subnets: empty = feature off. Every comma-separated
+	// entry must be a valid CIDR; reject malformed lists with a clear error.
+	for _, entry := range splitCSV(config.Zeek.ExcludedSubnets) {
+		if _, _, err := net.ParseCIDR(entry); err != nil {
+			return fmt.Errorf("zeek.excluded_subnets: invalid CIDR %q (expected e.g. 10.0.0.0/8): %w", entry, err)
+		}
 	}
 	// Defaults for buffering
 	if config.Buffering.Dir == "" {

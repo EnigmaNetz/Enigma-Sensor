@@ -34,7 +34,7 @@ type Capturer interface {
 }
 
 type Processor interface {
-	ProcessPCAP(pcapPath string, samplingPercentage float64) (types.ProcessedData, error)
+	ProcessPCAP(pcapPath string, opts types.ProcessOptions) (types.ProcessedData, error)
 }
 
 type Uploader interface {
@@ -351,7 +351,10 @@ func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, proce
 			}
 			log.Printf("%s Processing PCAP file at absolute path: %s", prefix, absPCAPPath)
 
-			result, err := processor.ProcessPCAP(absPCAPPath, cfg.Zeek.SamplingPercentage)
+			result, err := processor.ProcessPCAP(absPCAPPath, types.ProcessOptions{
+				SamplingPercentage: cfg.Zeek.SamplingPercentage,
+				ExcludedSubnets:    cfg.ExcludedSubnetList(),
+			})
 			if err != nil {
 				log.Printf("%s Processing failed: %v", prefix, err)
 				deletePCAPFile(absPCAPPath, prefix)
@@ -402,6 +405,7 @@ func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, proce
 			PollInterval:      time.Duration(cfg.PcapIngest.PollIntervalSeconds) * time.Second,
 			FileStableSeconds: cfg.PcapIngest.FileStableSeconds,
 			SamplingPct:       cfg.Zeek.SamplingPercentage,
+			ExcludedSubnets:   cfg.ExcludedSubnetList(),
 		}, processor, uploader)
 
 		wg.Add(1)

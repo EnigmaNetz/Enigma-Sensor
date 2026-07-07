@@ -54,7 +54,7 @@ func prepareWindowsZeekArgsWithSampling(runDir string, samplingPercentage float6
 	return args
 }
 
-func (p *Processor) ProcessPCAP(pcapPath string, samplingPercentage float64) (types.ProcessedData, error) {
+func (p *Processor) ProcessPCAP(pcapPath string, opts types.ProcessOptions) (types.ProcessedData, error) {
 	runDir := filepath.Dir(pcapPath)
 	zeekBaseDir := filepath.Join("zeek-windows", "zeek-runtime-win64")
 	zeekPath := filepath.Join(zeekBaseDir, "bin", "zeek.exe")
@@ -79,7 +79,7 @@ func (p *Processor) ProcessPCAP(pcapPath string, samplingPercentage float64) (ty
 	baseArgs := []string{"-r", zeekPcapPath, zeekScript, fmt.Sprintf("Log::default_logdir=%s", zeekRunDir), "-C"}
 
 	// For Windows, we handle sampling by modifying the search paths to use absolute paths
-	zeekArgs := prepareWindowsZeekArgsWithSampling(runDir, samplingPercentage, baseArgs)
+	zeekArgs := prepareWindowsZeekArgsWithSampling(runDir, opts.SamplingPercentage, baseArgs)
 
 	log.Printf("[processor] Running Zeek: %s %v", zeekPath, zeekArgs)
 
@@ -103,8 +103,15 @@ func (p *Processor) ProcessPCAP(pcapPath string, samplingPercentage float64) (ty
 		log.Printf("[processor] Warning: DHCP enrichment failed: %v", err)
 	}
 
-	logFiles := []string{"conn.log", "dns.log", "dhcp.log", "ja3_ja4.log", "ja4s.log"}
-	paths, err := types.RenameZeekLogsToXLSX(p.fs, runDir, logFiles)
+	// Drop any flows/records in an excluded subnet before the logs are renamed
+	// and uploaded. Fatal on failure: uploading unfiltered data would violate
+	// the "do not upload it" guarantee.
+	if err := types.FilterExcludedSubnets(runDir, types.ZeekLogFiles, opts.ExcludedSubnets); err != nil {
+		log.Printf("[processor] Subnet exclusion filtering failed: %v", err)
+		return types.ProcessedData{}, fmt.Errorf("subnet exclusion filtering failed: %w", err)
+	}
+
+	paths, err := types.RenameZeekLogsToXLSX(p.fs, runDir, types.ZeekLogFiles)
 	if err != nil {
 		log.Printf("[processor] Failed to rename Zeek logs: %v", err)
 		return types.ProcessedData{}, err
@@ -114,7 +121,7 @@ func (p *Processor) ProcessPCAP(pcapPath string, samplingPercentage float64) (ty
 		"zeek_out_dir":        runDir,
 		"timestamp":           time.Now().UTC().Format("20060102T150405Z"),
 		"pcap_path":           pcapPath,
-		"sampling_percentage": samplingPercentage,
+		"sampling_percentage": opts.SamplingPercentage,
 	}
 	log.Printf("[processor] Returning results: conn.xlsx=%s, dns.xlsx=%s, dhcp.xlsx=%s, ja3_ja4.xlsx=%s, ja4s.xlsx=%s, metadata=%v", paths["conn.log"], paths["dns.log"], paths["dhcp.log"], paths["ja3_ja4.log"], paths["ja4s.log"], metadata)
 

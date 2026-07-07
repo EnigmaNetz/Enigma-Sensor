@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	types "EnigmaNetz/Enigma-Go-Sensor/internal/processor/common"
 )
 
 // TestProcessPCAP verifies that ProcessPCAP processes a valid PCAP file and produces non-empty XLSX log paths. Skips if the test PCAP file is not found.
@@ -19,7 +21,7 @@ func TestProcessPCAP(t *testing.T) {
 		t.Skip("Test PCAP file not found; skipping integration test.")
 	}
 
-	result, err := p.ProcessPCAP(pcapPath, 100)
+	result, err := p.ProcessPCAP(pcapPath, types.ProcessOptions{SamplingPercentage: 100})
 	if err != nil {
 		t.Fatalf("ProcessPCAP failed: %v", err)
 	}
@@ -50,7 +52,7 @@ func TestMetadataContent(t *testing.T) {
 	if _, err := os.Stat(pcapPath); os.IsNotExist(err) {
 		t.Skip("Test PCAP file not found; skipping integration test.")
 	}
-	result, err := p.ProcessPCAP(pcapPath, 100)
+	result, err := p.ProcessPCAP(pcapPath, types.ProcessOptions{SamplingPercentage: 100})
 	if err != nil {
 		t.Fatalf("ProcessPCAP failed: %v", err)
 	}

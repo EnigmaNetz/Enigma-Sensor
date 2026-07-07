@@ -5,6 +5,68 @@ import (
 	"testing"
 )
 
+func TestValidateExcludedSubnets(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     string
+		wantError bool
+		wantList  []string
+	}{
+		{"empty is feature off", "", false, nil},
+		{"single valid cidr", "10.0.0.0/8", false, []string{"10.0.0.0/8"}},
+		{"multiple valid cidrs with spaces", "10.0.0.0/8, 172.20.10.0/24", false, []string{"10.0.0.0/8", "172.20.10.0/24"}},
+		{"ipv6 cidr", "fd00::/8", false, []string{"fd00::/8"}},
+		{"trailing comma tolerated", "10.0.0.0/8,", false, []string{"10.0.0.0/8"}},
+		{"missing mask rejected", "10.0.0.0", true, nil},
+		{"garbage rejected", "10.0.0.0/8,not-a-cidr", true, nil},
+		{"bad mask rejected", "10.0.0.0/99", true, nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := newBaseConfig()
+			cfg.Zeek.ExcludedSubnets = tt.value
+			err := cfg.ValidateAndSetDefaults()
+			if tt.wantError {
+				if err == nil {
+					t.Fatalf("expected error for %q, got nil", tt.value)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error for %q: %v", tt.value, err)
+			}
+			got := cfg.ExcludedSubnetList()
+			if len(got) != len(tt.wantList) {
+				t.Fatalf("ExcludedSubnetList() = %v, want %v", got, tt.wantList)
+			}
+			for i := range got {
+				if got[i] != tt.wantList[i] {
+					t.Errorf("entry %d = %q, want %q", i, got[i], tt.wantList[i])
+				}
+			}
+		})
+	}
+}
+
+func TestExcludedSubnetsEnvOverride(t *testing.T) {
+	cfg := newBaseConfig()
+	t.Setenv("SENSOR_ZEEK_EXCLUDED_SUBNETS", "10.0.0.0/8,192.168.0.0/16")
+
+	if err := ApplyEnvOverrides(&cfg); err != nil {
+		t.Fatalf("ApplyEnvOverrides: %v", err)
+	}
+	if cfg.Zeek.ExcludedSubnets != "10.0.0.0/8,192.168.0.0/16" {
+		t.Fatalf("env override not applied, got %q", cfg.Zeek.ExcludedSubnets)
+	}
+	if err := cfg.ValidateAndSetDefaults(); err != nil {
+		t.Fatalf("validation after override: %v", err)
+	}
+	if list := cfg.ExcludedSubnetList(); len(list) != 2 {
+		t.Errorf("expected 2 excluded subnets after override, got %v", list)
+	}
+}
+
 func TestValidateInterfaceName(t *testing.T) {
 	tests := []struct {
 		name      string

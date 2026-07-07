@@ -24,7 +24,8 @@
     "max_age_hours": 2
   },
   "zeek": {
-    "sampling_percentage": 100
+    "sampling_percentage": 100,
+    "excluded_subnets": ""
   },
   "pcap_ingest": {
     "enabled": false,

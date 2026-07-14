@@ -103,6 +103,23 @@ func (p *Processor) ProcessPCAP(pcapPath string, opts types.ProcessOptions) (typ
 		}
 	}
 
+	// Add JA3/JA4 fingerprint script if available so ja3_ja4.log / ja4s.log are
+	// produced (mirrors the Windows custom-scripts/main.zeek path). Without this
+	// the Linux sensor uploads empty JA3/JA4 payloads and TLS device-role
+	// classification never runs on Linux-sensor data.
+	ja3ja4ScriptPaths := []string{
+		"zeek-scripts/ja3-ja4-fingerprinting.zeek",
+		filepath.Join("..", "..", "zeek-scripts", "ja3-ja4-fingerprinting.zeek"),
+		filepath.Join(filepath.Dir(pcapPath), "..", "..", "zeek-scripts", "ja3-ja4-fingerprinting.zeek"),
+	}
+	for _, path := range ja3ja4ScriptPaths {
+		if _, err := os.Stat(path); err == nil {
+			zeekArgs = append(zeekArgs, path)
+			log.Printf("[processor] Added JA3/JA4 fingerprint script from %s", path)
+			break
+		}
+	}
+
 	log.Printf("[processor] Running Zeek: %s %v", p.zeekPath, zeekArgs)
 	cmd := p.cmdRunner.Command(p.zeekPath, zeekArgs...)
 	cmdStdout, ok := cmd.(*realCmd)

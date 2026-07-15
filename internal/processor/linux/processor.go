@@ -11,6 +11,7 @@ import (
 	"time"
 
 	types "EnigmaNetz/Enigma-Go-Sensor/internal/processor/common"
+	"EnigmaNetz/Enigma-Go-Sensor/internal/processor/common/zeekscripts"
 )
 
 // zeekBinary is the path to the Zeek executable
@@ -87,22 +88,23 @@ func (p *Processor) ProcessPCAP(pcapPath string, opts types.ProcessOptions) (typ
 
 	// Prepare Zeek command with sampling if needed
 	baseArgs := []string{"-r", pcapPath, fmt.Sprintf("Log::default_logdir=%s", runDir), "-C"}
-	zeekArgs := types.PrepareZeekArgsWithSampling(pcapPath, runDir, opts.SamplingPercentage, baseArgs)
+	zeekArgs := types.PrepareZeekArgsWithSampling(runDir, opts.SamplingPercentage, baseArgs)
 
-	// Add DHCP fingerprint script if available so param_req_list appears in dhcp.log.
-	zeekArgs, _ = types.AppendZeekScriptIfFound(p.fs, zeekArgs, pcapPath, "dhcp-fingerprint.zeek")
+	// Add DHCP fingerprint script so param_req_list appears in dhcp.log. Scripts are
+	// embedded in the binary and materialized into runDir, so this no longer depends
+	// on the process's working directory (which broke packaged systemd installs).
+	var err error
+	if zeekArgs, err = types.AppendZeekScript(zeekArgs, runDir, zeekscripts.DHCP); err != nil {
+		log.Printf("[processor] Warning: could not add DHCP fingerprint script: %v", err)
+	}
 
-	// Add JA3/JA4 fingerprint script if available so ja3_ja4.log / ja4s.log are
-	// produced (mirrors the Windows custom-scripts/main.zeek path). Without it the
-	// Linux sensor uploads empty JA3/JA4 payloads and TLS device-role classification
-	// never runs on Linux-sensor data. Warn loudly on a miss: the upload path
-	// tolerates the missing logs, which would otherwise hide it entirely — notably
-	// on packaged systemd installs where CWD is / and zeek-scripts/ is not shipped.
-	var ja3ja4Found bool
-	zeekArgs, ja3ja4Found = types.AppendZeekScriptIfFound(p.fs, zeekArgs, pcapPath, "ja3-ja4-fingerprinting.zeek")
-	if !ja3ja4Found {
-		cwd, _ := os.Getwd()
-		log.Printf("[processor] WARNING: JA3/JA4 fingerprint script not found (cwd=%s, searched standard zeek-scripts locations); ja3_ja4.log/ja4s.log will be empty and TLS device-role classification cannot run", cwd)
+	// Add JA3/JA4 fingerprint script so ja3_ja4.log / ja4s.log are produced (mirrors
+	// the Windows custom-scripts/main.zeek path). Without it the Linux sensor uploads
+	// empty JA3/JA4 payloads and TLS device-role classification never runs on
+	// Linux-sensor data. Warn loudly on failure: the upload path tolerates the
+	// missing logs, which would otherwise hide it entirely.
+	if zeekArgs, err = types.AppendZeekScript(zeekArgs, runDir, zeekscripts.JA3JA4); err != nil {
+		log.Printf("[processor] WARNING: could not add JA3/JA4 fingerprint script: %v; ja3_ja4.log/ja4s.log will be empty and TLS device-role classification cannot run", err)
 	}
 
 	log.Printf("[processor] Running Zeek: %s %v", p.zeekPath, zeekArgs)

@@ -19,6 +19,7 @@ import (
 	"EnigmaNetz/Enigma-Go-Sensor/internal/capture/common"
 	"EnigmaNetz/Enigma-Go-Sensor/internal/pcapingest"
 	types "EnigmaNetz/Enigma-Go-Sensor/internal/processor/common"
+	"EnigmaNetz/Enigma-Go-Sensor/internal/processor/common/zeekscripts"
 	"archive/zip"
 	"runtime"
 )
@@ -134,78 +135,30 @@ func ensureZeekWindows() error {
 		}
 	}
 
-	// Copy sampling script to the custom-scripts directory if it exists
-	samplingScriptSrc := "zeek-scripts/sampling.zeek"
-	samplingScriptDst := filepath.Join(zeekDir, "zeek-runtime-win64", "share", "zeek", "site", "custom-scripts", "sampling.zeek")
+	// Write the embedded sampling and DHCP fingerprint scripts into the Windows
+	// Zeek runtime's custom-scripts directory and load them from main.zeek. The
+	// scripts are embedded in the binary (see the zeekscripts package), so this no
+	// longer depends on a repo-relative zeek-scripts/ directory shipped alongside
+	// the executable.
+	customScriptsDir := filepath.Join(zeekDir, "zeek-runtime-win64", "share", "zeek", "site", "custom-scripts")
+	mainZeekPath := filepath.Join(customScriptsDir, "main.zeek")
 
-	if _, err := os.Stat(samplingScriptSrc); err == nil {
-		srcFile, err := os.Open(samplingScriptSrc)
-		if err != nil {
-			log.Printf("[sensor] Warning: Failed to open sampling script source: %v", err)
-		} else {
-			defer srcFile.Close()
-
-			// Ensure destination directory exists
-			if err := os.MkdirAll(filepath.Dir(samplingScriptDst), 0755); err != nil {
-				log.Printf("[sensor] Warning: Failed to create sampling script destination directory: %v", err)
-			} else {
-				dstFile, err := os.Create(samplingScriptDst)
-				if err != nil {
-					log.Printf("[sensor] Warning: Failed to create sampling script destination: %v", err)
-				} else {
-					defer dstFile.Close()
-					if _, err := io.Copy(dstFile, srcFile); err != nil {
-						log.Printf("[sensor] Warning: Failed to copy sampling script: %v", err)
-					} else {
-						log.Printf("[sensor] Successfully copied sampling script to Windows Zeek runtime")
-
-						// Update main.zeek to load the sampling script
-						mainZeekPath := filepath.Join(zeekDir, "zeek-runtime-win64", "share", "zeek", "site", "custom-scripts", "main.zeek")
-						if err := addSamplingScriptToMainZeek(mainZeekPath); err != nil {
-							log.Printf("[sensor] Warning: Failed to update main.zeek: %v", err)
-						}
-					}
-				}
-			}
-		}
+	if _, err := zeekscripts.Materialize(customScriptsDir, zeekscripts.Sampling); err != nil {
+		log.Printf("[sensor] Warning: Failed to write sampling script to Windows Zeek runtime: %v", err)
 	} else {
-		log.Printf("[sensor] Warning: Sampling script not found at %s", samplingScriptSrc)
+		log.Printf("[sensor] Successfully wrote sampling script to Windows Zeek runtime")
+		if err := addSamplingScriptToMainZeek(mainZeekPath); err != nil {
+			log.Printf("[sensor] Warning: Failed to update main.zeek: %v", err)
+		}
 	}
 
-	// Copy DHCP fingerprint script to the custom-scripts directory if it exists
-	fingerprintScriptSrc := "zeek-scripts/dhcp-fingerprint.zeek"
-	fingerprintScriptDst := filepath.Join(zeekDir, "zeek-runtime-win64", "share", "zeek", "site", "custom-scripts", "dhcp-fingerprint.zeek")
-
-	if _, err := os.Stat(fingerprintScriptSrc); err == nil {
-		srcFile, err := os.Open(fingerprintScriptSrc)
-		if err != nil {
-			log.Printf("[sensor] Warning: Failed to open DHCP fingerprint script source: %v", err)
-		} else {
-			defer srcFile.Close()
-
-			if err := os.MkdirAll(filepath.Dir(fingerprintScriptDst), 0755); err != nil {
-				log.Printf("[sensor] Warning: Failed to create DHCP fingerprint script destination directory: %v", err)
-			} else {
-				dstFile, err := os.Create(fingerprintScriptDst)
-				if err != nil {
-					log.Printf("[sensor] Warning: Failed to create DHCP fingerprint script destination: %v", err)
-				} else {
-					defer dstFile.Close()
-					if _, err := io.Copy(dstFile, srcFile); err != nil {
-						log.Printf("[sensor] Warning: Failed to copy DHCP fingerprint script: %v", err)
-					} else {
-						log.Printf("[sensor] Successfully copied DHCP fingerprint script to Windows Zeek runtime")
-
-						mainZeekPath := filepath.Join(zeekDir, "zeek-runtime-win64", "share", "zeek", "site", "custom-scripts", "main.zeek")
-						if err := addFingerprintScriptToMainZeek(mainZeekPath); err != nil {
-							log.Printf("[sensor] Warning: Failed to update main.zeek for DHCP fingerprint: %v", err)
-						}
-					}
-				}
-			}
-		}
+	if _, err := zeekscripts.Materialize(customScriptsDir, zeekscripts.DHCP); err != nil {
+		log.Printf("[sensor] Warning: Failed to write DHCP fingerprint script to Windows Zeek runtime: %v", err)
 	} else {
-		log.Printf("[sensor] Warning: DHCP fingerprint script not found at %s", fingerprintScriptSrc)
+		log.Printf("[sensor] Successfully wrote DHCP fingerprint script to Windows Zeek runtime")
+		if err := addFingerprintScriptToMainZeek(mainZeekPath); err != nil {
+			log.Printf("[sensor] Warning: Failed to update main.zeek for DHCP fingerprint: %v", err)
+		}
 	}
 
 	return nil

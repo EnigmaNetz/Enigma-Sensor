@@ -61,11 +61,10 @@ RUN mkdir -p \
         /var/log/enigma-sensor \
         /var/lib/enigma-sensor/captures
 
-# Copy compiled binary from the builder stage.
+# Copy compiled binary from the builder stage. The Zeek scripts (sampling, DHCP,
+# JA3/JA4) are embedded in the binary via the zeekscripts package and written to
+# the run directory at processing time, so no separate zeek-scripts/ copy is needed.
 COPY --from=builder /src/enigma-sensor /usr/local/bin/enigma-sensor
-
-# Copy Zeek scripts used by the processor for sampling and log generation.
-COPY zeek-scripts/ /app/zeek-scripts/
 
 # Copy the example config as a template; operators mount or override config.json
 # at /etc/enigma-sensor/config.json to supply API keys and settings.

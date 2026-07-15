@@ -5,6 +5,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+
+	"EnigmaNetz/Enigma-Go-Sensor/internal/processor/common/zeekscripts"
 )
 
 // Processor defines the interface for platform-agnostic PCAP processing using Zeek.
@@ -69,61 +71,38 @@ func RenameZeekLogsToXLSX(fs FS, runDir string, logFiles []string) (map[string]s
 	return paths, nil
 }
 
-// PrepareZeekArgsWithSampling prepares Zeek command arguments including sampling configuration
-// This is primarily used by Linux; Windows handles sampling via main.zeek
-func PrepareZeekArgsWithSampling(pcapPath, runDir string, samplingPercentage float64, baseArgs []string) []string {
+// PrepareZeekArgsWithSampling prepares Zeek command arguments including sampling
+// configuration. Primarily used by Linux; Windows handles sampling via main.zeek.
+func PrepareZeekArgsWithSampling(runDir string, samplingPercentage float64, baseArgs []string) []string {
 	args := make([]string, len(baseArgs))
 	copy(args, baseArgs)
 
-	// Add sampling script if sampling percentage is less than 100. Sampling is a
-	// special case of script discovery: the same candidate-path lookup, but it
-	// prepends a Sampling::sampling_percentage arg before the script path.
+	// Add sampling script if sampling percentage is less than 100. The embedded
+	// sampling.zeek is materialized into runDir and the Sampling::sampling_percentage
+	// arg is prepended before its path.
 	if samplingPercentage < 100 {
-		if samplingScriptPath := findZeekScript(OSFS{}, pcapPath, "sampling.zeek"); samplingScriptPath != "" {
-			args = append(args, fmt.Sprintf("Sampling::sampling_percentage=%.1f", samplingPercentage))
-			args = append(args, samplingScriptPath)
-			log.Printf("[processor] Added sampling script at %.1f%% from %s", samplingPercentage, samplingScriptPath)
+		if path, err := zeekscripts.Materialize(runDir, zeekscripts.Sampling); err != nil {
+			log.Printf("[processor] Warning: could not materialize sampling script (%v); processing all traffic", err)
 		} else {
-			log.Printf("[processor] Warning: sampling script not found, processing all traffic")
+			args = append(args, fmt.Sprintf("Sampling::sampling_percentage=%.1f", samplingPercentage))
+			args = append(args, path)
+			log.Printf("[processor] Added sampling script at %.1f%% from %s", samplingPercentage, path)
 		}
 	}
 
 	return args
 }
 
-// zeekScriptCandidates returns the standard locations a bundled Zeek script named
-// `script` may live in, relative to the current working directory and to the pcap
-// directory. This is the single source of truth for where the sensor looks for
-// its zeek-scripts/ assets across sampling, DHCP, and JA3/JA4 discovery.
-func zeekScriptCandidates(pcapPath, script string) []string {
-	return []string{
-		filepath.Join("zeek-scripts", script),
-		filepath.Join("..", "..", "zeek-scripts", script),
-		filepath.Join(filepath.Dir(pcapPath), "..", "..", "zeek-scripts", script),
-	}
-}
-
-// findZeekScript returns the first candidate path for `script` that exists per fs,
-// or "" if none resolve.
-func findZeekScript(fs FS, pcapPath, script string) string {
-	for _, path := range zeekScriptCandidates(pcapPath, script) {
-		if _, err := fs.Stat(path); err == nil {
-			return path
-		}
-	}
-	return ""
-}
-
-// AppendZeekScriptIfFound locates the bundled Zeek script `script` and, if found,
-// appends its path to args and returns (args, true). If no candidate resolves it
-// returns (args, false) so the caller can decide how to report the miss (the
-// upload path tolerates missing logs, so a silent miss is easy to overlook).
-// Stat goes through the injected FS so the discovery loop stays unit-testable.
-func AppendZeekScriptIfFound(fs FS, args []string, pcapPath, script string) ([]string, bool) {
-	path := findZeekScript(fs, pcapPath, script)
-	if path == "" {
-		return args, false
+// AppendZeekScript materializes the embedded Zeek script `script` into runDir and
+// appends its path to args. Returns the updated args, or the original args and an
+// error if the script could not be written. Scripts are sourced from the binary
+// (see the zeekscripts package), not from a CWD-relative filesystem lookup, so
+// discovery no longer depends on the process's working directory.
+func AppendZeekScript(args []string, runDir, script string) ([]string, error) {
+	path, err := zeekscripts.Materialize(runDir, script)
+	if err != nil {
+		return args, err
 	}
 	log.Printf("[processor] Added Zeek script %s from %s", script, path)
-	return append(args, path), true
+	return append(args, path), nil
 }

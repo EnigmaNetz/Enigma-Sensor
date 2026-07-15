@@ -10,14 +10,12 @@ GO_BUILD_SRC=../../cmd/enigma-sensor
 # Clean up any previous build
 rm -rf $PKG_DIR
 
-# Ensure binary exists, build if missing
+# Always rebuild: an existing binary may predate the current source, and go build is cached.
+echo "[INFO] Building Go binary..."
+(cd ../.. && GOOS=linux GOARCH=amd64 go build -o bin/enigma-sensor-linux ./cmd/enigma-sensor)
 if [ ! -f "$SENSOR_BIN" ]; then
-  echo "[INFO] $SENSOR_BIN not found. Building Go binary..."
-  (cd ../.. && GOOS=linux GOARCH=amd64 go build -o bin/enigma-sensor-linux ./cmd/enigma-sensor)
-  if [ ! -f "$SENSOR_BIN" ]; then
-    echo "[ERROR] Failed to build $SENSOR_BIN. Aborting."
-    exit 1
-  fi
+  echo "[ERROR] Failed to build $SENSOR_BIN. Aborting."
+  exit 1
 fi
 
 # Create directory structure

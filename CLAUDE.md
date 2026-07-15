@@ -273,7 +273,7 @@ The main sensor loop coordinates capture → process → upload → cleanup cycl
 cd installer/debian
 ./build-deb.sh
 ```
-- Auto-builds Linux binary if missing
+- Always rebuilds the Linux binary (never packages a stale one)
 - Creates systemd service integration
 - Outputs to `../../bin/enigma-sensor_*.deb`
 

@@ -66,23 +66,18 @@ func TestMetadataContent(t *testing.T) {
 	}
 }
 
-// --- Unit test for the JA3/JA4 script discovery loop ---------------------------
-// These use the injected FS + CmdRunner seams (no real Zeek/filesystem) to assert
-// that the JA3/JA4 fingerprint script is passed to the Zeek invocation when the
-// file resolves, and omitted when it does not — guarding the discovery loop in
-// ProcessPCAP against regressions.
+// --- Unit test for embedded JA3/JA4 script materialization ---------------------
+// Uses the injected FS + CmdRunner seams (no real Zeek) to assert that the
+// embedded JA3/JA4 fingerprint script is written into the run directory and passed
+// to the Zeek invocation — guarding the materialization path in ProcessPCAP.
 
-// fakeFS reports any path containing `present` as existing and everything else as
-// missing, so the discovery loop is driven deterministically without the real FS.
-type fakeFS struct{ present string }
+// fakeFS is a no-op filesystem; ProcessPCAP short-circuits (via the stubbed Run
+// error) before any of its methods are exercised. Scripts are materialized with
+// os.WriteFile directly, not through this FS.
+type fakeFS struct{}
 
-func (f fakeFS) Stat(name string) (os.FileInfo, error) {
-	if f.present != "" && strings.Contains(name, f.present) {
-		return nil, nil
-	}
-	return nil, os.ErrNotExist
-}
 func (fakeFS) MkdirAll(string, os.FileMode) error { return nil }
+func (fakeFS) Stat(string) (os.FileInfo, error)   { return nil, os.ErrNotExist }
 func (fakeFS) Open(string) (*os.File, error)      { return nil, os.ErrNotExist }
 func (fakeFS) Create(string) (*os.File, error)    { return nil, os.ErrNotExist }
 func (fakeFS) Rename(string, string) error        { return nil }
@@ -110,32 +105,25 @@ func argsContain(args []string, substr string) bool {
 	return false
 }
 
-func TestProcessPCAP_JA3JA4ScriptDiscovery(t *testing.T) {
+func TestProcessPCAP_JA3JA4ScriptMaterialized(t *testing.T) {
 	const script = "ja3-ja4-fingerprinting.zeek"
-	pcapPath := filepath.Join(t.TempDir(), "test.pcap")
+	runDir := t.TempDir()
+	pcapPath := filepath.Join(runDir, "test.pcap")
 
-	t.Run("script present is passed to zeek", func(t *testing.T) {
-		runner := &capturingCmdRunner{}
-		p := NewProcessorWithDeps(fakeFS{present: script}, runner, zeekBinary)
+	runner := &capturingCmdRunner{}
+	p := NewProcessorWithDeps(fakeFS{}, runner, zeekBinary)
 
-		// Run() errors to skip real Zeek; args were already captured at Command().
-		_, _ = p.ProcessPCAP(pcapPath, types.ProcessOptions{SamplingPercentage: 100})
+	// Run() errors to skip real Zeek; args were already captured at Command().
+	_, _ = p.ProcessPCAP(pcapPath, types.ProcessOptions{SamplingPercentage: 100})
 
-		if !argsContain(runner.args, script) {
-			t.Fatalf("expected zeek args to include %q, got: %v", script, runner.args)
-		}
-	})
-
-	t.Run("script absent is not passed", func(t *testing.T) {
-		runner := &capturingCmdRunner{}
-		p := NewProcessorWithDeps(fakeFS{present: ""}, runner, zeekBinary)
-
-		_, _ = p.ProcessPCAP(pcapPath, types.ProcessOptions{SamplingPercentage: 100})
-
-		if argsContain(runner.args, script) {
-			t.Fatalf("expected zeek args to omit %q when the file is missing, got: %v", script, runner.args)
-		}
-	})
+	// The embedded script must be passed to Zeek...
+	if !argsContain(runner.args, script) {
+		t.Fatalf("expected zeek args to include %q, got: %v", script, runner.args)
+	}
+	// ...and written to the run directory as a real file (embed → disk).
+	if _, err := os.Stat(filepath.Join(runDir, script)); err != nil {
+		t.Fatalf("expected %q to be materialized into runDir: %v", script, err)
+	}
 }
 
 // TODO: Add more granular unit tests with mocks for Zeek and file conversion.

@@ -15,7 +15,8 @@ PrivilegesRequired=admin
 Source: "..\\..\\bin\\enigma-sensor-windows-amd64.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\\..\\bin\\nssm.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "zeek-runtime-win64.zip"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\\..\\zeek-scripts\\*"; DestDir: "{app}\\zeek-scripts"; Flags: ignoreversion recursesubdirs
+; zeek-scripts/ are embedded in the binary (zeekscripts package) and written into
+; the Zeek runtime's custom-scripts dir at startup, so they are no longer shipped here.
 Source: "..\\..\\config.example.json"; DestDir: "{app}"; Flags: ignoreversion dontcopy
 
 [Dirs]

@@ -30,11 +30,11 @@ WORKDIR /app
 # Copy sensor binary
 COPY bin/enigma-sensor /app/bin/enigma-sensor
 
-# Copy configuration file  
+# Copy configuration file
 COPY loadtest/configs/sensor-config.json /app/config.json
 
-# Copy Zeek scripts
-COPY zeek-scripts/ /app/zeek-scripts/
+# Zeek scripts (sampling, DHCP, JA3/JA4) are embedded in the binary via the
+# zeekscripts package, so no separate copy is needed here.
 
 # Create necessary directories with proper permissions
 RUN mkdir -p /app/captures /app/logs /app/bin /app/loadtest/configs && \
@@ -42,9 +42,6 @@ RUN mkdir -p /app/captures /app/logs /app/bin /app/loadtest/configs && \
 
 # Make sensor executable
 RUN chmod +x /app/bin/enigma-sensor
-
-# Set up Zeek environment
-ENV ZEEK_SCRIPTS_PATH=/app/zeek-scripts
 
 # Run as root to allow packet capture (needed for tcpdump/packet capture)
 USER root

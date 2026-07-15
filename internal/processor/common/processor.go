@@ -75,24 +75,11 @@ func PrepareZeekArgsWithSampling(pcapPath, runDir string, samplingPercentage flo
 	args := make([]string, len(baseArgs))
 	copy(args, baseArgs)
 
-	// Add sampling script if sampling percentage is less than 100
+	// Add sampling script if sampling percentage is less than 100. Sampling is a
+	// special case of script discovery: the same candidate-path lookup, but it
+	// prepends a Sampling::sampling_percentage arg before the script path.
 	if samplingPercentage < 100 {
-		// Try to find the sampling script in various locations
-		possiblePaths := []string{
-			"zeek-scripts/sampling.zeek",
-			filepath.Join("..", "..", "zeek-scripts", "sampling.zeek"),
-			filepath.Join(filepath.Dir(pcapPath), "..", "..", "zeek-scripts", "sampling.zeek"),
-		}
-
-		var samplingScriptPath string
-		for _, path := range possiblePaths {
-			if _, err := os.Stat(path); err == nil {
-				samplingScriptPath = path
-				break
-			}
-		}
-
-		if samplingScriptPath != "" {
+		if samplingScriptPath := findZeekScript(OSFS{}, pcapPath, "sampling.zeek"); samplingScriptPath != "" {
 			args = append(args, fmt.Sprintf("Sampling::sampling_percentage=%.1f", samplingPercentage))
 			args = append(args, samplingScriptPath)
 			log.Printf("[processor] Added sampling script at %.1f%% from %s", samplingPercentage, samplingScriptPath)
@@ -102,4 +89,41 @@ func PrepareZeekArgsWithSampling(pcapPath, runDir string, samplingPercentage flo
 	}
 
 	return args
+}
+
+// zeekScriptCandidates returns the standard locations a bundled Zeek script named
+// `script` may live in, relative to the current working directory and to the pcap
+// directory. This is the single source of truth for where the sensor looks for
+// its zeek-scripts/ assets across sampling, DHCP, and JA3/JA4 discovery.
+func zeekScriptCandidates(pcapPath, script string) []string {
+	return []string{
+		filepath.Join("zeek-scripts", script),
+		filepath.Join("..", "..", "zeek-scripts", script),
+		filepath.Join(filepath.Dir(pcapPath), "..", "..", "zeek-scripts", script),
+	}
+}
+
+// findZeekScript returns the first candidate path for `script` that exists per fs,
+// or "" if none resolve.
+func findZeekScript(fs FS, pcapPath, script string) string {
+	for _, path := range zeekScriptCandidates(pcapPath, script) {
+		if _, err := fs.Stat(path); err == nil {
+			return path
+		}
+	}
+	return ""
+}
+
+// AppendZeekScriptIfFound locates the bundled Zeek script `script` and, if found,
+// appends its path to args and returns (args, true). If no candidate resolves it
+// returns (args, false) so the caller can decide how to report the miss (the
+// upload path tolerates missing logs, so a silent miss is easy to overlook).
+// Stat goes through the injected FS so the discovery loop stays unit-testable.
+func AppendZeekScriptIfFound(fs FS, args []string, pcapPath, script string) ([]string, bool) {
+	path := findZeekScript(fs, pcapPath, script)
+	if path == "" {
+		return args, false
+	}
+	log.Printf("[processor] Added Zeek script %s from %s", script, path)
+	return append(args, path), true
 }

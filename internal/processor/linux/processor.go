@@ -89,18 +89,20 @@ func (p *Processor) ProcessPCAP(pcapPath string, opts types.ProcessOptions) (typ
 	baseArgs := []string{"-r", pcapPath, fmt.Sprintf("Log::default_logdir=%s", runDir), "-C"}
 	zeekArgs := types.PrepareZeekArgsWithSampling(pcapPath, runDir, opts.SamplingPercentage, baseArgs)
 
-	// Add DHCP fingerprint script if available so param_req_list appears in dhcp.log
-	fingerprintScriptPaths := []string{
-		"zeek-scripts/dhcp-fingerprint.zeek",
-		filepath.Join("..", "..", "zeek-scripts", "dhcp-fingerprint.zeek"),
-		filepath.Join(filepath.Dir(pcapPath), "..", "..", "zeek-scripts", "dhcp-fingerprint.zeek"),
-	}
-	for _, path := range fingerprintScriptPaths {
-		if _, err := os.Stat(path); err == nil {
-			zeekArgs = append(zeekArgs, path)
-			log.Printf("[processor] Added DHCP fingerprint script from %s", path)
-			break
-		}
+	// Add DHCP fingerprint script if available so param_req_list appears in dhcp.log.
+	zeekArgs, _ = types.AppendZeekScriptIfFound(p.fs, zeekArgs, pcapPath, "dhcp-fingerprint.zeek")
+
+	// Add JA3/JA4 fingerprint script if available so ja3_ja4.log / ja4s.log are
+	// produced (mirrors the Windows custom-scripts/main.zeek path). Without it the
+	// Linux sensor uploads empty JA3/JA4 payloads and TLS device-role classification
+	// never runs on Linux-sensor data. Warn loudly on a miss: the upload path
+	// tolerates the missing logs, which would otherwise hide it entirely — notably
+	// on packaged systemd installs where CWD is / and zeek-scripts/ is not shipped.
+	var ja3ja4Found bool
+	zeekArgs, ja3ja4Found = types.AppendZeekScriptIfFound(p.fs, zeekArgs, pcapPath, "ja3-ja4-fingerprinting.zeek")
+	if !ja3ja4Found {
+		cwd, _ := os.Getwd()
+		log.Printf("[processor] WARNING: JA3/JA4 fingerprint script not found (cwd=%s, searched standard zeek-scripts locations); ja3_ja4.log/ja4s.log will be empty and TLS device-role classification cannot run", cwd)
 	}
 
 	log.Printf("[processor] Running Zeek: %s %v", p.zeekPath, zeekArgs)

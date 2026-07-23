@@ -10,3 +10,4 @@ zeek-windows/
 .claude/
 results/
 .mcp.json
+installer/debian/enigma-sensor_*_amd64/

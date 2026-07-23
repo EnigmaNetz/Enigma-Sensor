@@ -29,28 +29,26 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Install base runtime dependencies.
 # tcpdump: packet capture on Linux
 # ca-certificates: TLS root CAs for gRPC connections to the Enigma API
-# curl, gnupg: used to add the OpenSUSE Zeek repository key and list
 # libpcap0.8: shared library required by the CGO-linked enigma-sensor binary
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         tcpdump \
         ca-certificates \
-        curl \
-        gnupg \
         libpcap0.8 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Zeek from the official OpenSUSE security repository for Ubuntu 22.04.
-# This matches the pattern used in loadtest/Dockerfile.sensor.
-# Pin Zeek to 8.0.5 to avoid breaking changes from new releases
-RUN curl -fsSL https://download.opensuse.org/repositories/security:zeek/xUbuntu_22.04/Release.key \
-        | gpg --dearmor \
-        | tee /etc/apt/trusted.gpg.d/security_zeek.gpg \
-    && echo "deb http://download.opensuse.org/repositories/security:/zeek/xUbuntu_22.04/ /" \
-        | tee /etc/apt/sources.list.d/security:zeek.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends zeek=8.0.5-0 \
-    && rm -rf /var/lib/apt/lists/*
+# Install Zeek 8.0.5-0 from the packages bundled in this repository at
+# installer/linux/zeek/, the same set the Linux release zip ships. The version is
+# pinned to avoid breaking changes from newer Zeek releases, and bundling removes
+# any build-time dependency on a third-party package repository. apt, not dpkg,
+# so Zeek's shared library dependencies resolve from Ubuntu's own repositories.
+# sha256sum -c runs before the install so a tampered blob fails the build rather
+# than being installed as root: apt performs no signature check on local files.
+COPY installer/linux/zeek/ /tmp/zeek/
+RUN apt-get update \
+    && (cd /tmp/zeek && sha256sum -c SHA256SUMS) \
+    && apt-get install -y --no-install-recommends /tmp/zeek/*.deb \
+    && rm -rf /tmp/zeek /var/lib/apt/lists/*
 
 # Create runtime directories used by the sensor.
 # /etc/enigma-sensor     config files (config.json mounted here at runtime)

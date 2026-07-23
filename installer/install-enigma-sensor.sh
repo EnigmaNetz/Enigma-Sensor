@@ -1,6 +1,10 @@
 #!/bin/bash
 set -eu
 
+# Resolve the directory holding this script so the bundled Zeek packages and the
+# sensor package are found regardless of the caller's working directory.
+SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
+
 # --- User-provided variables ---
 ENIGMA_API_KEY="${ENIGMA_API_KEY:-}"
 ENIGMA_API_URL="${ENIGMA_API_URL:-api.enigmaai.net:443}"
@@ -83,15 +87,58 @@ fi
 
 case "$OS_ID" in
   ubuntu|debian)
-    # --- Ensure curl and gpg are installed ---
+    export DEBIAN_FRONTEND=noninteractive
+    # --- Ensure base tooling is installed ---
+    # tcpdump lives here, not with Zeek: the sensor package depends on it and the
+    # Zeek step below is best effort, so it must not be skipped by a Zeek failure.
     apt update
-    apt install -y curl gpg
-    # --- Add Zeek repository and key if not present ---
-    if ! grep -q 'security:/zeek' /etc/apt/sources.list.d/security:zeek.list 2>/dev/null; then
+    apt install -y curl gpg tcpdump
+
+    # --- Install Zeek from the packages bundled in the release ---
+    # The bundle is exactly Zeek 8.0.5-0, pinned to avoid breaking changes from
+    # newer Zeek releases. apt, not dpkg, so Zeek's shared library dependencies
+    # resolve from the distribution's own repositories.
+    install_zeek_bundled() {
+      [ -d "$SCRIPT_DIR/zeek" ] || return 1
+      if [ ! -f "$SCRIPT_DIR/zeek/SHA256SUMS" ]; then
+        echo "ERROR: the bundled Zeek packages carry no SHA256SUMS manifest."
+        return 1
+      fi
+      if ! ( cd "$SCRIPT_DIR/zeek" && sha256sum -c SHA256SUMS ); then
+        echo "ERROR: the bundled Zeek packages fail checksum verification."
+        return 1
+      fi
+      # Install exactly the files the manifest lists. A glob installs whatever
+      # .deb is present, so a local user who drops one into an unpacked release
+      # directory gets its maintainer scripts run as root.
+      zeek_debs=()
+      while read -r _ zeek_deb_name; do
+        [ -n "$zeek_deb_name" ] || continue
+        [ -f "$SCRIPT_DIR/zeek/$zeek_deb_name" ] || return 1
+        zeek_debs+=("$SCRIPT_DIR/zeek/$zeek_deb_name")
+      done < "$SCRIPT_DIR/zeek/SHA256SUMS"
+      [ "${#zeek_debs[@]}" -gt 0 ] || return 1
+      # --no-install-recommends matches the Dockerfile so the published image and
+      # a host install resolve the same package closure.
+      apt-get install -y --no-install-recommends "${zeek_debs[@]}" || return 1
+      # Retire the third-party repository a previous installer version configured.
+      rm -f /etc/apt/trusted.gpg.d/security_zeek.gpg \
+            /etc/apt/sources.list.d/security:zeek.list
+      return 0
+    }
+
+    # --- Fall back to the OpenSUSE repository when the bundle is unavailable ---
+    ZEEK_OBS_KEYRING=/usr/share/keyrings/security_zeek.gpg
+    ZEEK_OBS_SOURCES=/etc/apt/sources.list.d/security:zeek.list
+
+    # Remove the key and the apt source together so a failed fallback never
+    # leaves a configured third-party repository behind.
+    zeek_obs_cleanup() {
+      rm -f "$ZEEK_OBS_KEYRING" "$ZEEK_OBS_SOURCES"
+    }
+
+    install_zeek_obs() {
       case "$VERSION_ID" in
-        "20.04")
-          ZEEK_RELEASE="xUbuntu_20.04"
-          ;;
         "22.04")
           ZEEK_RELEASE="xUbuntu_22.04"
           ;;
@@ -100,24 +147,76 @@ case "$OS_ID" in
           ;;
         *)
           echo "ERROR: Unsupported Ubuntu version: $VERSION_ID for Zeek repo."
-          exit 1
+          return 1
           ;;
       esac
-      curl -fsSL https://download.opensuse.org/repositories/security:zeek/${ZEEK_RELEASE}/Release.key | gpg --dearmor | tee /etc/apt/trusted.gpg.d/security_zeek.gpg
-      echo "deb http://download.opensuse.org/repositories/security:/zeek/${ZEEK_RELEASE}/ /" | tee /etc/apt/sources.list.d/security:zeek.list
-      apt update
+      if ! grep -q 'security:/zeek' "$ZEEK_OBS_SOURCES" 2>/dev/null; then
+        # Fetch the key into a private temporary directory first. Piping curl
+        # into gpg into tee hides a curl failure behind tee's exit status and
+        # leaves an apt source backed by an empty key, and a derived .gpg name
+        # in /tmp is a target a local process can pre-create as a symlink.
+        ZEEK_KEY_DIR=$(mktemp -d) || return 1
+        if ! curl -fsSL "https://download.opensuse.org/repositories/security:zeek/${ZEEK_RELEASE}/Release.key" -o "$ZEEK_KEY_DIR/key.asc"; then
+          rm -rf "$ZEEK_KEY_DIR"
+          echo "ERROR: Unable to download the OpenSUSE Zeek repository key."
+          return 1
+        fi
+        if ! gpg --dearmor < "$ZEEK_KEY_DIR/key.asc" > "$ZEEK_KEY_DIR/key.gpg"; then
+          rm -rf "$ZEEK_KEY_DIR"
+          return 1
+        fi
+        # signed-by scopes the key to this repository; trusted.gpg.d would trust
+        # it for every repository on the host.
+        if ! mv "$ZEEK_KEY_DIR/key.gpg" "$ZEEK_OBS_KEYRING"; then
+          rm -rf "$ZEEK_KEY_DIR"
+          return 1
+        fi
+        rm -rf "$ZEEK_KEY_DIR"
+        echo "deb [signed-by=$ZEEK_OBS_KEYRING] https://download.opensuse.org/repositories/security:/zeek/${ZEEK_RELEASE}/ /" > "$ZEEK_OBS_SOURCES" || { zeek_obs_cleanup; return 1; }
+        apt update || { zeek_obs_cleanup; return 1; }
+      fi
+      # Constrain to the 8.0.x line: 8.1 and later carry breaking changes the
+      # sensor cannot take.
+      apt-get install -y 'zeek-core=8.0.*' || { zeek_obs_cleanup; return 1; }
+    }
+
+    if install_zeek_bundled; then
+      echo "Zeek installed from bundled packages."
+    elif install_zeek_obs; then
+      echo "WARNING: bundled Zeek packages unavailable; installed Zeek from the OpenSUSE repository."
+    else
+      echo "WARNING: Zeek installation failed. Continuing to the sensor package install."
+      echo "         The sensor requires Zeek 8.0.x at /opt/zeek/bin/zeek and will not run without it."
     fi
-    # --- Install Zeek, tcpdump, and dependencies ---
-    # Pin Zeek to 8.0.5 to avoid breaking changes from new releases
-    export DEBIAN_FRONTEND=noninteractive
-    apt install -y zeek=8.0.5-0 tcpdump
+
+    # --- Warn when the installed Zeek is off the supported line ---
+    ZEEK_VER=$(dpkg-query -W -f='${Version}' zeek-core 2>/dev/null || echo none)
+    case "$ZEEK_VER" in
+      8.0.*) ;;
+      *) echo "WARNING: zeek-core version '$ZEEK_VER' is outside the supported 8.0.x line." ;;
+    esac
+
     # --- Find and install Enigma Sensor .deb package ---
-    PKG=$(ls ./*.deb 2>/dev/null | head -n1)
-    if [ -z "$PKG" ]; then
-      echo "ERROR: No .deb package found in the current directory."
+    sensor_debs=("$SCRIPT_DIR"/*.deb)
+    if [ ! -e "${sensor_debs[0]}" ]; then
+      sensor_debs=(./*.deb)
+    fi
+    PKG="${sensor_debs[0]}"
+    if [ ! -e "$PKG" ]; then
+      echo "ERROR: No .deb package found in $SCRIPT_DIR or the current directory."
       exit 1
     fi
-    dpkg -i "$PKG" || apt-get install -f -y
+    if ! dpkg -i "$PKG"; then
+      apt-get install -f -y || true
+    fi
+    # apt-get install -f resolves a broken install by removing the package and
+    # exits 0, so check the end state instead of trusting the exit status.
+    if [ "$(dpkg-query -W -f='${Status}' enigma-sensor 2>/dev/null || true)" != "install ok installed" ]; then
+      echo "ERROR: the Enigma Sensor package could not be installed."
+      echo "       Its dependencies (zeek-core, tcpdump) are not satisfied on this host."
+      echo "       Install Zeek 8.0.x and re-run this script."
+      exit 1
+    fi
     ;;
   centos|rhel|fedora)
     # --- Install Zeek, tcpdump, and dependencies ---

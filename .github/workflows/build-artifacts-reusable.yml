@@ -123,6 +123,9 @@ jobs:
           RELEASE_DIR="enigma-sensor-${{ inputs.artifact_prefix }}-linux-release"
           mkdir "$RELEASE_DIR"
           cp installer/install-enigma-sensor.sh "$RELEASE_DIR/"
+          mkdir -p "$RELEASE_DIR/zeek"
+          cp installer/linux/zeek/*.deb "$RELEASE_DIR/zeek/"
+          cp installer/linux/zeek/SHA256SUMS "$RELEASE_DIR/zeek/"
           cp bin/enigma-sensor_*.deb "$RELEASE_DIR/" || true
           cd "$RELEASE_DIR"
           zip -r "../${RELEASE_DIR}.zip" .

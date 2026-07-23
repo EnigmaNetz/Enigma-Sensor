@@ -12,3 +12,6 @@ loadtest/
 .claude/
 results/
 installer/
+!installer/linux
+!installer/linux/zeek
+!installer/linux/zeek/**

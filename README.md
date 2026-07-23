@@ -6,7 +6,7 @@ Cross-platform sensor that captures network traffic, converts it to Zeek-style l
 
 ## Supported Platforms
 
-- **Linux** (Ubuntu 20.04/22.04/24.04 LTS)
+- **Linux** (Ubuntu 22.04/24.04 LTS)
 - **Windows 10 1809+**
 - **macOS**
 - **Docker** (any Linux distribution with Docker installed)
@@ -45,6 +45,10 @@ sudo bash install-enigma-sensor.sh
 ```
 
 The `ENIGMA_NETWORK_ID` uniquely identifies the network the sensor is deployed in (1-64 characters, letters/numbers/spaces/hyphens).
+
+The release zip bundles the Zeek packages the sensor needs, so the installer requires no third-party package repository and works on hosts with no route to `download.opensuse.org`.
+
+Ubuntu 20.04 is not supported: it is end of life and ships glibc 2.31 and libssl1.1, below Zeek 8.0's `libc6 >= 2.34` and `libssl3` requirements. Use the Docker path documented below on 20.04 hosts.
 
 - Config: `/etc/enigma-sensor/config.json`
 - Logs: `/var/log/enigma-sensor/enigma-sensor.log`

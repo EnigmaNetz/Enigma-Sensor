@@ -18,6 +18,7 @@ import (
 func TestCollectLogs_Unix_ArchiveContainsExpectedFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Chdir(tmpDir)
+	useCwdSources(t)
 
 	if err := os.Mkdir("logs", 0755); err != nil {
 		t.Fatalf("failed to create logs dir: %v", err)
@@ -101,13 +102,22 @@ func TestCollectLogs_Unix_ArchiveContainsExpectedFiles(t *testing.T) {
 	}
 }
 
-// TestCollectLogs_Unix_MissingDirsAreHandled verifies that when logs/ and
-// captures/ are absent, CollectLogs still succeeds and includes config.json,
-// version.txt, and system-info.txt.
+// TestCollectLogs_Unix_MissingDirsAreHandled verifies that when captures/ is
+// absent, CollectLogs still succeeds and includes logs, config.json,
+// version.txt, and system-info.txt. Runtime content (a log file) is present so
+// the bundle is not degraded; a missing captures/ dir must be tolerated rather
+// than fatal.
 func TestCollectLogs_Unix_MissingDirsAreHandled(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Chdir(tmpDir)
+	useCwdSources(t)
 
+	if err := os.Mkdir("logs", 0755); err != nil {
+		t.Fatalf("failed to create logs dir: %v", err)
+	}
+	if err := os.WriteFile("logs/test.log", []byte(strings.Repeat("l", 300)), 0644); err != nil {
+		t.Fatalf("failed to write log file: %v", err)
+	}
 	if err := os.WriteFile("config.json", []byte(`{"foo": "`+strings.Repeat("c", 300)+`"}`), 0644); err != nil {
 		t.Fatalf("failed to write config.json: %v", err)
 	}
@@ -142,7 +152,7 @@ func TestCollectLogs_Unix_MissingDirsAreHandled(t *testing.T) {
 		found[hdr.Name] = true
 	}
 
-	for _, want := range []string{"config.json", "version.txt", "system-info.txt"} {
+	for _, want := range []string{"logs/test.log", "config.json", "version.txt", "system-info.txt"} {
 		if !found[want] {
 			t.Errorf("expected %s in archive, not found", want)
 		}
@@ -157,6 +167,7 @@ func TestCollectLogs_Unix_MissingDirsAreHandled(t *testing.T) {
 func TestCollectLogs_Unix_NonRegularCaptureEntry_DoesNotCorruptArchive(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Chdir(tmpDir)
+	useCwdSources(t)
 
 	if err := os.Mkdir("logs", 0755); err != nil {
 		t.Fatalf("failed to create logs dir: %v", err)

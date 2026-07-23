@@ -20,11 +20,15 @@ import (
 	"EnigmaNetz/Enigma-Go-Sensor/internal/pcapingest"
 	types "EnigmaNetz/Enigma-Go-Sensor/internal/processor/common"
 	"EnigmaNetz/Enigma-Go-Sensor/internal/processor/common/zeekscripts"
+	"EnigmaNetz/Enigma-Go-Sensor/internal/selfmetrics"
 	"archive/zip"
 	"runtime"
 )
 
 var ErrAPIGone = errors.New("sensor received 410 Gone from API and should stop")
+
+// selfMetricsInterval is how often the sensor logs its own resource usage.
+const selfMetricsInterval = 5 * time.Minute
 
 // Capturer abstracts the capture logic
 // (You can use mockgen for tests)
@@ -276,8 +280,9 @@ func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, proce
 
 	maxWorkers := cfg.Capture.MaxProcessingWorkers
 	if maxWorkers < 1 {
-		maxWorkers = 10
+		maxWorkers = 1
 	}
+	log.Printf("[sensor] Processing workers: %d", maxWorkers)
 	pcapQueue := make(chan string, maxWorkers)
 	var wg sync.WaitGroup
 
@@ -350,6 +355,12 @@ func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, proce
 		wg.Add(1)
 		go worker(i)
 	}
+
+	// Log the sensor's own resource usage periodically. This is a pure observer,
+	// so it is deliberately not tracked by wg (which is waited on at shutdown).
+	metricsCtx, cancelMetrics := context.WithCancel(ctx)
+	defer cancelMetrics()
+	go selfmetrics.StartLogger(metricsCtx, selfMetricsInterval, cfg.Capture.OutputDir)
 
 	// Start PCAP ingest watcher if enabled
 	if cfg.PcapIngest.Enabled {

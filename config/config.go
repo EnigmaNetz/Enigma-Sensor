@@ -3,11 +3,44 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"regexp"
 	"strings"
 )
+
+const (
+	// maxDefaultProcessingWorkers is the historical default worker count and the
+	// ceiling the memory-scaled default is clamped to.
+	maxDefaultProcessingWorkers = 10
+	// memoryMBPerProcessingWorker is the rough memory budget for one worker and
+	// the Zeek child it runs.
+	memoryMBPerProcessingWorker = 768
+)
+
+// availableMemoryMB reports the host memory available for processing workers in
+// MB. The second return is false when the host memory cannot be determined.
+// It is a package var so tests can stub it.
+var availableMemoryMB = hostAvailableMemoryMB
+
+// defaultProcessingWorkers derives the default worker count from available host
+// memory, clamped to [1, maxDefaultProcessingWorkers]. When host memory is
+// unknown it keeps the historical default.
+func defaultProcessingWorkers() int {
+	mb, known := availableMemoryMB()
+	if !known {
+		return maxDefaultProcessingWorkers
+	}
+	workers := mb / memoryMBPerProcessingWorker
+	if workers < 1 {
+		return 1
+	}
+	if workers > maxDefaultProcessingWorkers {
+		return maxDefaultProcessingWorkers
+	}
+	return int(workers)
+}
 
 // Config represents the application configuration
 type Config struct {
@@ -190,9 +223,13 @@ func (config *Config) ValidateAndSetDefaults() error {
 		config.Capture.Interface = "any"
 	}
 	if config.Capture.MaxProcessingWorkers == 0 {
-		config.Capture.MaxProcessingWorkers = 10
+		config.Capture.MaxProcessingWorkers = defaultProcessingWorkers()
 	} else if config.Capture.MaxProcessingWorkers < 1 || config.Capture.MaxProcessingWorkers > 20 {
 		return fmt.Errorf("capture.max_processing_workers must be between 1 and 20, got %d", config.Capture.MaxProcessingWorkers)
+	} else if recommended := defaultProcessingWorkers(); config.Capture.MaxProcessingWorkers > recommended {
+		if _, known := availableMemoryMB(); known {
+			log.Printf("WARNING: capture.max_processing_workers is set to %d but available host memory supports about %d worker(s); each worker can run a Zeek child, so this may lead to out-of-memory kills", config.Capture.MaxProcessingWorkers, recommended)
+		}
 	}
 	// Validate Capture RetentionHours: nil means "not configured" (fall back to log_retention_days), 0 = immediate cleanup, max 720
 	if config.Capture.RetentionHours != nil {

@@ -19,7 +19,6 @@ import (
 )
 
 type LinuxCapturer struct {
-	cmds      []*exec.Cmd
 	outputDir string
 }
 
@@ -82,7 +81,6 @@ func (c *LinuxCapturer) runSingleCapture(ctx context.Context, iface string, time
 	}
 
 	cmd := commandContext("tcpdump", args...)
-	c.cmds = []*exec.Cmd{cmd}
 
 	// Capture stdout and stderr (must be before Start)
 	stdoutPipe, _ := cmd.StdoutPipe()
@@ -149,11 +147,6 @@ func (c *LinuxCapturer) runMultiInterfaceCapture(ctx context.Context, interfaces
 			}
 
 			cmd := commandContext("tcpdump", args...)
-
-			// Thread-safe command tracking
-			mu.Lock()
-			c.cmds = append(c.cmds, cmd)
-			mu.Unlock()
 
 			// Capture stdout and stderr
 			stdoutPipe, _ := cmd.StdoutPipe()

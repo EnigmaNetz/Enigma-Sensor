@@ -1,7 +1,12 @@
 package config
 
 import (
+	"bytes"
+	"log"
+	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -652,4 +657,247 @@ func TestConfig_ValidateAndSetDefaults_NetworkID(t *testing.T) {
 	if cfg.NetworkID != "Trimmed-Network" {
 		t.Errorf("Expected network_id to be trimmed to 'Trimmed-Network', got %q", cfg.NetworkID)
 	}
+}
+
+// stubAvailableMemory replaces the host memory probe for the duration of the
+// test and restores the real one afterwards.
+func stubAvailableMemory(t *testing.T, mb int, known bool) {
+	t.Helper()
+	orig := availableMemoryMB
+	availableMemoryMB = func() (uint64, bool) { return uint64(mb), known }
+	t.Cleanup(func() { availableMemoryMB = orig })
+}
+
+// TestDefaultProcessingWorkers_MemoryScaling verifies the default worker count
+// scales with available memory and stays inside [1, maxDefaultProcessingWorkers].
+// Each Zeek worker costs roughly memoryMBPerProcessingWorker, so an unscaled
+// default of 10 is what OOM-kills small hosts.
+func TestDefaultProcessingWorkers_MemoryScaling(t *testing.T) {
+	tests := []struct {
+		name     string
+		memoryMB int
+		known    bool
+		expected int
+	}{
+		{"unknown memory keeps the historical default", 0, false, 10},
+		{"16GB clamps at the maximum", 16384, true, 10},
+		{"8GB clamps at the maximum", 8192, true, 10},
+		{"2GB scales down to 2", 2048, true, 2},
+		{"1GB scales down to 1", 1024, true, 1},
+		{"256MB floors at 1, never 0", 256, true, 1},
+		{"0MB known still floors at 1", 0, true, 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stubAvailableMemory(t, tt.memoryMB, tt.known)
+			if got := defaultProcessingWorkers(); got != tt.expected {
+				t.Errorf("defaultProcessingWorkers() with %dMB (known=%v) = %d, want %d", tt.memoryMB, tt.known, got, tt.expected)
+			}
+		})
+	}
+}
+
+// TestConfig_ValidateAndSetDefaults_MaxProcessingWorkers verifies the config
+// default is memory-scaled while an explicitly configured value is respected
+// and still range-validated.
+func TestConfig_ValidateAndSetDefaults_MaxProcessingWorkers(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       int
+		memoryMB    int
+		known       bool
+		expected    int
+		expectError bool
+		errorMsg    string
+	}{
+		{"zero with unknown memory defaults to 10", 0, 0, false, 10, false, ""},
+		{"zero with 16GB defaults to 10", 0, 16384, true, 10, false, ""},
+		{"zero with 2GB defaults to 2", 0, 2048, true, 2, false, ""},
+		{"zero with 1GB defaults to 1", 0, 1024, true, 1, false, ""},
+		{"zero with 256MB defaults to 1", 0, 256, true, 1, false, ""},
+		{"explicit 15 preserved on a low-memory host", 15, 512, true, 15, false, ""},
+		{"explicit 1 preserved on a big host", 1, 16384, true, 1, false, ""},
+		{"explicit 20 preserved", 20, 16384, true, 20, false, ""},
+		{"explicit 25 still fails validation", 25, 16384, true, 25, true, "must be between 1 and 20"},
+		{"explicit negative still fails validation", -1, 16384, true, -1, true, "must be between 1 and 20"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stubAvailableMemory(t, tt.memoryMB, tt.known)
+			cfg := &Config{NetworkID: "Test-Network-01"}
+			cfg.Capture.MaxProcessingWorkers = tt.input
+			err := cfg.ValidateAndSetDefaults()
+			if tt.expectError {
+				if err == nil {
+					t.Fatalf("Expected error for MaxProcessingWorkers=%d, got nil", tt.input)
+				}
+				if tt.errorMsg != "" && !strings.Contains(err.Error(), tt.errorMsg) {
+					t.Errorf("Expected error to contain %q, got %q", tt.errorMsg, err.Error())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Unexpected error for MaxProcessingWorkers=%d: %v", tt.input, err)
+			}
+			if cfg.Capture.MaxProcessingWorkers != tt.expected {
+				t.Errorf("MaxProcessingWorkers: input %d, memory %dMB, expected %d, got %d", tt.input, tt.memoryMB, tt.expected, cfg.Capture.MaxProcessingWorkers)
+			}
+		})
+	}
+}
+
+// TestDefaultProcessingWorkers_UsesDeclaredConstants ties the expectations above
+// to the declared constants so the test fails loudly if either is retuned
+// without revisiting the scaling behaviour.
+func TestDefaultProcessingWorkers_UsesDeclaredConstants(t *testing.T) {
+	stubAvailableMemory(t, memoryMBPerProcessingWorker*3, true)
+	if got := defaultProcessingWorkers(); got != 3 {
+		t.Errorf("defaultProcessingWorkers() with exactly 3 workers worth of memory = %d, want 3", got)
+	}
+	stubAvailableMemory(t, memoryMBPerProcessingWorker*maxDefaultProcessingWorkers*4, true)
+	if got := defaultProcessingWorkers(); got != maxDefaultProcessingWorkers {
+		t.Errorf("defaultProcessingWorkers() on a huge host = %d, want %d", got, maxDefaultProcessingWorkers)
+	}
+}
+
+// syncBuffer is a mutex-guarded bytes.Buffer so the standard logger can be
+// redirected into it without tripping the race detector.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.String()
+}
+
+// captureConfigLogs redirects the standard logger into a buffer for the duration
+// of the test and restores it afterwards.
+func captureConfigLogs(t *testing.T) *syncBuffer {
+	t.Helper()
+	buf := &syncBuffer{}
+	log.SetOutput(buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	return buf
+}
+
+// TestConfig_ValidateAndSetDefaults_LowMemoryWarning covers the advisory warning
+// emitted when an explicitly configured worker count exceeds what the detected
+// host memory supports. Nothing else asserts this branch, so without these cases
+// the whole warning could be deleted with every config test still green.
+func TestConfig_ValidateAndSetDefaults_LowMemoryWarning(t *testing.T) {
+	tests := []struct {
+		name        string
+		workers     int
+		memoryMB    int
+		known       bool
+		wantWarning bool
+	}{
+		{"explicit 15 on a 512MB host warns", 15, 512, true, true},
+		{"explicit 10 on a 1GB host warns", 10, 1024, true, true},
+		{"explicit 1 with plenty of memory does not warn", 1, 16384, true, false},
+		{"explicit 10 with plenty of memory does not warn", 10, 16384, true, false},
+		{"explicit value equal to the recommendation does not warn", 2, 2048, true, false},
+		{"explicit 15 with unknown memory does not warn", 15, 0, false, false},
+		{"explicit 20 with unknown memory does not warn", 20, 0, false, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stubAvailableMemory(t, tt.memoryMB, tt.known)
+			buf := captureConfigLogs(t)
+
+			cfg := &Config{NetworkID: "Test-Network-01"}
+			cfg.Capture.MaxProcessingWorkers = tt.workers
+			if err := cfg.ValidateAndSetDefaults(); err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+
+			logged := buf.String()
+			warned := strings.Contains(logged, "capture.max_processing_workers is set to")
+
+			if warned != tt.wantWarning {
+				t.Fatalf("warning emitted = %v, want %v (workers=%d, memory=%dMB, known=%v); log was %q",
+					warned, tt.wantWarning, tt.workers, tt.memoryMB, tt.known, logged)
+			}
+			if !tt.wantWarning {
+				return
+			}
+
+			for _, want := range []string{
+				"WARNING",
+				"capture.max_processing_workers",
+				"available host memory supports about",
+				"out-of-memory",
+			} {
+				if !strings.Contains(logged, want) {
+					t.Errorf("warning %q missing expected text %q", logged, want)
+				}
+			}
+			if !strings.Contains(logged, "set to "+itoa(tt.workers)) {
+				t.Errorf("warning %q does not name the configured value %d", logged, tt.workers)
+			}
+			// The configured value must be preserved; the branch only advises.
+			if cfg.Capture.MaxProcessingWorkers != tt.workers {
+				t.Errorf("MaxProcessingWorkers = %d, want the configured %d", cfg.Capture.MaxProcessingWorkers, tt.workers)
+			}
+		})
+	}
+}
+
+// TestConfig_ValidateAndSetDefaults_LowMemoryWarningNamesRecommendation pins the
+// recommended count carried in the warning, so a mutation that logs the
+// configured value twice (or a constant) fails.
+func TestConfig_ValidateAndSetDefaults_LowMemoryWarningNamesRecommendation(t *testing.T) {
+	// 3 workers' worth of memory, with 15 configured.
+	stubAvailableMemory(t, memoryMBPerProcessingWorker*3, true)
+	buf := captureConfigLogs(t)
+
+	cfg := &Config{NetworkID: "Test-Network-01"}
+	cfg.Capture.MaxProcessingWorkers = 15
+	if err := cfg.ValidateAndSetDefaults(); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	logged := buf.String()
+	if !strings.Contains(logged, "set to 15") {
+		t.Errorf("warning %q does not name the configured 15", logged)
+	}
+	if !strings.Contains(logged, "about 3 worker(s)") {
+		t.Errorf("warning %q does not name the recommended 3 workers", logged)
+	}
+}
+
+// TestConfig_ValidateAndSetDefaults_NoWarningWhenDefaulted verifies the warning
+// never fires for the zero (auto-default) case, where the derived value is by
+// construction within the memory budget.
+func TestConfig_ValidateAndSetDefaults_NoWarningWhenDefaulted(t *testing.T) {
+	stubAvailableMemory(t, 512, true)
+	buf := captureConfigLogs(t)
+
+	cfg := &Config{NetworkID: "Test-Network-01"}
+	cfg.Capture.MaxProcessingWorkers = 0
+	if err := cfg.ValidateAndSetDefaults(); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if logged := buf.String(); strings.Contains(logged, "capture.max_processing_workers is set to") {
+		t.Errorf("did not expect a low-memory warning when the value was auto-defaulted, got %q", logged)
+	}
+}
+
+// itoa is a tiny local helper so the assertions above can build the exact
+// substring the warning is expected to contain.
+func itoa(n int) string {
+	return strconv.Itoa(n)
 }

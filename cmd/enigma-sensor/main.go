@@ -31,7 +31,7 @@ Usage: enigma-sensor [collect-logs] [--version|-v] [--help|-h]
 Runs a network capture and processing session using config.json.
 
 Options:
-  collect-logs    Package logs, captures, config, and diagnostics into a zip archive for support
+  collect-logs    Package logs, captures, config, and diagnostics into an archive for support
   --version, -v   Print version and exit
   --help, -h      Show this help message and exit
 
@@ -45,7 +45,7 @@ Example:
     Runs a single capture and processing session using config.json.
 
   enigma-sensor collect-logs
-    Packages logs, captures, config, and diagnostics into a zip archive for support.
+    Packages logs, captures, config, and diagnostics into an archive for support.
 
   enigma-sensor --help
     Shows this help message.
@@ -65,13 +65,13 @@ func main() {
 			fmt.Println(version.Version)
 			return
 		case "collect-logs":
-			zipName := fmt.Sprintf("enigma-logs-%s.zip", time.Now().Format("20060102-150405"))
-			err := collect_logs.CollectLogs(zipName)
+			outName := fmt.Sprintf("enigma-logs-%s%s", time.Now().Format("20060102-150405"), collect_logs.ArchiveExt)
+			size, err := collect_logs.CollectLogs(outName)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Failed to collect logs: %v\n", err)
 				os.Exit(1)
 			}
-			fmt.Printf("Created %s with logs, config, and diagnostics.\n", zipName)
+			fmt.Printf("Created %s (%d bytes) with logs, config, and diagnostics.\n", outName, size)
 			return
 		}
 	}

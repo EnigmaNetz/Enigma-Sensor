@@ -189,6 +189,10 @@ go test -v ./internal/processor/...
 
 # Test with coverage
 go test -cover ./...
+
+# Container-based end-to-end Linux install test (needs go, docker, dos2unix, fakeroot)
+# Runs a full install on fresh ubuntu:22.04 and ubuntu:24.04 containers
+bash scripts/test-linux-install.sh
 ```
 
 ### Code Quality
@@ -238,7 +242,8 @@ golangci-lint run
 
 ### Platform-Specific Behavior
 - **Windows**: Uses `pktmon` for capture, auto-extracts bundled Zeek runtime, runs as Windows service
-- **Linux/macOS**: Uses `tcpdump` for capture, requires system Zeek installation
+- **Linux**: Uses `tcpdump` for capture; the release installer supplies Zeek (`/opt/zeek/bin/zeek`) from a bundled package set, falling back to a third-party repo only if the bundle is missing or fails
+- **macOS**: Uses `tcpdump` for capture, requires system Zeek installation
 
 ### Configuration System
 - Config hierarchy: Platform-specific paths → `config.json` fallback
@@ -281,6 +286,11 @@ cd installer/debian
 - Uses Inno Setup with NSSM for service management
 - Bundles Zeek runtime in `installer/windows/zeek-runtime-win64.zip`
 - Auto-extracts and configures on first run
+
+### Linux Installer
+- Vendors a minimal Zeek 8.0.5-0 runtime deb set at `installer/linux/zeek/` (`zeek-core`, `zeekctl`, `zeek-client`, `SHA256SUMS`)
+- The release zip carries this bundle under `zeek/`; the installer verifies it against `SHA256SUMS` before installing
+- See `installer/linux/zeek/README.md` for provenance and the refresh procedure
 
 ## Code Quality Requirements
 
@@ -325,8 +335,8 @@ cd installer/debian
 - Service installation handled by NSSM
 
 ### Linux Development Notes
-- Requires system installation of `zeek` and `tcpdump`
-- Install script handles package dependencies
+- The release installer ships Zeek 8.0.5-0 in the release zip and installs it from there; `tcpdump` still comes from the distro repos
+- Running the installer directly from a repository checkout takes the third-party OBS fallback path instead, because the script resolves the bundle relative to its own directory (`installer/`), while the bundle lives at `installer/linux/zeek/`
 - Systemd service integration for production deployment
 
 ## API Integration

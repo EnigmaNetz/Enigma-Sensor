@@ -1,0 +1,37 @@
+name: Linux Install Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-install:
+    name: Container install test
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: '1.24.x'
+        cache: true
+
+    - name: Install packaging dependencies
+      run: sudo apt-get update && sudo apt-get install -y dos2unix fakeroot
+
+    - name: Run Linux install test
+      run: bash scripts/test-linux-install.sh
+
+    # Docker's ignore-negation semantics decide whether the bundled Zeek debs
+    # reach the build context, so an actual build is the only proof.
+    - name: Build Docker image
+      run: docker build -t enigma-sensor:citest .
+
+    - name: Verify bundled Zeek in the image
+      run: docker run --rm --entrypoint /opt/zeek/bin/zeek enigma-sensor:citest --version | grep 'version 8\.0\.'

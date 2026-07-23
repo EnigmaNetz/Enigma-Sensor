@@ -5,6 +5,7 @@ package windows
 import (
 	types "EnigmaNetz/Enigma-Go-Sensor/internal/processor/common"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -85,11 +86,13 @@ func (p *Processor) ProcessPCAP(pcapPath string, opts types.ProcessOptions) (typ
 
 	cmd := p.execCmd("bin/zeek.exe", zeekArgs...)
 	cmd.Dir = zeekBaseDir
+	stderrTail := types.NewTailBuffer(types.ZeekStderrTailBytes)
 	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stderr = io.MultiWriter(os.Stderr, stderrTail)
 	cmd.Env = append(os.Environ(), "ZEEKPATH="+zeekShareAbs)
+	cmd.WaitDelay = types.ZeekWaitDelay
 	if err := cmd.Run(); err != nil {
-		log.Printf("[processor] Zeek execution failed: %v", err)
+		log.Printf("[processor] Zeek execution failed: %s", types.FormatZeekFailure(err, stderrTail))
 		return types.ProcessedData{}, fmt.Errorf("zeek failed: %w", err)
 	}
 	log.Printf("[processor] Zeek execution completed successfully.")

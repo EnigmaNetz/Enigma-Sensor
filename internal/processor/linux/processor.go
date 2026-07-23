@@ -4,6 +4,7 @@ package linux
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -32,6 +33,8 @@ type FS interface {
 
 type Cmd interface {
 	Run() error
+	SetStdout(w io.Writer)
+	SetStderr(w io.Writer)
 }
 
 type CmdRunner interface {
@@ -50,12 +53,16 @@ func (realFS) Rename(oldpath, newpath string) error         { return os.Rename(o
 
 type realCmd struct{ cmd *exec.Cmd }
 
-func (r *realCmd) Run() error { return r.cmd.Run() }
+func (r *realCmd) Run() error            { return r.cmd.Run() }
+func (r *realCmd) SetStdout(w io.Writer) { r.cmd.Stdout = w }
+func (r *realCmd) SetStderr(w io.Writer) { r.cmd.Stderr = w }
 
 type realCmdRunner struct{}
 
 func (realCmdRunner) Command(name string, arg ...string) Cmd {
-	return &realCmd{cmd: exec.Command(name, arg...)}
+	cmd := exec.Command(name, arg...)
+	cmd.WaitDelay = types.ZeekWaitDelay
+	return &realCmd{cmd: cmd}
 }
 
 // Processor implements the Processor interface for Linux
@@ -109,13 +116,11 @@ func (p *Processor) ProcessPCAP(pcapPath string, opts types.ProcessOptions) (typ
 
 	log.Printf("[processor] Running Zeek: %s %v", p.zeekPath, zeekArgs)
 	cmd := p.cmdRunner.Command(p.zeekPath, zeekArgs...)
-	cmdStdout, ok := cmd.(*realCmd)
-	if ok {
-		cmdStdout.cmd.Stdout = os.Stdout
-		cmdStdout.cmd.Stderr = os.Stderr
-	}
+	stderrTail := types.NewTailBuffer(types.ZeekStderrTailBytes)
+	cmd.SetStdout(os.Stdout)
+	cmd.SetStderr(io.MultiWriter(os.Stderr, stderrTail))
 	if err := cmd.Run(); err != nil {
-		log.Printf("[processor] Zeek execution failed: %v", err)
+		log.Printf("[processor] Zeek execution failed: %s", types.FormatZeekFailure(err, stderrTail))
 		return types.ProcessedData{}, fmt.Errorf("zeek failed: %w", err)
 	}
 	log.Printf("[processor] Zeek execution completed successfully.")

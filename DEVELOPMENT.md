@@ -45,6 +45,18 @@ go build -o bin/enigma-sensor ./cmd/enigma-sensor
 - Windows (installed): `C:\\ProgramData\\EnigmaSensor\\config.json`
 - Repo/local dev: `./config.json`
 
+### Capture Worker Sizing
+
+`capture.max_processing_workers` caps how many PCAPs are processed concurrently. Each worker can run a Zeek child that allocates hundreds of MB, so this setting is the main lever on the sensor's peak memory.
+
+The key is optional. Omitting it (the shipped `config.example.json` default) or setting it to 0 makes the sensor derive the value from available host memory on Linux (available MB divided by 768 MB per worker, clamped to 1-10); previously this was a flat 10. Available MB is the minimum of `/proc/meminfo` and any cgroup memory limit (cgroup v2 `memory.max`, falling back to cgroup v1 `memory.limit_in_bytes`), so a containerized or systemd `MemoryMax=`-limited sensor sizes against its own limit rather than the host's full memory. On non-Linux hosts the derived default stays 10, since available memory is not read there. Set the key explicitly (1-20) only to override the derived value; the sensor logs a warning if an explicit value looks too high for the host's available memory.
+
+On RAM-constrained hosts, an explicit value of 1-2 can still be set if the sensor or its Zeek children are being OOM-killed despite the memory-scaled default.
+
+### Self-Metrics Logging
+
+The sensor logs a `[selfmetrics] ...` line every 5 minutes with its own RSS, open file descriptor count, OS thread count, goroutine count, Go heap allocation, and the number of `zeek_out_*` directories in the capture output directory. Useful for spotting resource growth on a long-running sensor. There is no config knob for this; the interval is fixed. The count only covers `capture.output_dir`; PCAPs handled by the optional pcap-ingest watcher (`pcap_ingest.watch_dir`) are processed in their own `processing/` subdirectory and are not reflected in this gauge.
+
 ## Log Locations
 
 - Linux (installed): `/var/log/enigma-sensor/enigma-sensor.log`

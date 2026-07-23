@@ -87,6 +87,28 @@ fi
 
 case "$OS_ID" in
   ubuntu|debian)
+    # --- Refuse Ubuntu releases Zeek 8.0 cannot run on ---
+    # Ubuntu 20.04 and older are end of life and ship glibc 2.31 with libssl1.1,
+    # below the libc6 >= 2.34 and libssl3 that Zeek 8.0 requires. Both the
+    # bundled packages and the OpenSUSE fallback fail there, so stop before
+    # spending an apt run on a host that cannot work. Debian is unaffected.
+    if [ "$OS_ID" = "ubuntu" ]; then
+      UBUNTU_MAJOR=${VERSION_ID%%.*}
+      case "$UBUNTU_MAJOR" in
+        ''|*[!0-9]*) ;;
+        *)
+          if [ "$UBUNTU_MAJOR" -le 20 ]; then
+            echo "ERROR: Ubuntu $VERSION_ID is not supported by the Enigma Sensor installer."
+            echo "  Ubuntu 20.04 and older are end of life and ship glibc 2.31 with libssl1.1."
+            echo "  Zeek 8.0 requires libc6 >= 2.34 and libssl3, so it cannot be installed here."
+            echo "  Use Ubuntu 22.04 or later, or run the sensor in Docker:"
+            echo "    docker run ... ghcr.io/enigmanetz/enigma-sensor:latest"
+            exit 1
+          fi
+          ;;
+      esac
+    fi
+
     export DEBIAN_FRONTEND=noninteractive
     # --- Ensure base tooling is installed ---
     # tcpdump lives here, not with Zeek: the sensor package depends on it and the

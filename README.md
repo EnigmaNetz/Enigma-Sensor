@@ -125,7 +125,7 @@ Package logs and config for support:
 ./enigma-sensor collect-logs
 ```
 
-This creates `enigma-logs-YYYYMMDD-HHMMSS.zip` with logs, captures, config, version, and system info.
+This creates `enigma-logs-YYYYMMDD-HHMMSS.tar.gz` on Linux and macOS, or `enigma-logs-YYYYMMDD-HHMMSS.zip` on Windows, with logs, captures, config, version, and system info.
 
 ---
 

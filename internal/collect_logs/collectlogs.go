@@ -2,10 +2,8 @@ package collect_logs
 
 import (
 	"EnigmaNetz/Enigma-Go-Sensor/internal/version"
-	"archive/zip"
 	"bufio"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,86 +11,116 @@ import (
 	"strings"
 )
 
-// CollectLogs creates a zip archive with logs, captures, config, version, and system info for diagnostics.
-// zipName is the output file name (e.g., "enigma-logs-YYYYMMDD-HHMMSS.zip").
-func CollectLogs(zipName string) error {
-	zipFile, err := os.Create(zipName)
-	if err != nil {
-		return fmt.Errorf("failed to create zip: %w", err)
-	}
-	defer zipFile.Close()
+// archiveBlob is generated content to be added to the archive under Name.
+type archiveBlob struct {
+	Name    string
+	Content string
+}
 
-	zipWriter := zip.NewWriter(zipFile)
-	defer zipWriter.Close()
+// minArchiveBytes is the floor below which a written archive is treated as
+// hollow rather than valid.
+const minArchiveBytes = 256
 
-	// Add all files in logs/
+// writeArchive is the platform-specific archive writer. It is a variable so
+// tests can substitute a failing or degenerate implementation.
+var writeArchive = writeArchiveDefault
+
+// CollectLogs creates an archive with logs, captures, config, version, and system info for diagnostics.
+// outName is the output file name (e.g., "enigma-logs-YYYYMMDD-HHMMSS" + ArchiveExt).
+// It returns the size of the written archive in bytes. Reporting the result to
+// the operator is the caller's job.
+func CollectLogs(outName string) (size int64, retErr error) {
+	// A failed run must not leave a partial or hollow archive behind for an
+	// operator to pick up and ship to support.
+	defer func() {
+		if retErr != nil {
+			_ = os.Remove(outName)
+		}
+	}()
+
+	// files holds the paths of on-disk files to add to the archive, which are
+	// also used unchanged as the path inside the archive.
+	var files []string
+	var blobs []archiveBlob
+
+	// gatheredBytes counts only real diagnostic content gathered from disk.
+	// The generated version.txt and system-info.txt blobs are deliberately
+	// excluded: they are always present and would mask an otherwise empty
+	// bundle.
+	var gatheredBytes int64
+
+	// Add all regular files directly in logs/
 	logDir := "logs"
-	logFiles, err := os.ReadDir(logDir)
-	if err == nil { // logs/ may not exist
+	if logFiles, err := os.ReadDir(logDir); err == nil { // logs/ may not exist
 		for _, entry := range logFiles {
 			if entry.IsDir() {
 				continue
 			}
 			path := filepath.Join(logDir, entry.Name())
-			if err := addFileToZip(zipWriter, path); err != nil {
-				// Non-fatal, just skip
+			if info, err := entry.Info(); err == nil {
+				gatheredBytes += info.Size()
 			}
+			files = append(files, path)
 		}
 	}
 
-	// Recursively add all files in captures/
-	capturesDir := "captures"
-	_ = addDirToZip(zipWriter, capturesDir) // Non-fatal
-
-	// Add config.json if present
-	if _, err := os.Stat("config.json"); err == nil {
-		_ = addFileToZip(zipWriter, "config.json") // Non-fatal
-	}
-
-	// Add version.txt
-	_ = addStringToZip(zipWriter, "version.txt", version.Version+"\n")
-
-	// Add system-info.txt
-	sysInfo := getSystemInfo()
-	_ = addStringToZip(zipWriter, "system-info.txt", sysInfo)
-
-	return nil
-}
-
-func addFileToZip(zipWriter *zip.Writer, filename string) error {
-	file, err := os.Open(filename)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	w, err := zipWriter.Create(filename)
-	if err != nil {
-		return err
-	}
-	_, err = io.Copy(w, file)
-	return err
-}
-
-func addStringToZip(zipWriter *zip.Writer, filename, content string) error {
-	w, err := zipWriter.Create(filename)
-	if err != nil {
-		return err
-	}
-	_, err = w.Write([]byte(content))
-	return err
-}
-
-func addDirToZip(zipWriter *zip.Writer, dir string) error {
-	return filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	// Recursively add all files in captures/ (non-fatal if absent)
+	_ = filepath.WalkDir("captures", func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if info.IsDir() {
+		if d.IsDir() {
 			return nil
 		}
-		return addFileToZip(zipWriter, path)
+		if info, err := d.Info(); err == nil {
+			gatheredBytes += info.Size()
+		}
+		files = append(files, path)
+		return nil
 	})
+
+	// Add config.json if present
+	if info, err := os.Stat("config.json"); err == nil {
+		gatheredBytes += info.Size()
+		files = append(files, "config.json")
+	}
+
+	if gatheredBytes == 0 {
+		wd, wdErr := os.Getwd()
+		if wdErr != nil {
+			wd = "the current working directory"
+		}
+		return 0, fmt.Errorf("no diagnostic content found in %s: logs/ and captures/ are empty or absent and config.json is missing; run collect-logs from the sensor's working directory (the one holding logs/, captures/, and config.json)", wd)
+	}
+
+	blobs = append(blobs,
+		archiveBlob{Name: "version.txt", Content: version.Version + "\n"},
+		archiveBlob{Name: "system-info.txt", Content: getSystemInfo()},
+	)
+
+	written, err := writeArchive(outName, files, blobs)
+	if err != nil {
+		return 0, fmt.Errorf("failed to write archive %s: %w", outName, err)
+	}
+
+	// gatheredBytes is measured from stat before archiving, so it does not
+	// prove anything actually landed in the bundle: every gathered file can
+	// still fail to open (root-owned logs/ collected as a non-root user). The
+	// count of entries genuinely written is the guard that catches that.
+	if len(files) > 0 && written == 0 {
+		return 0, fmt.Errorf("archive %s contains no diagnostic files: all %d gathered files failed to be archived (check permissions on logs/, captures/, and config.json)", outName, len(files))
+	}
+
+	info, err := os.Stat(outName)
+	if err != nil {
+		return 0, fmt.Errorf("failed to stat archive %s after writing: %w", outName, err)
+	}
+
+	if info.Size() < minArchiveBytes {
+		return 0, fmt.Errorf("archive %s is implausibly small: %d bytes", outName, info.Size())
+	}
+
+	return info.Size(), nil
 }
 
 func getSystemInfo() string {

@@ -3,9 +3,43 @@ package collect_logs
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// useCwdSources points the packaged-install source vars at guaranteed-absent
+// paths under a temp dir and restores them in cleanup. Every test MUST control
+// these vars: they default to REAL absolute system paths (e.g.
+// /var/log/enigma-sensor), so a test that leaves them unset could read real
+// host state and become nondeterministic. Calling this forces CollectLogs onto
+// the cwd-relative fallback (logs/, captures/, config.json), which is what the
+// existing tests seed.
+func useCwdSources(t *testing.T) {
+	t.Helper()
+	origLog, origCap, origCfg := installLogDir, installCaptureDir, installConfigPath
+	base := t.TempDir()
+	installLogDir = filepath.Join(base, "absent-install-logs")
+	installCaptureDir = filepath.Join(base, "absent-install-captures")
+	installConfigPath = filepath.Join(base, "absent-install-config.json")
+	t.Cleanup(func() {
+		installLogDir, installCaptureDir, installConfigPath = origLog, origCap, origCfg
+	})
+}
+
+// useInstallSources points the packaged-install source vars at the given
+// (populated) paths and restores them in cleanup, for tests that exercise the
+// absolute install-path resolution.
+func useInstallSources(t *testing.T, logDir, captureDir, configPath string) {
+	t.Helper()
+	origLog, origCap, origCfg := installLogDir, installCaptureDir, installConfigPath
+	installLogDir = logDir
+	installCaptureDir = captureDir
+	installConfigPath = configPath
+	t.Cleanup(func() {
+		installLogDir, installCaptureDir, installConfigPath = origLog, origCap, origCfg
+	})
+}
 
 // seedDiagnosticContent writes a real log file into the current working
 // directory so CollectLogs has actual diagnostic content to gather.
@@ -26,6 +60,7 @@ func seedDiagnosticContent(t *testing.T) {
 func TestCollectLogs_NoDiagnosticContent_ReturnsError(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Chdir(tmpDir)
+	useCwdSources(t)
 
 	_, err := CollectLogs("test-logs" + ArchiveExt)
 	if err == nil {
@@ -41,17 +76,50 @@ func TestCollectLogs_NoDiagnosticContent_ReturnsError(t *testing.T) {
 	}
 }
 
+// TestCollectLogs_ConfigOnly_Degraded_ReturnsError verifies the degraded-bundle
+// guard: when config.json is present but there are no logs and no captures, the
+// bundle would carry only configuration and no diagnostic runtime content.
+// CollectLogs must reject that condition rather than ship a config-only bundle
+// that looks complete to support, and must not leave an archive on disk.
+func TestCollectLogs_ConfigOnly_Degraded_ReturnsError(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Chdir(tmpDir)
+	useCwdSources(t)
+
+	// Only a config source, no logs and no captures.
+	if err := os.WriteFile("config.json", []byte(`{"foo": "`+strings.Repeat("c", 300)+`"}`), 0644); err != nil {
+		t.Fatalf("failed to write config.json: %v", err)
+	}
+
+	outName := "test-logs" + ArchiveExt
+	_, err := CollectLogs(outName)
+	if err == nil {
+		t.Fatal("expected CollectLogs to return an error for a config-only (degraded) bundle, got nil")
+	}
+	// The message must convey BOTH that logs and captures were empty AND that
+	// config alone is not enough (the bundle would contain only config).
+	for _, want := range []string{"only", "config", "logs", "captures"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected degraded-bundle error to mention %q, got: %v", want, err)
+		}
+	}
+	if _, statErr := os.Stat(outName); !os.IsNotExist(statErr) {
+		t.Errorf("expected no archive to be left on disk for a degraded bundle, stat err: %v", statErr)
+	}
+}
+
 // TestCollectLogs_ArchiveStepFailure_ReturnsError verifies that CollectLogs
 // surfaces an error (rather than silently succeeding) when the underlying
 // archive-writing step fails.
 func TestCollectLogs_ArchiveStepFailure_ReturnsError(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Chdir(tmpDir)
+	useCwdSources(t)
 	seedDiagnosticContent(t)
 
 	original := writeArchive
 	t.Cleanup(func() { writeArchive = original })
-	writeArchive = func(outName string, files []string, blobs []archiveBlob) (int, error) {
+	writeArchive = func(outName string, files []archiveFile, blobs []archiveBlob) (int, error) {
 		return 0, fmt.Errorf("simulated archive write failure")
 	}
 
@@ -70,11 +138,12 @@ func TestCollectLogs_ArchiveStepFailure_ReturnsError(t *testing.T) {
 func TestCollectLogs_ImplausiblySmallArchive_ReturnsError(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Chdir(tmpDir)
+	useCwdSources(t)
 	seedDiagnosticContent(t)
 
 	original := writeArchive
 	t.Cleanup(func() { writeArchive = original })
-	writeArchive = func(outName string, files []string, blobs []archiveBlob) (int, error) {
+	writeArchive = func(outName string, files []archiveFile, blobs []archiveBlob) (int, error) {
 		// Simulate a writer that "succeeds" but produces an implausibly
 		// small file (10 bytes).
 		return len(files), os.WriteFile(outName, []byte("tinydata!!"), 0644)
@@ -96,11 +165,12 @@ func TestCollectLogs_ImplausiblySmallArchive_ReturnsError(t *testing.T) {
 func TestCollectLogs_MissingArchive_ReturnsError(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Chdir(tmpDir)
+	useCwdSources(t)
 	seedDiagnosticContent(t)
 
 	original := writeArchive
 	t.Cleanup(func() { writeArchive = original })
-	writeArchive = func(outName string, files []string, blobs []archiveBlob) (int, error) {
+	writeArchive = func(outName string, files []archiveFile, blobs []archiveBlob) (int, error) {
 		return len(files), nil // reports success but writes nothing
 	}
 
@@ -116,6 +186,7 @@ func TestCollectLogs_MissingArchive_ReturnsError(t *testing.T) {
 func TestCollectLogs_Success_ReturnsArchiveSize(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Chdir(tmpDir)
+	useCwdSources(t)
 
 	if err := os.Mkdir("logs", 0755); err != nil {
 		t.Fatalf("failed to create logs dir: %v", err)
@@ -155,11 +226,12 @@ func TestCollectLogs_Success_ReturnsArchiveSize(t *testing.T) {
 func TestCollectLogs_NoFilesArchived_ReturnsError(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Chdir(tmpDir)
+	useCwdSources(t)
 	seedDiagnosticContent(t)
 
 	original := writeArchive
 	t.Cleanup(func() { writeArchive = original })
-	writeArchive = func(outName string, files []string, blobs []archiveBlob) (int, error) {
+	writeArchive = func(outName string, files []archiveFile, blobs []archiveBlob) (int, error) {
 		// Writes a plausibly sized file, but archived none of the gathered
 		// source files.
 		return 0, os.WriteFile(outName, []byte(strings.Repeat("h", 512)), 0644)
@@ -180,11 +252,12 @@ func TestCollectLogs_NoFilesArchived_ReturnsError(t *testing.T) {
 func TestCollectLogs_FailedRun_RemovesArchive(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Chdir(tmpDir)
+	useCwdSources(t)
 	seedDiagnosticContent(t)
 
 	original := writeArchive
 	t.Cleanup(func() { writeArchive = original })
-	writeArchive = func(outName string, files []string, blobs []archiveBlob) (int, error) {
+	writeArchive = func(outName string, files []archiveFile, blobs []archiveBlob) (int, error) {
 		if err := os.WriteFile(outName, []byte(strings.Repeat("h", 512)), 0644); err != nil {
 			return 0, err
 		}

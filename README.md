@@ -129,7 +129,7 @@ Package logs and config for support:
 ./enigma-sensor collect-logs
 ```
 
-This creates `enigma-logs-YYYYMMDD-HHMMSS.tar.gz` on Linux and macOS, or `enigma-logs-YYYYMMDD-HHMMSS.zip` on Windows, with logs, captures, config, version, and system info.
+This creates `enigma-logs-YYYYMMDD-HHMMSS.tar.gz` on Linux and macOS, or `enigma-logs-YYYYMMDD-HHMMSS.zip` on Windows, with logs, captures, config, version, and system info. On a packaged install (Linux `.deb` or the Windows installer), `collect-logs` gathers logs, captures, and config from their installed locations regardless of the directory you run it from, while a source checkout still falls back to the `logs/`, `captures/`, and `config.json` in the current directory.
 
 ---
 

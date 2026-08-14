@@ -17,9 +17,45 @@ type archiveBlob struct {
 	Content string
 }
 
+// archiveFile is one on-disk file to add to the archive. Source is the path
+// read from disk; Name is the path recorded inside the archive. Decoupling the
+// two keeps archive member names stable (logs/<basename>, captures/<rel>,
+// config.json) regardless of whether the source is a packaged absolute path or
+// a cwd-relative dev path.
+type archiveFile struct {
+	Source string
+	Name   string
+}
+
 // minArchiveBytes is the floor below which a written archive is treated as
 // hollow rather than valid.
 const minArchiveBytes = 256
+
+// Packaged-install source locations, defaulted from the platform consts. They
+// are package vars so tests can point them at temp paths; they default to the
+// real absolute install paths written by the installer.
+var (
+	installLogDir     = defaultInstallLogDir
+	installCaptureDir = defaultInstallCaptureDir
+	installConfigPath = defaultInstallConfigPath
+)
+
+// resolveDir returns installDir if it is an existing directory, else fallback.
+func resolveDir(installDir, fallback string) string {
+	if info, err := os.Stat(installDir); err == nil && info.IsDir() {
+		return installDir
+	}
+	return fallback
+}
+
+// resolveFile returns installPath if it is an existing regular file, else
+// fallback.
+func resolveFile(installPath, fallback string) string {
+	if info, err := os.Stat(installPath); err == nil && info.Mode().IsRegular() {
+		return installPath
+	}
+	return fallback
+}
 
 // writeArchive is the platform-specific archive writer. It is a variable so
 // tests can substitute a failing or degenerate implementation.
@@ -38,34 +74,43 @@ func CollectLogs(outName string) (size int64, retErr error) {
 		}
 	}()
 
-	// files holds the paths of on-disk files to add to the archive, which are
-	// also used unchanged as the path inside the archive.
-	var files []string
+	// files holds the on-disk source path plus the stable archive member name
+	// for each file to add to the archive.
+	var files []archiveFile
 	var blobs []archiveBlob
 
-	// gatheredBytes counts only real diagnostic content gathered from disk.
-	// The generated version.txt and system-info.txt blobs are deliberately
-	// excluded: they are always present and would mask an otherwise empty
-	// bundle.
-	var gatheredBytes int64
+	// logBytes and captureBytes count runtime diagnostic content; configBytes
+	// counts configuration. They are tracked separately so a bundle carrying
+	// only config (no runtime logs/captures) can be rejected as degraded. The
+	// generated version.txt and system-info.txt blobs are deliberately excluded
+	// from all three: they are always present and would mask an empty bundle.
+	var logBytes, captureBytes, configBytes int64
 
-	// Add all regular files directly in logs/
-	logDir := "logs"
-	if logFiles, err := os.ReadDir(logDir); err == nil { // logs/ may not exist
+	// Resolve each source to its packaged install location when present, else
+	// the cwd-relative dev/source fallback.
+	logDir := resolveDir(installLogDir, "logs")
+	captureDir := resolveDir(installCaptureDir, "captures")
+	configPath := resolveFile(installConfigPath, "config.json")
+
+	// Add all regular files directly in the resolved log dir, under logs/<name>.
+	if logFiles, err := os.ReadDir(logDir); err == nil { // log dir may not exist
 		for _, entry := range logFiles {
 			if entry.IsDir() {
 				continue
 			}
-			path := filepath.Join(logDir, entry.Name())
 			if info, err := entry.Info(); err == nil {
-				gatheredBytes += info.Size()
+				logBytes += info.Size()
 			}
-			files = append(files, path)
+			files = append(files, archiveFile{
+				Source: filepath.Join(logDir, entry.Name()),
+				Name:   "logs/" + entry.Name(),
+			})
 		}
 	}
 
-	// Recursively add all files in captures/ (non-fatal if absent)
-	_ = filepath.WalkDir("captures", func(path string, d os.DirEntry, err error) error {
+	// Recursively add all files under the resolved capture dir, under
+	// captures/<relative-path> (non-fatal if absent).
+	_ = filepath.WalkDir(captureDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -73,24 +118,39 @@ func CollectLogs(outName string) (size int64, retErr error) {
 			return nil
 		}
 		if info, err := d.Info(); err == nil {
-			gatheredBytes += info.Size()
+			captureBytes += info.Size()
 		}
-		files = append(files, path)
+		rel, err := filepath.Rel(captureDir, path)
+		if err != nil {
+			rel = filepath.Base(path)
+		}
+		files = append(files, archiveFile{
+			Source: path,
+			Name:   "captures/" + filepath.ToSlash(rel),
+		})
 		return nil
 	})
 
-	// Add config.json if present
-	if info, err := os.Stat("config.json"); err == nil {
-		gatheredBytes += info.Size()
-		files = append(files, "config.json")
+	// Add the resolved config file if present, under config.json.
+	if info, err := os.Stat(configPath); err == nil {
+		configBytes += info.Size()
+		files = append(files, archiveFile{Source: configPath, Name: "config.json"})
 	}
 
-	if gatheredBytes == 0 {
+	runtimeBytes := logBytes + captureBytes
+
+	if runtimeBytes == 0 && configBytes == 0 {
 		wd, wdErr := os.Getwd()
 		if wdErr != nil {
 			wd = "the current working directory"
 		}
 		return 0, fmt.Errorf("no diagnostic content found in %s: logs/ and captures/ are empty or absent and config.json is missing; run collect-logs from the sensor's working directory (the one holding logs/, captures/, and config.json)", wd)
+	}
+
+	if runtimeBytes == 0 {
+		// Config was found but there are no runtime diagnostics. A config-only
+		// bundle looks complete to support while carrying nothing actionable.
+		return 0, fmt.Errorf("degraded bundle: would contain only config and no runtime diagnostics; both the logs dir (%s) and captures dir (%s) are empty or absent, so there are no logs or captures to collect", logDir, captureDir)
 	}
 
 	blobs = append(blobs,

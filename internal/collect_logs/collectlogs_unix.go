@@ -13,11 +13,19 @@ import (
 // ArchiveExt is the archive extension used on non-Windows platforms.
 const ArchiveExt = ".tar.gz"
 
+// Packaged-install source paths on non-Windows platforms. These match the
+// locations created by installer/install-enigma-sensor.sh exactly.
+const (
+	defaultInstallLogDir     = "/var/log/enigma-sensor"
+	defaultInstallCaptureDir = "/var/lib/enigma-sensor/captures"
+	defaultInstallConfigPath = "/etc/enigma-sensor/config.json"
+)
+
 // writeArchiveDefault writes a gzip-compressed tar archive containing the
 // given on-disk files and generated blobs. It returns the number of on-disk
 // source files actually written into the archive; the generated blobs are not
 // counted.
-func writeArchiveDefault(outName string, files []string, blobs []archiveBlob) (int, error) {
+func writeArchiveDefault(outName string, files []archiveFile, blobs []archiveBlob) (int, error) {
 	out, err := os.Create(outName)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create archive file %s: %w", outName, err)
@@ -28,11 +36,11 @@ func writeArchiveDefault(outName string, files []string, blobs []archiveBlob) (i
 
 	written := 0
 	writeErr := func() error {
-		for _, path := range files {
-			if err := addFileToTar(tarWriter, path); err != nil {
+		for _, f := range files {
+			if err := addFileToTar(tarWriter, f); err != nil {
 				// Non-fatal: a source file that cannot be archived is skipped.
 				// addFileToTar leaves the tar stream well-formed in that case.
-				fmt.Fprintf(os.Stderr, "warning: skipped %s: %v\n", path, err)
+				fmt.Fprintf(os.Stderr, "warning: skipped %s: %v\n", f.Source, err)
 				continue
 			}
 			written++
@@ -73,8 +81,8 @@ func writeArchiveDefault(outName string, files []string, blobs []archiveBlob) (i
 // that could produce a short or long copy is therefore handled here: non-regular
 // files are rejected before the header is written, a file that shrank mid-copy
 // is zero-padded, and a file that grew is truncated to the declared size.
-func addFileToTar(tarWriter *tar.Writer, path string) error {
-	f, err := os.Open(path)
+func addFileToTar(tarWriter *tar.Writer, af archiveFile) error {
+	f, err := os.Open(af.Source)
 	if err != nil {
 		return err
 	}
@@ -85,11 +93,11 @@ func addFileToTar(tarWriter *tar.Writer, path string) error {
 		return err
 	}
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("not a regular file: %s", path)
+		return fmt.Errorf("not a regular file: %s", af.Source)
 	}
 
 	hdr := &tar.Header{
-		Name:     path,
+		Name:     af.Name,
 		Mode:     0644,
 		Size:     info.Size(),
 		ModTime:  info.ModTime(),
@@ -104,7 +112,7 @@ func addFileToTar(tarWriter *tar.Writer, path string) error {
 		// The entry is already open in the stream. Pad it out so the archive
 		// stays well-formed, then report the failure so the caller can skip it.
 		if padErr := padTarEntry(tarWriter, hdr.Size-n); padErr != nil {
-			return fmt.Errorf("failed to pad truncated entry %s: %w", path, padErr)
+			return fmt.Errorf("failed to pad truncated entry %s: %w", af.Source, padErr)
 		}
 		return copyErr
 	}
@@ -112,7 +120,7 @@ func addFileToTar(tarWriter *tar.Writer, path string) error {
 		// The file shrank between stat and copy. Pad the remainder with zeros
 		// so the declared size is honoured.
 		if err := padTarEntry(tarWriter, hdr.Size-n); err != nil {
-			return fmt.Errorf("failed to pad shrunken entry %s: %w", path, err)
+			return fmt.Errorf("failed to pad shrunken entry %s: %w", af.Source, err)
 		}
 	}
 	return nil

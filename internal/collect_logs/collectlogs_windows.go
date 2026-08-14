@@ -12,10 +12,29 @@ import (
 // ArchiveExt is the archive extension used on Windows.
 const ArchiveExt = ".zip"
 
+// Packaged-install source paths on Windows.
+//
+// Only config.json has a fixed absolute home: the installer
+// (installer/windows/enigma-sensor-installer.iss) copies config.example.json
+// verbatim to C:\ProgramData\EnigmaSensor\config.json, changing only
+// api_key/network_id. That config keeps relative paths for everything else
+// (capture.output_dir = "./captures", logging.file = "logs/enigma-sensor.log").
+// The service runs via NSSM with AppDirectory set to the install dir
+// (C:\Program Files\EnigmaSensor), so at runtime the process cwd is the
+// install dir, not ProgramData. Leaving the log and capture dirs empty here
+// means resolveDir falls through to its cwd-relative fallback ("logs",
+// "captures"), which resolves against that install-dir cwd and matches
+// where the running service actually writes.
+const (
+	defaultInstallLogDir     = ``
+	defaultInstallCaptureDir = ``
+	defaultInstallConfigPath = `C:\ProgramData\EnigmaSensor\config.json`
+)
+
 // writeArchiveDefault writes a zip archive containing the given on-disk files
 // and generated blobs. It returns the number of on-disk source files actually
 // written into the archive; the generated blobs are not counted.
-func writeArchiveDefault(outName string, files []string, blobs []archiveBlob) (int, error) {
+func writeArchiveDefault(outName string, files []archiveFile, blobs []archiveBlob) (int, error) {
 	out, err := os.Create(outName)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create archive file %s: %w", outName, err)
@@ -25,10 +44,10 @@ func writeArchiveDefault(outName string, files []string, blobs []archiveBlob) (i
 
 	written := 0
 	writeErr := func() error {
-		for _, path := range files {
-			if err := addFileToZip(zipWriter, path); err != nil {
+		for _, f := range files {
+			if err := addFileToZip(zipWriter, f); err != nil {
 				// Non-fatal: a source file that cannot be archived is skipped.
-				fmt.Fprintf(os.Stderr, "warning: skipped %s: %v\n", path, err)
+				fmt.Fprintf(os.Stderr, "warning: skipped %s: %v\n", f.Source, err)
 				continue
 			}
 			written++
@@ -57,8 +76,8 @@ func writeArchiveDefault(outName string, files []string, blobs []archiveBlob) (i
 	return written, nil
 }
 
-func addFileToZip(zipWriter *zip.Writer, path string) error {
-	f, err := os.Open(path)
+func addFileToZip(zipWriter *zip.Writer, af archiveFile) error {
+	f, err := os.Open(af.Source)
 	if err != nil {
 		return err
 	}
@@ -69,10 +88,10 @@ func addFileToZip(zipWriter *zip.Writer, path string) error {
 		return err
 	}
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("not a regular file: %s", path)
+		return fmt.Errorf("not a regular file: %s", af.Source)
 	}
 
-	w, err := zipWriter.Create(path)
+	w, err := zipWriter.Create(af.Name)
 	if err != nil {
 		return err
 	}

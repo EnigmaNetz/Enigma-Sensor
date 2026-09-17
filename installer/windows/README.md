@@ -1,225 +1,99 @@
-# Windows Installer Setup
+# Windows Installer
 
-## Overview
+The Windows installer is built with [Inno Setup](https://jrsoftware.org/isinfo.php) from
+`enigma-sensor-installer.iss`. It installs the sensor as the `EnigmaSensor` Windows service, managed
+by NSSM (the Non-Sucking Service Manager).
 
-The Enigma Sensor Windows installer uses [Inno Setup](https://jrsoftware.org/isinfo.php) and optionally bundles Npcap for enhanced network capture capabilities.
+## Build
 
-## Prerequisites
+Release and pull request builds happen in continuous integration (`.github/workflows/build-artifacts-reusable.yml`), which
+produces `enigma-sensor-windows-<version>.exe`. To build locally on Windows:
 
-1. **Inno Setup** - Download and install from https://jrsoftware.org/isdl.php
-2. **Npcap Installer** (optional but recommended) - See instructions below
-3. **Compiled sensor binary** - Run build from project root
-4. **NSSM binary** - Should be in `bin/nssm.exe`
+1. Build the sensor from the repository root. The installer expects this exact path:
 
-## Building the Installer
-
-### Quick Build (Without Npcap)
-
-```bash
-# From project root
-cd installer/windows
-
-# Compile with Inno Setup
-iscc enigma-sensor-installer.iss
-```
-
-This creates `Output/enigma-sensor-installer.exe` without Npcap bundled. The sensor will fall back to pktmon.
-
-### Full Build (With Npcap)
-
-To include optional Npcap installation:
-
-1. **Download Npcap Installer**:
    ```powershell
-   # Download to installer/windows/ directory
-   cd installer/windows
-   Invoke-WebRequest -Uri "https://npcap.com/dist/npcap-1.79.exe" -OutFile "npcap-installer.exe"
+   go build -o bin/enigma-sensor-windows-amd64.exe ./cmd/enigma-sensor
    ```
 
-2. **Verify File Placement**:
-   ```
-   installer/windows/
-   ├── enigma-sensor-installer.iss
-   ├── npcap-installer.exe         ← Downloaded Npcap installer
-   ├── zeek-runtime-win64.zip
-   └── README.md
-   ```
+   (`GOOS=windows GOARCH=amd64 go build ...` from Linux produces the same binary.)
 
-3. **Build Installer**:
-   ```bash
-   iscc enigma-sensor-installer.iss
+2. Install Inno Setup 6 (`choco install innosetup`) and compile:
+
+   ```powershell
+   & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer/windows/enigma-sensor-installer.iss
    ```
 
-   The output `enigma-sensor-installer.exe` will include Npcap as an optional component.
+The output is `installer/windows/Output/enigma-sensor-installer.exe`.
 
-## Installer Features
+The installer packages:
 
-### Npcap Integration
+| File | Source |
+| --- | --- |
+| `enigma-sensor-windows-amd64.exe` | `bin/`, built in step 1 |
+| `nssm.exe` | `bin/nssm.exe`, committed |
+| `zeek-runtime-win64.zip` | This directory, committed. The sensor extracts it to `zeek-windows\` on every start |
+| `config.example.json` | Repository root. Used only to create the config, not installed |
 
-The installer provides an **optional Npcap installation step** with:
+Npcap is not packaged. The installer downloads it at install time if the user asks for it.
 
-1. **Automatic Detection** - Checks if Npcap is already installed
-2. **User Choice** - Checkbox to install Npcap (checked by default if not installed)
-3. **Silent Installation** - Runs Npcap installer with `/S` flag
-4. **Graceful Fallback** - Sensor works with or without Npcap
+## What the installer does
 
-### Installation Flow
+It needs administrator rights and installs to `C:\Program Files\EnigmaSensor`. After the directory
+page it shows up to two pages of its own, Npcap first (both are inserted after the directory page,
+and Inno Setup places the later-created page first).
 
-```
-1. Welcome Screen
-2. License Agreement
-3. Select Destination Directory
-4. Enter API Key (if fresh install)
-5. Npcap Option Page          ← NEW
-   - "Install Npcap (Recommended)"
-   - Explains benefits vs pktmon
-   - Auto-checked if Npcap not installed
-   - Skipped if already installed
-6. Ready to Install
-7. Installing Files
-8. Installing Npcap (if selected)  ← NEW
-9. Configuring Service
-10. Finish
-```
+1. **Npcap page** (skipped when `{sys}\Npcap\wpcap.dll` exists): an "Install Npcap (Recommended)"
+   checkbox, unchecked by default. Npcap captures everything the network card receives; without it
+   the sensor uses `pktmon`, which only sees this computer's own traffic.
+2. **Configuration page** (only when `C:\ProgramData\EnigmaSensor\config.json` does not exist): asks
+   for the API key and Network ID. Both are required, and the Network ID is checked against the same
+   rules as the sensor (1 to 64 characters; letters, numbers, spaces, hyphens and underscores;
+   starting and ending with a letter or number).
+3. **Before installing**: if Npcap was chosen, downloads `https://npcap.com/dist/npcap-1.79.exe`.
+   If the download fails it shows a message and carries on without Npcap.
+4. **Installing**: stops an existing `EnigmaSensor` service, copies the files, and on a fresh install
+   writes `C:\ProgramData\EnigmaSensor\config.json` from `config.example.json` with the API key and
+   Network ID filled in. An existing config is never touched.
+5. **After installing**:
+   - launches the Npcap installer if it was downloaded; the user clicks through it and setup waits;
+   - registers the service with NSSM: runs as LocalSystem, starts automatically, working directory
+     `C:\Program Files\EnigmaSensor`, console output to
+     `C:\ProgramData\EnigmaSensor\logs\enigma-sensor.log`;
+   - starts the service.
 
-### Npcap Benefits Explained to User
+Running a newer installer over an existing install upgrades it in place and keeps the config.
 
-The installer shows this message on the Npcap page:
+Uninstalling stops and removes the service. The config in `C:\ProgramData\EnigmaSensor` stays.
 
-> **Install Npcap for improved packet capture**
->
-> Npcap enables full network visibility with promiscuous mode, capturing 5-20x more traffic than the built-in pktmon tool. This is recommended for comprehensive network monitoring.
->
-> Without Npcap, the sensor will use pktmon, which captures only traffic processed by this computer.
->
-> Would you like to install Npcap?
+### Resulting files
 
-## Testing the Installer
+| Path | Contents |
+| --- | --- |
+| `C:\ProgramData\EnigmaSensor\config.json` | Config, including the API key |
+| `C:\ProgramData\EnigmaSensor\logs\enigma-sensor.log` | Service console output. NSSM is not configured to rotate it |
+| `C:\Program Files\EnigmaSensor\logs\enigma-sensor.log` | The sensor's own log, rotated per the `logging` settings |
+| `C:\Program Files\EnigmaSensor\captures\` | Captures and Zeek output |
+| `C:\Program Files\EnigmaSensor\zeek-windows\` | Extracted Zeek runtime |
 
-### Test Without Npcap
+## Npcap
 
-1. Build installer without `npcap-installer.exe` in directory
-2. Run installer
-3. Npcap page should not appear
-4. Sensor should use pktmon (check logs)
+The sensor chooses its capturer once, at service start: Npcap if
+`%WINDIR%\System32\Npcap\wpcap.dll` exists or Npcap lists devices, otherwise `pktmon`. The log says
+which:
 
-### Test With Npcap Option
+- `[capture] Using Npcap capturer (promiscuous mode enabled)`
+- `[capture] Npcap not available, using pktmon capturer (limited to host traffic)`
 
-1. Place `npcap-installer.exe` in `installer/windows/`
-2. Build installer
-3. Run installer
-4. Npcap page should appear with checkbox
-5. Select/deselect and verify behavior
-
-### Test With Npcap Already Installed
-
-1. Install Npcap manually or via Wireshark
-2. Run installer
-3. Npcap page should show but with note about existing installation
-4. Installation should skip Npcap step
-
-## Npcap Licensing Considerations
-
-### Important License Information
-
-- **Npcap License**: Review at https://npcap.com/oem/redist.html
-- **Free Use**: Npcap is free for non-commercial use
-- **Commercial Use**: May require Npcap OEM license for redistribution
-- **Wireshark Exception**: If users already have Wireshark, they have Npcap
-
-### Recommended Approach
-
-1. **Bundle Npcap installer** but make it optional
-2. **User consent** - Checkbox gives explicit user choice
-3. **License compliance** - User accepts Npcap license during installation
-4. **Alternative**: Provide separate download link instead of bundling
-
-### For Commercial Deployments
-
-If distributing to commercial customers:
-
-1. Contact Npcap team about OEM licensing
-2. Or provide download instructions instead of bundling
-3. Or rely on customers with Wireshark already having Npcap
-
-## File Sizes
-
-- Enigma Sensor binary: ~20MB
-- NSSM: ~350KB
-- Zeek runtime: ~75MB
-- Npcap installer: ~3MB
-- **Total installer size**: ~100MB (with all components)
-
-## Troubleshooting
-
-### Npcap Installation Fails
-
-**Symptom**: Installer completes but sensor uses pktmon
-
-**Solutions**:
-1. Check if Npcap installer was included in build
-2. Verify Npcap installer is not corrupted
-3. Try manual Npcap installation
-4. Check Windows Event Log for Npcap installation errors
-
-### Silent Installation Not Working
-
-**Symptom**: Npcap shows UI during installation
-
-**Solutions**:
-1. Ensure `/S` parameter is used (already in script)
-2. Check Npcap installer version supports silent mode
-3. Run installer as Administrator
-
-### Sensor Doesn't Use Npcap After Installation
-
-**Symptom**: Logs show "using pktmon capturer" even with Npcap installed
-
-**Solutions**:
-1. Verify Npcap DLL exists: `C:\Windows\System32\Npcap\wpcap.dll`
-2. Check Npcap service is running: `Get-Service npcap`
-3. Restart sensor service: `Restart-Service EnigmaSensor`
-4. Check sensor logs for Npcap detection messages
-
-## Build Script Example
-
-For automated builds, use this PowerShell script:
+If Npcap is installed after the sensor, restart the service:
 
 ```powershell
-# build-installer.ps1
-param(
-    [switch]$IncludeNpcap = $true
-)
-
-# Navigate to installer directory
-cd installer/windows
-
-# Download Npcap if requested and not present
-if ($IncludeNpcap -and -not (Test-Path "npcap-installer.exe")) {
-    Write-Host "Downloading Npcap installer..."
-    Invoke-WebRequest -Uri "https://npcap.com/dist/npcap-1.79.exe" -OutFile "npcap-installer.exe"
-}
-
-# Build installer
-Write-Host "Building installer with Inno Setup..."
-& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" enigma-sensor-installer.iss
-
-Write-Host "Installer created: Output/enigma-sensor-installer.exe"
+Restart-Service EnigmaSensor
 ```
 
-## Version Management
+Npcap is licensed separately by its authors; see the [Npcap license](https://npcap.com/oem/). The
+installer downloads it from npcap.com rather than redistributing it.
 
-Use the version bump script from the repo root:
+## Version
 
-```sh
-./scripts/bump-version.sh patch   # or minor/major
-```
-
-This updates `enigma-sensor-installer.iss`, `internal/version/version.go`, and `installer/debian/DEBIAN/control`, then commits and tags.
-
-## References
-
-- **Inno Setup Documentation**: https://jrsoftware.org/ishelp/
-- **Npcap Website**: https://npcap.com/
-- **Npcap License**: https://github.com/nmap/npcap/blob/master/LICENSE
-- **NSSM Documentation**: https://nssm.cc/usage
+`AppVersion` in the `.iss` is set by `scripts/bump-version.sh`; see
+[DEVELOPMENT.md](../../DEVELOPMENT.md).

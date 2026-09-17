@@ -1,113 +1,163 @@
-# Development & Operations
+# Development
 
-This document covers local development, configuration, building, testing, and packaging.
+Local development, testing, packaging and releasing for the Enigma AI Sensor. How the sensor works
+and how to configure it is in [README.md](README.md).
+
+The sensor is the first step of the platform's data flow: Sensor → Enigma-Publisher (gRPC) →
+Pub/Sub in cloud or NATS on-prem → Enigma-Subscriber → warehouse → Enigma-Analytics and the UI.
+
+The default branch is `main`. Branch from it and open pull requests against it.
 
 ---
 
 ## Prerequisites
 
-- Go 1.24+
-- Linux/macOS: `tcpdump`, `zeek` for full flow; Windows: admin for `pktmon`
+- Go 1.24
+- Linux or macOS, to run the sensor: root, `tcpdump`, and Zeek 8.0.x at `/opt/zeek/bin/zeek` (the
+  path is fixed in `internal/processor/linux/processor.go`)
+- Windows, to run the sensor: an administrator shell. `pktmon` is built in; Npcap is optional. Zeek
+  comes from `installer/windows/zeek-runtime-win64.zip`, which the sensor extracts to
+  `zeek-windows/` in its working directory on start
+- For packaging and the Linux install test: `dos2unix`, `fakeroot` and Docker
 
 ---
 
-## Local Setup
+## Run locally
 
-1) Install deps and test tooling:
 ```sh
 go mod download
-go test -i ./...
+cp config.example.json config.json
 ```
 
-2) Create `config.json` from example and adjust as needed:
-```json
-{
-  "network_id": "YOUR_NETWORK_ID",
-  "logging": { "file": "logs/enigma-sensor.log" },
-  "capture": { "output_dir": "./captures", "window_seconds": 60, "loop": true, "interface": "any" },
-  "enigma_api": { "server": "api.enigmaai.net:443", "api_key": "YOUR_API_KEY", "upload": true },
-  "buffering": { "dir": "logs/buffer", "max_age_hours": 2 },
-  "zeek": { "sampling_percentage": 100 }
-}
-```
+Edit `config.json`:
 
-3) Build and run:
+- set `network_id` (the placeholder is rejected at startup);
+- for uploads, set `enigma_api.api_key` and point `enigma_api.server` at staging:
+  `api.staging.getenigma.ai:443`. The default in `config.example.json` is production;
+- or set `enigma_api.upload` to `false` to capture and process without uploading.
+
+`config.json` is gitignored. It holds an API key; never commit it.
+
 ```sh
 go build -o bin/enigma-sensor ./cmd/enigma-sensor
-./bin/enigma-sensor
+sudo ./bin/enigma-sensor
 ```
 
----
+On Linux the sensor looks for `/etc/enigma-sensor/config.json` before `./config.json`, so a
+machine with an installed sensor uses the installed config.
 
-## Configuration Locations
+Paths in `config.example.json` are relative, so logs go to `logs/`, captures and Zeek output to
+`captures/zeek_out_<timestamp>/`, and failed uploads to `logs/buffer/`.
 
-- Linux (installed): `/etc/enigma-sensor/config.json`
-- Windows (installed): `C:\\ProgramData\\EnigmaSensor\\config.json`
-- Repo/local dev: `./config.json`
-
-## Log Locations
-
-- Linux (installed): `/var/log/enigma-sensor/enigma-sensor.log`
-- Windows (installed): `C:\\ProgramData\\EnigmaSensor\\logs\\enigma-sensor.log`
-- Repo/local dev: `./logs/enigma-sensor.log`
-
-Rotation is handled via built-in rotation (lumberjack): `max_size_mb`, `log_retention_days`, 3 backups, gzip.
+To process existing PCAP (packet capture) files instead of capturing, enable `pcap_ingest` (see README) and drop
+files into `<watch_dir>/incoming/`.
 
 ---
 
-## Commands
+## Test
 
 ```sh
-# Show help/version
-./bin/enigma-sensor --help
-./bin/enigma-sensor --version
-
-# Collect diagnostics
-./bin/enigma-sensor collect-logs
-
-# Run tests (host OS)
-go test ./...
-
-# Cross-platform tests (CI/local)
-GOOS=linux GOARCH=amd64 go test ./...
-GOOS=windows GOARCH=amd64 go test ./...
-GOOS=darwin GOARCH=amd64 go test ./...
+go test ./...                      # host platform
+go test -race ./...                # what continuous integration (CI) runs
+go test -v ./internal/capture/...  # one package
 ```
+
+Platform code sits behind build tags (`//go:build windows`, `//go:build linux || darwin`), so
+`go test` on Linux never compiles the Windows files. You cannot run another platform's tests from
+Linux (`GOOS=windows go test` fails with "exec format error"), but you can compile them:
+
+```sh
+GOOS=windows GOARCH=amd64 go vet ./...
+GOOS=darwin GOARCH=amd64 go vet ./...
+```
+
+CI runs the tests natively on each platform.
+
+### Linux install test
+
+```sh
+bash scripts/test-linux-install.sh
+```
+
+Builds the `.deb`, assembles the release zip layout, and installs it in fresh `ubuntu:22.04` and
+`ubuntu:24.04` containers with the OpenSUSE Zeek repository blocked, to prove Zeek installs from the
+bundled packages.
+
+### Load test
+
+`loadtest/` holds a Docker Compose traffic generator. It does not currently run; see
+[loadtest/README.md](loadtest/README.md).
 
 ---
 
-## Packaging
+## CI
 
-### Debian (.deb)
+CI runs in GitHub Actions.
+
+| Workflow | Trigger | What it does |
+| --- | --- | --- |
+| `go-test.yml` | Push to `main`, every PR | `go test -v -race ./...` on Ubuntu, Windows and macOS |
+| `linux-install-test.yml` | Push to `main`, every PR | `scripts/test-linux-install.sh`, then builds the Docker image and checks its Zeek is 8.0.x |
+| `pr-build-artifacts.yml` | PR labelled `build:windows`, `build:linux`, `build:macos` or `build:all` | Builds installers and binaries as workflow artifacts (kept 7 days) |
+| `go-build-release.yml` | Any tag push | Builds everything and attaches it to the GitHub Release for that tag |
+| `docker-publish.yml` | `v*` tag push | Builds and pushes `ghcr.io/enigmanetz/enigma-sensor` tagged with the version, `major.minor`, `major` and `latest` |
+
+`pr-build-artifacts.yml` and `go-build-release.yml` both call `build-artifacts-reusable.yml`. There
+is no lint or format check in CI; run `gofmt -l .` before opening a PR.
+
+Dependabot opens weekly grouped PRs for GitHub Actions versions.
+
+---
+
+## Package
+
+### Debian package
+
 ```sh
 cd installer/debian
 ./build-deb.sh
 ```
-- Installs systemd unit, default config at `/etc/enigma-sensor/config.json`
 
-### Windows Installer
-- Inno Setup with NSSM; logs at `C:\\ProgramData\\EnigmaSensor\\logs\\enigma-sensor.log`
+Always rebuilds `bin/enigma-sensor-linux`, then writes `bin/enigma-sensor_<version>_amd64.deb`. The
+package installs `/usr/local/bin/enigma-sensor` and a systemd unit, depends on `zeek-core` and
+`tcpdump`, and enables and starts the service on install. It does not write a config; the installer
+does.
 
----
+### Linux release zip
 
-## Version Management
+Built in CI only. It holds `install-enigma-sensor.sh`, the `.deb`, and the bundled Zeek packages
+under `zeek/`. Running `installer/install-enigma-sensor.sh` straight from a checkout does not find
+the bundle and falls back to the OpenSUSE repository; see
+[installer/linux/zeek/README.md](installer/linux/zeek/README.md).
 
-Bump version across all files:
+### Windows installer
+
+See [installer/windows/README.md](installer/windows/README.md).
+
+### Docker image
+
 ```sh
-./scripts/bump-version.sh patch   # 1.5.0 -> 1.5.1
-./scripts/bump-version.sh minor   # 1.5.0 -> 1.6.0
-./scripts/bump-version.sh major   # 1.5.0 -> 2.0.0
+docker build -t enigma-sensor .
 ```
 
-Updates `internal/version/version.go`, `installer/debian/DEBIAN/control`, and `installer/windows/enigma-sensor-installer.iss`, then commits and creates a git tag.
+`.dockerignore` excludes `installer/` except the bundled Zeek packages, which the image installs.
 
 ---
 
-## Notes and Standards
+## Release
 
-- Follow existing code patterns and conventions
-- Update/add tests for functional changes
-- Avoid logging secrets; keep permissions restrictive
-- Consider Linux, Windows, macOS impacts for changes
+1. On a branch, run the version bump. It needs a clean working tree and commits the change:
 
+   ```sh
+   ./scripts/bump-version.sh patch   # or minor, major
+   ```
 
+   It updates `internal/version/version.go`, `installer/debian/DEBIAN/control` and
+   `installer/windows/enigma-sensor-installer.iss`. It does not tag.
+
+2. Open a PR and merge it to `main`.
+3. Tag the version bump commit `v<version>` (for example `v1.9.5`) and push the tag. That runs
+   `go-build-release.yml` and `docker-publish.yml`.
+
+Sensors in the field update only when someone reinstalls them, so older versions stay in use for a
+long time. Keep the upload format backward compatible.

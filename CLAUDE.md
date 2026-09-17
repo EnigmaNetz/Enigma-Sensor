@@ -135,220 +135,162 @@ AI agents must understand and respect data classification:
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Start here
+
+`README.md` is the source of truth for how the sensor behaves and is configured. `DEVELOPMENT.md`
+covers building, testing, CI, packaging and releasing. Read the relevant section before changing
+behaviour, and link to those files rather than copying their content here.
+
+Other references: `installer/linux/zeek/README.md` (bundled Zeek packages), `installer/windows/README.md`
+(Windows installer).
+
 ## Git Workflow
 **Branch naming convention:**
 - Format: `task/[TICKET-ID]-[short-description]`
 - Example: `task/B1CF-1234-add-user-authentication`
 - Use lowercase with hyphens for description
 - Always include ticket ID in branch name
+- Branch from `main`; PRs target `main` (this repo has no `stage` branch)
 
 **Commit message requirements:**
 - MUST include ticket reference at end: `Ref [TICKET-ID]`
 - Example: `Ref B1CF-1234`
 - If branch name contains no numbers, do not reference any ticket
+- NEVER reference Claude, Claude Code, or other AI tools in commit messages
+- Never use `git add .`; stage files explicitly
 
 ## Project Overview
 
-The Enigma Sensor is a **cross-platform network capture and processing tool** written in Go that:
-- Collects network traffic data using platform-specific capture tools
-- Processes PCAP files into Zeek-format logs (conn.xlsx, dns.xlsx)
-- Uploads processed logs to the Enigma API for analysis
-- Runs as a service on Windows or as a systemd service on Linux
+The Enigma AI Sensor is a Go 1.24 agent installed on customer machines. Each loop it:
 
-**Core Architecture:**
+PCAP is packet capture; gRPC is gRPC Remote Procedure Calls.
+
 ```
-Platform Detection → Capture (pktmon/tcpdump) → Processing (gopacket) → Upload (gRPC API)
+Capture (tcpdump | Npcap | pktmon) → PCAP → Zeek → 5 logs → excluded-subnet filter → gRPC upload → Enigma-Publisher
 ```
+
+- **Capture**: `tcpdump` on Linux and macOS. On Windows, Npcap (via gopacket) when
+  `wpcap.dll` is present, otherwise `pktmon`, whose ETL (Event Trace Log) output is converted with
+  `pktmon etl2pcapng`.
+- **Process**: Zeek writes `conn`, `dns`, `dhcp`, `ja3_ja4` and `ja4s` logs. On every platform
+  `dhcp.log` is then enriched with DHCP (Dynamic Host Configuration Protocol) option 55 read from
+  the PCAP with gopacket. The logs are renamed to `.xlsx`, but they are still Zeek tab-separated text, not Excel.
+- **Upload**: to Enigma-Publisher, then the PCAP is deleted.
+
+The same binary serves cloud and on-prem; on-prem only changes `enigma_api.server` and
+`enigma_api.ca_cert_file`.
 
 ## Development Commands
 
-### Building and Testing
 ```bash
-# Download dependencies
 go mod download
-
-# Build for current platform
 go build -o bin/enigma-sensor ./cmd/enigma-sensor
-
-# Cross-platform builds
-GOOS=linux GOARCH=amd64 go build -o bin/enigma-sensor-linux ./cmd/enigma-sensor
-GOOS=windows GOARCH=amd64 go build -o bin/enigma-sensor-windows-amd64.exe ./cmd/enigma-sensor
-GOOS=darwin GOARCH=amd64 go build -o bin/enigma-sensor-darwin ./cmd/enigma-sensor
-
-# Run all tests
 go test ./...
-
-# Cross-platform testing (required before merging)
-GOOS=linux GOARCH=amd64 go test ./...
-GOOS=windows GOARCH=amd64 go test ./...
-GOOS=darwin GOARCH=amd64 go test ./...
-
-# Run specific package tests
-go test -v ./internal/capture/...
-go test -v ./internal/processor/...
-
-# Test with coverage
-go test -cover ./...
-
-# Container-based end-to-end Linux install test (needs go, docker, dos2unix, fakeroot)
-# Runs a full install on fresh ubuntu:22.04 and ubuntu:24.04 containers
-bash scripts/test-linux-install.sh
+go test -race ./...                       # continuous integration (CI) runs this on Ubuntu, Windows and macOS
+GOOS=windows GOARCH=amd64 go vet ./...    # compile-check Windows code and tests from Linux
+GOOS=darwin GOARCH=amd64 go vet ./...
+gofmt -l .                                # no lint or format gate in CI; keep this empty
+bash scripts/test-linux-install.sh        # needs docker, dos2unix, fakeroot
 ```
 
-### Code Quality
-```bash
-# Format code
-gofmt -w .
-goimports -w .
+`GOOS=windows go test` does not work from Linux (exec format error). There is no golangci-lint
+config in the repo.
 
-# Linting (use golangci-lint with: govet, staticcheck, errcheck, ineffassign, gosec, gocritic)
-golangci-lint run
-```
+## Code Map
 
-### Running the Sensor
-```bash
-# Run with default config.json
-./bin/enigma-sensor
+- `cmd/enigma-sensor/main.go`: argument handling (`collect-logs`, `--version`, `--help`), config
+  path lookup, log rotation, wiring
+- `config/`: `Config` struct, defaults and validation (`ValidateAndSetDefaults`), `SENSOR_*`
+  environment overrides by reflection (`env_override.go`)
+- `internal/sensor/`: the capture loop, processing worker pool, PCAP and `zeek_out_*` cleanup,
+  Windows Zeek extraction
+- `internal/capture/`: `factory.go` picks the capturer; `linux/` (tcpdump, also macOS), `windows/`
+  (`capture_npcap.go`, `capture.go` for pktmon, `interface_mapper.go`)
+- `internal/processor/`: `linux/` and `windows/` run Zeek; `common/` holds `ZeekLogFiles`,
+  `subnet_filter.go`, `dhcp_enrichment.go` and the embedded scripts in `zeekscripts/`
+- `internal/api/`: `client.go` (compress, chunk, retry, disk buffer, upload) and the generated
+  gRPC code in `publish/`
+- `internal/metadata/`: metadata sent with every upload
+- `internal/pcapingest/`: offline PCAP directory watcher
+- `internal/collect_logs/`: support bundle (tar.gz on Unix, zip on Windows)
+- `installer/`: Linux installer script, Debian package, bundled Zeek debs, Windows Inno Setup script
+  and Zeek runtime zip
+- `loadtest/`: Docker Compose load generator, currently broken
 
-# Show help
-./bin/enigma-sensor --help
+## Upload Contract
 
-# Show version
-./bin/enigma-sensor --version
+- The sensor calls one RPC (remote procedure call), `publishService.uploadExcelMethod`, defined with
+  an unused `getMethod` in
+  `internal/api/publish/grpc_config.proto`.
+- The **API key is sent in the `employeeId` field**, not a header.
+- `data` is zlib-compressed JSON `{"dns","conn","ja3ja4","ja4s","dhcp"}`; each value is a
+  base64-encoded, zlib-compressed Zeek log. `conn` is required; missing others are sent empty.
+- `metadata` is a string map from `internal/metadata/collector.go`: `network_id`, `machine_id`,
+  `sensor_version`, `os_name`, `os_version`, `architecture`, `host_ips`, `zeek_version`,
+  `session_id`.
+- Success is `statusCode` 200 in the response body. `statusCode` 410 means the key is invalid and is
+  meant to stop the sensor (exit 0), but see the 410 trap below.
+- Payloads over `enigma_api.max_payload_size_mb` are split by line into several uploads.
+- An upload is tried 3 times, 5 seconds apart, then written to `buffering.dir`. Buffered payloads
+  are retried oldest first before the next upload and purged after `buffering.max_age_hours`.
 
-# Package logs for support
-./bin/enigma-sensor collect-logs
-```
+Enigma-Publisher (`grpc_config.proto`) receives this, and Enigma-Data-Generator
+(`demo_generator/client/proto/publisher.proto`) imitates the sensor with the same contract.
+Subscriber's fan-out reads the five log types by name, and Enigma-Analytics uses the JA3/JA4 data for
+device role classification. Sensors in the field are updated only by
+reinstalling, so old versions keep sending the old shape: changes must stay backward compatible,
+and a contract change touches all of those repos.
 
-## Architecture and Code Structure
+## Traps
 
-### Entry Point
-- `cmd/enigma-sensor/main.go` - Minimal main function that loads config and orchestrates components
+- **Zeek path is hardcoded.** Linux and macOS run `/opt/zeek/bin/zeek`; Windows runs
+  `zeek-windows/zeek-runtime-win64/bin/zeek.exe` relative to the working directory. `zeek.path`
+  exists in the config struct but is never read.
+- **Zeek scripts differ by platform.** Linux and macOS pass the scripts embedded in
+  `internal/processor/common/zeekscripts/` on the command line. Windows loads
+  `site/custom-scripts/main.zeek` from `installer/windows/zeek-runtime-win64.zip`, which carries
+  its own copy of the JA3/JA4 script plus ASN (autonomous system number) and hostname enrichment;
+  on start the sensor writes the embedded sampling and DHCP scripts into that directory and adds
+  them to `main.zeek`. A change to the embedded JA3/JA4 script does not reach Windows unless the zip is rebuilt.
+- **`ZeekLogFiles`** (`internal/processor/common/processor.go`) is the single list of uploaded logs.
+  Both the subnet filter and the rename to `.xlsx` use it, so a new log added there is filtered
+  automatically. The uploader's `LogFiles` and `CombinedLogs` still need the field added by hand.
+- **Subnet filtering fails closed.** If `FilterExcludedSubnets` errors, the capture is not
+  uploaded. Keep it that way: the setting promises excluded traffic never leaves the host.
+- **Sampling** is applied in Zeek to `conn` and `dns` records only. `sampling_percentage: 0` is
+  replaced by 100 during validation.
+- **`capture.retention_hours` is a pointer.** `nil` means "fall back to `log_retention_days`",
+  `0` means delete straight after upload. Keep the distinction.
+- **Config lookup order**: the system path (`/etc/enigma-sensor/config.json` or
+  `C:\ProgramData\EnigmaSensor\config.json`) wins over `./config.json`. A file that exists but fails
+  validation stops startup; it does not fall through to the next path.
+- **New config fields** must be string, int, int64, float64, bool or a pointer to one, so the
+  reflection-based `SENSOR_*` overrides can set them. Lists are comma-separated strings (see
+  `zeek.excluded_subnets`). Add a default and bounds in `ValidateAndSetDefaults` and a row in the
+  README configuration table.
+- **410 shutdown does not trigger today (known, to be ticketed).** `client.go` wraps `ErrAPIGone`,
+  but `sensor.go`, `pcapingest/watcher.go` and `main.go` compare errors with `==`, so a rejected key
+  is retried and buffered like any failure. Use `errors.Is`. The mock uploaders in `sensor_test.go`
+  and `watcher_test.go` return the bare error, which is why tests pass.
+- **The API key is logged today (known, to be ticketed).** `main.go` logs the whole config with
+  `%+v` at startup, key included, and `collect-logs` archives config and logs unredacted. Do not add
+  more of this; see Code Standards.
+- **`logging.level` has no effect.** Logging uses the standard `log` package with no levels.
+- **Installers duplicate validation and config.** The Network ID rules exist in `config/config.go`,
+  `installer/install-enigma-sensor.sh` and `installer/windows/enigma-sensor-installer.iss`. The
+  Linux installer writes its own config JSON; Windows copies `config.example.json`; Docker copies
+  `config.example.json` and applies environment variables in `docker-entrypoint.sh`.
+- **Version** lives in three files; change it only with `scripts/bump-version.sh`.
+- **Dependabot** covers GitHub Actions only.
 
-### Core Packages
-- `internal/sensor/` - Main sensor orchestration logic and interfaces
-- `internal/capture/` - Platform-specific network capture implementations
-  - `capture/common/` - Shared capture configuration and types
-  - `capture/windows/` - Windows pktmon implementation
-  - `capture/linux/` - Linux/macOS tcpdump implementation
-- `internal/processor/` - PCAP to Zeek log conversion
-  - `processor/common/` - Processing types and interfaces
-  - `processor/windows/` - Windows-specific processing
-  - `processor/linux/` - Linux/macOS processing
-- `internal/api/` - Enigma API client and gRPC communication
-- `config/` - Configuration loading and validation
-- `internal/version/` - Version information
-- `internal/collect_logs/` - Support diagnostics collection
+## Code Standards
 
-### Platform-Specific Behavior
-- **Windows**: Uses `pktmon` for capture, auto-extracts bundled Zeek runtime, runs as Windows service
-- **Linux**: Uses `tcpdump` for capture; the release installer supplies Zeek (`/opt/zeek/bin/zeek`) from a bundled package set, falling back to a third-party repo only if the bundle is missing or fails
-- **macOS**: Uses `tcpdump` for capture, requires system Zeek installation
-
-### Configuration System
-- Config hierarchy: Platform-specific paths → `config.json` fallback
-- **Windows**: `C:\ProgramData\EnigmaSensor\config.json` → `config.json`
-- **Linux**: `/etc/enigma-sensor/config.json` → `config.json`
-- All settings configurable: logging, capture windows, API endpoints, traffic sampling
-
-## Key Interfaces and Patterns
-
-### Core Interfaces
-```go
-type Capturer interface {
-    Capture(ctx context.Context, cfg common.CaptureConfig) (string, error)
-}
-
-type Processor interface {
-    ProcessPCAP(pcapPath string, opts types.ProcessOptions) (types.ProcessedData, error)
-}
-
-type Uploader interface {
-    UploadLogs(ctx context.Context, files api.LogFiles) error
-}
-```
-
-### Sensor Orchestration Pattern
-The main sensor loop coordinates capture → process → upload → cleanup cycles, with proper error handling for API failures (including 410 Gone responses that trigger graceful shutdown).
-
-## Installation and Packaging
-
-### Debian Package Build
-```bash
-cd installer/debian
-./build-deb.sh
-```
-- Always rebuilds the Linux binary (never packages a stale one)
-- Creates systemd service integration
-- Outputs to `../../bin/enigma-sensor_*.deb`
-
-### Windows Installer
-- Uses Inno Setup with NSSM for service management
-- Bundles Zeek runtime in `installer/windows/zeek-runtime-win64.zip`
-- Auto-extracts and configures on first run
-
-### Linux Installer
-- Vendors a minimal Zeek 8.0.5-0 runtime deb set at `installer/linux/zeek/` (`zeek-core`, `zeekctl`, `zeek-client`, `SHA256SUMS`)
-- The release zip carries this bundle under `zeek/`; the installer verifies it against `SHA256SUMS` before installing
-- See `installer/linux/zeek/README.md` for provenance and the refresh procedure
-
-## Code Quality Requirements
-
-### Cross-Platform Testing
-- **MANDATORY**: All changes must pass tests on Linux, Windows, and macOS
-- Use build tags for platform-specific code
-- Test capture and processing logic on target platforms
-
-### Error Handling Standards
-- Always check and handle returned errors
-- Wrap errors with context using `fmt.Errorf`
-- Never ignore errors from file operations, network calls, or subprocesses
-
-### Security Requirements
-- Never log API keys or sensitive configuration
-- Set restrictive file permissions (0600) for config and logs
-- Validate all user input and configuration values
-
-### Testing Standards
-- All new functionality requires unit tests
-- Use mocks for external dependencies (filesystem, network)
-- Integration tests should use real capture tools where possible
-- No merges with failing tests or linter errors
-
-## Development Environment Setup
-
-### Prerequisites
-- Go 1.24+
-- Platform-specific capture tools:
-  - **Windows**: Admin privileges for pktmon
-  - **Linux/macOS**: Root privileges, tcpdump and zeek installed
-
-### Configuration for Development
-1. Copy `config.example.json` to `config.json`
-2. Set `enigma_api.api_key` for API integration testing
-3. Configure `enigma_api.server` for staging: `api.staging.getenigma.ai:443`
-4. Adjust logging and capture settings as needed
-
-### Windows Development Notes
-- Zeek runtime auto-extracts from bundled zip to `zeek-windows/`
-- ETL files converted to PCAP for processing
-- Service installation handled by NSSM
-
-### Linux Development Notes
-- The release installer ships Zeek 8.0.5-0 in the release zip and installs it from there; `tcpdump` still comes from the distro repos
-- Running the installer directly from a repository checkout takes the third-party OBS fallback path instead, because the script resolves the bundle relative to its own directory (`installer/`), while the bundle lives at `installer/linux/zeek/`
-- Systemd service integration for production deployment
-
-## API Integration
-
-### gRPC Communication
-- Uses protobuf definitions in `internal/api/publish/`
-- Handles authentication via API key headers
-- Implements retry logic for transient failures
-- Responds to 410 Gone by graceful shutdown (invalid API key)
-
-### Upload Process
-- Converts Zeek logs to API-expected formats
-- Batches multiple log files per upload
-- Configurable payload size limits
-- Automatic cleanup after successful upload
+- Platform-specific code goes behind build tags with a stub for other platforms; check it compiles
+  with the `GOOS=... go vet` commands above.
+- Check every returned error and wrap with context (`fmt.Errorf("...: %w", err)`).
+- Never log or archive the API key or other secrets. New files that hold secrets get 0600.
+- Validate anything passed to an external command (see `validateInterfaceName` in `config/config.go`).
+- New behaviour needs unit tests with the external tool mocked; the capture and processor packages
+  inject command runners and file systems for this.
+- Sensor changes reach customers only through a reinstall, and customer machines are memory
+  constrained. Prefer changes that do not raise memory use or require a new Zeek build.

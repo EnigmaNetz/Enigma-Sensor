@@ -92,7 +92,8 @@ The installer:
   third-party package repository is needed. If the bundle is missing or fails to install, it falls
   back to the OpenSUSE Zeek repository;
 - installs the `enigma-sensor` package, a systemd service that starts at boot;
-- writes `/etc/enigma-sensor/config.json` if it does not already exist, then restarts the service.
+- writes `/etc/enigma-sensor/config.json` if it does not already exist, readable only by root
+  (mode 0600, also applied to an existing config), then restarts the service.
 
 Re-running the installer upgrades the sensor and keeps the existing config.
 
@@ -277,12 +278,24 @@ enigma-sensor collect-logs
 ```
 
 `collect-logs` writes `enigma-logs-YYYYMMDD-HHMMSS.tar.gz` (Linux and macOS) or `.zip` (Windows) in
-the current directory. It collects `logs/`, `captures/` and `config.json` **relative to the current
-directory**, plus version and system information, and fails if it finds none of them:
+the current directory. Run it as root (`sudo`) or from an administrator prompt, and send the archive
+to Enigma AI support. It contains:
 
-- **Windows**: run it from `C:\Program Files\EnigmaSensor`. `C:\ProgramData\EnigmaSensor` is not
-  included; attach its `config.json` and `logs\enigma-sensor.log` separately if support asks.
-- **Linux package installs**: the files live in `/etc/enigma-sensor`, `/var/log/enigma-sensor` and
-  `/var/lib/enigma-sensor`, so `collect-logs` finds nothing. Archive those directories instead.
+- the config file the sensor loads, found in the same order the sensor uses (see
+  [Configuration](#configuration)). Every text value under `enigma_api` except `server` and
+  `ca_cert_file` is masked with `*`, whatever the key is called. A config that is not valid JSON is
+  left out, because its key cannot be located; `collect-logs.txt` says so;
+- the sensor log named by `logging.file` and its rotated backups (decompressed);
+- on Windows, the service log in `C:\ProgramData\EnigmaSensor\logs`;
+- everything under `capture.output_dir`;
+- the sensor version, system information, and `collect-logs.txt`, which lists the paths it used and
+  any error loading the config.
 
-The config and the sensor log both contain your API key. Share them only with Enigma AI support.
+The API key is masked with `*` in the logs too, including keys that earlier sensor versions wrote to
+the log. Relative paths in the config resolve against the current directory, then the directory
+holding the sensor binary, which is the Windows service's working directory. On Linux, if the config
+is missing or does not parse, it falls back to `/var/log/enigma-sensor` and
+`/var/lib/enigma-sensor/captures`. If nothing is found, it fails and lists the paths it tried.
+
+On Linux and macOS the archive is readable only by the user who ran it; on Windows it takes the
+permissions of the folder it is written to. `collect-logs` refuses to overwrite an existing file.

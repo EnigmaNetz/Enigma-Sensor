@@ -37,7 +37,7 @@ func TestCollectLogs_Unix_ArchiveContainsExpectedFiles(t *testing.T) {
 	}
 
 	outName := "test-logs.tar.gz"
-	if _, err := CollectLogs(outName); err != nil {
+	if _, err := collectInCwd(t, outName); err != nil {
 		t.Fatalf("CollectLogs failed: %v", err)
 	}
 
@@ -113,7 +113,7 @@ func TestCollectLogs_Unix_MissingDirsAreHandled(t *testing.T) {
 	}
 
 	outName := "test-logs-missing.tar.gz"
-	if _, err := CollectLogs(outName); err != nil {
+	if _, err := collectInCwd(t, outName); err != nil {
 		t.Fatalf("CollectLogs failed: %v", err)
 	}
 
@@ -175,7 +175,7 @@ func TestCollectLogs_Unix_NonRegularCaptureEntry_DoesNotCorruptArchive(t *testin
 	}
 
 	outName := "test-logs.tar.gz"
-	if _, err := CollectLogs(outName); err != nil {
+	if _, err := collectInCwd(t, outName); err != nil {
 		t.Fatalf("CollectLogs failed on a non-regular captures entry: %v", err)
 	}
 
@@ -219,5 +219,56 @@ func TestCollectLogs_Unix_NonRegularCaptureEntry_DoesNotCorruptArchive(t *testin
 	}
 	if got := string(members["logs/enigma.log"]); got != logContent {
 		t.Errorf("logs/enigma.log content mismatch: got %q, want %q", got, logContent)
+	}
+}
+
+// TestCollectLogs_Unix_ArchiveIsOwnerOnly checks the archive, which holds logs
+// and captures, is not readable by other users.
+func TestCollectLogs_Unix_ArchiveIsOwnerOnly(t *testing.T) {
+	t.Chdir(t.TempDir())
+	seedDiagnosticContent(t)
+
+	outName := "test-logs.tar.gz"
+	if _, err := collectInCwd(t, outName); err != nil {
+		t.Fatalf("CollectLogs failed: %v", err)
+	}
+	info, err := os.Stat(outName)
+	if err != nil {
+		t.Fatalf("archive not created: %v", err)
+	}
+	if mode := info.Mode().Perm(); mode != 0600 {
+		t.Errorf("archive mode = %o, want 600", mode)
+	}
+}
+
+// readArchiveMembers returns every regular member of a .tar.gz archive by name.
+func readArchiveMembers(t *testing.T, path string) map[string][]byte {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("failed to open archive: %v", err)
+	}
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		t.Fatalf("failed to open gzip reader: %v", err)
+	}
+	defer gz.Close()
+
+	members := map[string][]byte{}
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			return members
+		}
+		if err != nil {
+			t.Fatalf("failed to read tar entry: %v", err)
+		}
+		buf, err := io.ReadAll(tr)
+		if err != nil {
+			t.Fatalf("failed to read member %s: %v", hdr.Name, err)
+		}
+		members[hdr.Name] = buf
 	}
 }

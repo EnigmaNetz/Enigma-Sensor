@@ -139,6 +139,7 @@ echo "MARK installer_exit=$?"
 echo "MARK zeek_version=$(/opt/zeek/bin/zeek --version 2>&1 | head -n 1)"
 echo "MARK sensor_status=$(dpkg -s enigma-sensor 2>&1 | sed -n 's/^Status: //p')"
 echo "MARK zeek_core_version=$(dpkg -s zeek-core 2>&1 | sed -n 's/^Version: //p')"
+echo "MARK config_mode=$(stat -c %a /etc/enigma-sensor/config.json 2>&1)"
 if [ -e /etc/apt/sources.list.d/security:zeek.list ]; then
   echo "MARK obs_list=present"
 else
@@ -190,6 +191,13 @@ for image in ubuntu:22.04 ubuntu:24.04; do
     *) fail "$image: dpkg -s zeek-core version is 8.0.x" \
          "got '${zeek_core_version:-<no marker>}'" ;;
   esac
+
+  config_mode=$(mark_value "$out" config_mode)
+  if [ "$config_mode" = "600" ]; then
+    pass "$image: /etc/enigma-sensor/config.json is mode 600"
+  else
+    fail "$image: /etc/enigma-sensor/config.json is mode 600" "got '${config_mode:-<no marker>}'"
+  fi
 
   obs_list=$(mark_value "$out" obs_list)
   if [ "$obs_list" = "absent" ]; then

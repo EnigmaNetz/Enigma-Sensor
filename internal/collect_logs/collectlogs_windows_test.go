@@ -4,6 +4,7 @@ package collect_logs
 
 import (
 	"archive/zip"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -34,7 +35,7 @@ func TestCollectLogs_Windows_CreatesZipWithExpectedFiles(t *testing.T) {
 	}
 
 	zipName := "test-logs.zip"
-	_, err := CollectLogs(zipName)
+	_, err := collectInCwd(t, zipName)
 	if err != nil {
 		t.Fatalf("CollectLogs failed: %v", err)
 	}
@@ -79,7 +80,7 @@ func TestCollectLogs_Windows_MissingDirsAreHandled(t *testing.T) {
 	}
 
 	zipName := "test-logs-missing.zip"
-	_, err := CollectLogs(zipName)
+	_, err := collectInCwd(t, zipName)
 	if err != nil {
 		t.Fatalf("CollectLogs failed: %v", err)
 	}
@@ -130,11 +131,36 @@ func TestCollectLogs_Windows_EmptyDirs_ReturnsError(t *testing.T) {
 	}
 
 	zipName := "test-logs-empty.zip"
-	_, err := CollectLogs(zipName)
+	_, err := collectInCwd(t, zipName)
 	if err == nil {
 		t.Fatal("expected CollectLogs to return an error when no diagnostic content exists, got nil")
 	}
 	if !strings.Contains(err.Error(), "no diagnostic content found") {
 		t.Errorf("expected error to mention missing diagnostic content, got: %v", err)
 	}
+}
+
+// readArchiveMembers returns every member of a .zip archive by name.
+func readArchiveMembers(t *testing.T, path string) map[string][]byte {
+	t.Helper()
+	r, err := zip.OpenReader(path)
+	if err != nil {
+		t.Fatalf("failed to open zip: %v", err)
+	}
+	defer r.Close()
+
+	members := map[string][]byte{}
+	for _, f := range r.File {
+		rc, err := f.Open()
+		if err != nil {
+			t.Fatalf("failed to open member %s: %v", f.Name, err)
+		}
+		buf, err := io.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			t.Fatalf("failed to read member %s: %v", f.Name, err)
+		}
+		members[f.Name] = buf
+	}
+	return members
 }

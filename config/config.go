@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -370,4 +371,39 @@ func LoadConfig(configPath string) (*Config, error) {
 	}
 
 	return &config, nil
+}
+
+// RedactedValue replaces secrets wherever a config is printed.
+const RedactedValue = "[REDACTED]"
+
+// Redacted returns a copy of the config that is safe to log: secrets are
+// replaced with a placeholder.
+func (c *Config) Redacted() Config {
+	r := *c
+	if r.EnigmaAPI.APIKey != "" {
+		r.EnigmaAPI.APIKey = RedactedValue
+	}
+	return r
+}
+
+// Paths returns the config files the sensor reads, in lookup order: the system
+// path an installer writes, then config.json in the working directory.
+func Paths(goos string) []string {
+	if goos == "windows" {
+		return []string{`C:\ProgramData\EnigmaSensor\config.json`, "config.json"}
+	}
+	return []string{"/etc/enigma-sensor/config.json", "config.json"}
+}
+
+// FindPath returns the first of paths that exists. A path that cannot be
+// checked for a reason other than not existing is returned too, so loading it
+// reports the real error instead of silently falling through to the next path.
+// It returns an error wrapping os.ErrNotExist when none exists.
+func FindPath(paths []string) (string, error) {
+	for _, path := range paths {
+		if _, err := os.Stat(path); err == nil || !errors.Is(err, os.ErrNotExist) {
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("no config file found (tried %s): %w", strings.Join(paths, ", "), os.ErrNotExist)
 }

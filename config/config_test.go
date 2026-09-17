@@ -1,6 +1,10 @@
 package config
 
 import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -651,5 +655,58 @@ func TestConfig_ValidateAndSetDefaults_NetworkID(t *testing.T) {
 	}
 	if cfg.NetworkID != "Trimmed-Network" {
 		t.Errorf("Expected network_id to be trimmed to 'Trimmed-Network', got %q", cfg.NetworkID)
+	}
+}
+
+func TestRedacted_MasksAPIKeyWithoutChangingConfig(t *testing.T) {
+	cfg := &Config{NetworkID: "HQ-Firewall-01"}
+	cfg.EnigmaAPI.APIKey = "live-key-7f3a9c2e"
+	cfg.EnigmaAPI.Server = "api.enigmaai.net:443"
+
+	redacted := cfg.Redacted()
+	dump := fmt.Sprintf("%+v", redacted)
+	if strings.Contains(dump, "live-key-7f3a9c2e") {
+		t.Errorf("redacted config dump contains the API key: %s", dump)
+	}
+	if !strings.Contains(dump, "APIKey:[REDACTED]") || !strings.Contains(dump, "HQ-Firewall-01") {
+		t.Errorf("redacted config dump lost the placeholder or other fields: %s", dump)
+	}
+	if cfg.EnigmaAPI.APIKey != "live-key-7f3a9c2e" {
+		t.Errorf("Redacted modified the original config: api key is %q", cfg.EnigmaAPI.APIKey)
+	}
+
+	var empty Config
+	if got := empty.Redacted().EnigmaAPI.APIKey; got != "" {
+		t.Errorf("an unset API key should stay empty, got %q", got)
+	}
+}
+
+func TestPaths_SystemPathFirst(t *testing.T) {
+	if got := Paths("linux"); len(got) != 2 || got[0] != "/etc/enigma-sensor/config.json" || got[1] != "config.json" {
+		t.Errorf("Paths(linux) = %v", got)
+	}
+	if got := Paths("windows"); len(got) != 2 || got[0] != `C:\ProgramData\EnigmaSensor\config.json` || got[1] != "config.json" {
+		t.Errorf("Paths(windows) = %v", got)
+	}
+}
+
+func TestFindPath(t *testing.T) {
+	dir := t.TempDir()
+	first := filepath.Join(dir, "first.json")
+	second := filepath.Join(dir, "second.json")
+	missing := filepath.Join(dir, "missing.json")
+	for _, p := range []string{first, second} {
+		if err := os.WriteFile(p, []byte("{}"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if got, err := FindPath([]string{missing, first, second}); err != nil || got != first {
+		t.Errorf("FindPath = %q, %v; want the first existing path %q", got, err, first)
+	}
+
+	_, err := FindPath([]string{missing})
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("FindPath with no existing path: err = %v, want os.ErrNotExist", err)
 	}
 }

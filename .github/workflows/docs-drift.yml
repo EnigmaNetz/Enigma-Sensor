@@ -1,0 +1,29 @@
+name: Docs Drift
+
+# Thin caller of the shared workflow in EnigmaNetz/Enigma-Release.
+# The schedule stays here so GitHub registers it on this repo. Change lookup,
+# the Claude prompt, validation and PR handling live in the shared template.
+
+on:
+  schedule:
+    - cron: '0 13 * * 1'  # Mondays 13:00 UTC
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: 'Show proposed edits in the job summary without pushing'
+        type: boolean
+        default: true
+
+# The shared template uses scoped GitHub App tokens for every GitHub call;
+# GITHUB_TOKEN needs no permissions.
+permissions: {}
+
+jobs:
+  docs-drift:
+    uses: EnigmaNetz/Enigma-Release/.github/workflows/docs-drift-template.yml@main
+    with:
+      trigger: tags
+      target-branch: main
+      # Scheduled runs have no inputs, so they are never dry runs.
+      dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run }}
+    secrets: inherit

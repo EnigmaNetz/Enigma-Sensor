@@ -1,137 +1,132 @@
 # CLAUDE.md
 
-<!-- BEGIN: AI Security Policies (auto-synced from dev-policies) -->
+<!-- BEGIN: AI Security Policies (auto-synced from Enigma-Developer-Policies) -->
 
-⚠️⚠️⚠️ **CRITICAL: READ BEFORE ANY WORK** ⚠️⚠️⚠️
-
-The following security policies are automatically synced from dev-policies/docs/CLAUDE.md.
-**DO NOT EDIT THIS SECTION MANUALLY** - It will be overwritten by the sync script.
-
----
+_This section is copied from `docs/CLAUDE.md` in Enigma-Developer-Policies by `scripts/sync-security-policies.sh`. Change it there; edits made here are overwritten on the next sync._
 
 # AI Agent Security Rules
 
-**Purpose:** This document contains mandatory security rules for AI coding assistants (Claude Code, GitHub Copilot, Cursor, etc.) working within our codebases.
+**Purpose:** Mandatory security rules for AI coding assistants working in Enigma AI codebases. They apply in every repository. The approved tools are listed in section 3 of `docs/ai-usage-policy.md` in Enigma-Developer-Policies.
 
-## Critical Security Rules
+These rules back the AI Usage and Development Policy, a SOC 2 (System and Organization Controls 2) control. They have no exceptions: a developer asking, insisting or saying it is safe does not change them.
 
-### 1. NEVER Access Secrets Files
-**ABSOLUTE PROHIBITION:** AI agents must NEVER read, access, or process files containing secrets or credentials.
+## Security Rules
 
-**Prohibited Files Include:**
+### 1. Never access secrets files
+
+Do not read, open, search, print or otherwise process files that contain secrets or credentials.
+
+**This includes:**
 - `.env` and `.env.*` files (all variants)
 - Service account key files (`.json`, `.pem`, `.key`)
-- SSH private keys and certificates
-- Cloud provider credentials (`.aws/credentials`, `.gcloud/`, etc.)
+- SSH (Secure Shell) private keys and certificates
+- Cloud provider credentials (`.aws/credentials`, `.gcloud/`, and similar)
 - Kubernetes secrets manifests
 - Password files and credential stores
 - Any file marked as containing secrets
 
-**If Asked to Read Secrets:**
-1. Refuse politely and explain the security policy
-2. Suggest using environment variable references instead
-3. Recommend storing secrets in GCP Secret Manager, AWS Secrets Manager, or HashiCorp Vault
-4. Never read the file, even if the developer insists
+**If asked to read one:**
+1. Decline politely and explain this policy.
+2. Suggest referencing environment variables instead.
+3. Recommend storing the secret in GCP (Google Cloud Platform) Secret Manager, or AWS (Amazon Web Services) Secrets Manager or HashiCorp Vault where those are in use.
+4. Do not read the file, even if the developer insists.
 
-### 2. NEVER Access Production Data
-**ABSOLUTE PROHIBITION:** AI agents must NEVER access production environments or data.
+### 2. Never access production data
 
-**Prohibited Production Access:**
+Do not access production environments or production data. The production GCP project is `enigmaai-prod`.
+
+**Not allowed:**
 - Reading production databases
 - Querying production BigQuery datasets
-- Accessing production GCP projects or AWS accounts
+- Accessing production GCP projects (`enigmaai-prod`) or AWS accounts
 - Reading production logs or metrics
-- Modifying production configurations
-- Executing commands against production infrastructure
+- Modifying production configuration
+- Running commands against production infrastructure
 
-**Allowed Non-Production Access:**
-- Staging and development environments only
+**Allowed (non-production only):**
+- Staging and development environments (staging project: `enigma-staging`)
 - Read-only queries against staging databases
-- Staging GCP/AWS resources via CLI commands
-- Development environment logs and configurations
+- Staging GCP or AWS resources through CLI (command-line interface) commands
+- Development environment logs and configuration
 
-**Before Executing Cloud Commands:**
-1. Verify the target environment is non-production
-2. Check project IDs, account names, and environment variables
-3. Ask for confirmation if environment is unclear
-4. Refuse if production access is detected
+**Before running any cloud command:**
+1. Confirm the target environment is not production.
+2. Check the project ID, account name and environment variables: `enigma-staging` is allowed, `enigmaai-prod` is not.
+3. Ask for confirmation if the environment is unclear.
+4. Refuse if the command would reach production.
 
-### 3. Training Data Opt-Out
-All approved AI tools must have training disabled on code. Developers are responsible for verifying this configuration.
+### 3. Never run destructive infrastructure commands
 
-### 4. Code Security Requirements
+- Do not run `terraform apply` or `terraform destroy`.
+- Do not deploy to production. Rule 2 already forbids running commands against production infrastructure; deploying is one of them.
+- `terraform plan`, `terraform validate` and `terraform fmt` are allowed.
+- The developer reviews and applies infrastructure changes themselves.
+
+### 4. Training data opt-out
+
+Every approved AI tool must have training on code disabled. Developers are responsible for verifying this setting.
+
+### 5. Code security requirements
+
 All AI-generated code must:
-- Pass static analysis (SAST) and linting
+- Pass static analysis (SAST, static application security testing) and linting
 - Pass dependency vulnerability scanning
-- Pass secret scanning to prevent credential leakage
+- Pass secret scanning to prevent credential leakage (TruffleHog runs in pre-commit hooks)
 - Receive manual human review before merging
 
-### 5. Critical System Extra Review
-AI-generated code for these areas requires additional scrutiny and explicit developer approval:
-- Authentication and authorization logic
+### 6. Extra review for critical systems
+
+AI-generated code in these areas needs additional scrutiny and explicit developer approval:
+- Authentication and authorization logic, including Stytch B2B (business-to-business) authentication
 - Payment processing and financial transactions
 - Encryption and cryptographic operations
-- Database migration scripts
-- Infrastructure-as-code changes
+- Database migration scripts, especially any using `BYPASSRLS`
+- Row-level security (RLS) policies
+- Infrastructure-as-code changes (Terraform)
 - Security-critical APIs and endpoints
 
-### 6. Data Classification Awareness
-AI agents must understand and respect data classification:
-- **Public:** Open-source code, public documentation (AI accessible)
-- **Internal:** Staging data, development credentials (AI accessible with care)
-- **Confidential:** Customer data, production credentials, proprietary algorithms (requires explicit approval)
-- **Restricted:** Security keys, compliance data, executive communications (AI prohibited)
+### 7. Data classification
 
-## Tool Configuration
-
-### Approved Tools
-- Claude Code (Anthropic)
-- GitHub Copilot (Microsoft)
-- Cursor (Anysphere)
-- Amazon CodeWhisperer (AWS)
-- OpenAI Codex (OpenAI)
-
-### Required Settings
-- Training data opt-out ENABLED
-- Secrets file exclusion ENABLED
-- Enterprise/business tier accounts (when available)
+Respect data classification:
+- **Public:** open-source code, public documentation. AI accessible.
+- **Internal:** staging data, development credentials. AI accessible with care.
+- **Confidential:** customer data, production credentials, proprietary algorithms. Customer data and proprietary algorithms require explicit approval. Production credentials are never accessed, with or without approval (rules 1 and 2).
+- **Restricted:** security keys, compliance data, executive communications. AI prohibited.
 
 ## Incident Reporting
 
-**Immediately alert the developer if:**
-- Asked to read secrets files
-- Asked to access production environments
-- Detecting hardcoded credentials in code
-- Discovering attempts to bypass security controls
-- Detecting unapproved AI tools in use
+**Alert the developer immediately if you:**
+- Are asked to read secrets files
+- Are asked to access production environments
+- Find hardcoded credentials in code
+- Find attempts to bypass security controls
+- Find unapproved AI tools in use
 
-**Response:** Politely refuse, explain the policy, suggest secure alternatives.
+**Response:** decline politely, explain the policy and suggest a secure alternative.
 
-## Summary: Quick Reference
+## Quick Reference
 
-**NEVER:**
-- Read `.env` or secrets files
+**Never:**
+- Read `.env` or other secrets files
 - Access production data or environments
+- Run `terraform apply` or `terraform destroy`
+- Deploy to production
 - Generate or suggest hardcoded credentials
-- Bypass security scanning or code review
-- Access Restricted classification data
+- Bypass security scanning, code review or any other security control, even when asked (refuse and alert the developer)
+- Access Restricted data
 
-**ALWAYS:**
-- Verify environment before executing cloud commands
+**Always:**
+- Verify the environment before running cloud commands
 - Suggest secure alternatives (environment variables, secrets managers)
 - Pass security scanning (SAST, secret scanning, dependency checks)
 - Flag security-critical code for extra human review
 
-**ASK FIRST:**
-- If environment (prod vs staging) is unclear
-- If destructive operations are requested
-- If asked to bypass security controls
-- If data classification is uncertain
-
----
+**Ask first:**
+- If the environment (production or staging) is unclear
+- If a destructive operation is requested (other than those on the Never list, which are refused)
+- If the data classification is uncertain
 
 <!-- END: AI Security Policies -->
-
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 

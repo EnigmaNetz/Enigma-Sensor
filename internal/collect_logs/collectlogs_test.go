@@ -2,10 +2,22 @@ package collect_logs
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"strings"
 	"testing"
 )
+
+// collectInCwd runs collect with the working directory as the only place to
+// look, so a config or log on the machine running the tests cannot leak in.
+func collectInCwd(t *testing.T, outName string) (int64, error) {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	return collect(outName, sources{configPaths: []string{"config.json"}, baseDirs: []string{wd}})
+}
 
 // seedDiagnosticContent writes a real log file into the current working
 // directory so CollectLogs has actual diagnostic content to gather.
@@ -27,14 +39,14 @@ func TestCollectLogs_NoDiagnosticContent_ReturnsError(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Chdir(tmpDir)
 
-	_, err := CollectLogs("test-logs" + ArchiveExt)
+	_, err := collectInCwd(t, "test-logs"+ArchiveExt)
 	if err == nil {
 		t.Fatal("expected CollectLogs to return an error when no diagnostic content exists, got nil")
 	}
 	if !strings.Contains(err.Error(), "no diagnostic content found") {
 		t.Errorf("expected error to mention missing diagnostic content, got: %v", err)
 	}
-	for _, want := range []string{"logs/", "captures/", "config.json"} {
+	for _, want := range []string{"logs", "captures", "config.json"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("expected error to name %q, got: %v", want, err)
 		}
@@ -51,11 +63,11 @@ func TestCollectLogs_ArchiveStepFailure_ReturnsError(t *testing.T) {
 
 	original := writeArchive
 	t.Cleanup(func() { writeArchive = original })
-	writeArchive = func(outName string, files []string, blobs []archiveBlob) (int, error) {
+	writeArchive = func(outName string, entries []archiveEntry, blobs []archiveBlob) (int, error) {
 		return 0, fmt.Errorf("simulated archive write failure")
 	}
 
-	_, err := CollectLogs("test-logs" + ArchiveExt)
+	_, err := collectInCwd(t, "test-logs"+ArchiveExt)
 	if err == nil {
 		t.Fatal("expected CollectLogs to return an error when writeArchive fails, got nil")
 	}
@@ -74,14 +86,14 @@ func TestCollectLogs_ImplausiblySmallArchive_ReturnsError(t *testing.T) {
 
 	original := writeArchive
 	t.Cleanup(func() { writeArchive = original })
-	writeArchive = func(outName string, files []string, blobs []archiveBlob) (int, error) {
+	writeArchive = func(outName string, entries []archiveEntry, blobs []archiveBlob) (int, error) {
 		// Simulate a writer that "succeeds" but produces an implausibly
 		// small file (10 bytes).
-		return len(files), os.WriteFile(outName, []byte("tinydata!!"), 0644)
+		return len(entries), os.WriteFile(outName, []byte("tinydata!!"), 0644)
 	}
 
 	outName := "test-logs" + ArchiveExt
-	_, err := CollectLogs(outName)
+	_, err := collectInCwd(t, outName)
 	if err == nil {
 		t.Fatal("expected CollectLogs to return an error for an implausibly small archive, got nil")
 	}
@@ -100,12 +112,12 @@ func TestCollectLogs_MissingArchive_ReturnsError(t *testing.T) {
 
 	original := writeArchive
 	t.Cleanup(func() { writeArchive = original })
-	writeArchive = func(outName string, files []string, blobs []archiveBlob) (int, error) {
-		return len(files), nil // reports success but writes nothing
+	writeArchive = func(outName string, entries []archiveEntry, blobs []archiveBlob) (int, error) {
+		return len(entries), nil // reports success but writes nothing
 	}
 
 	outName := "test-logs" + ArchiveExt
-	_, err := CollectLogs(outName)
+	_, err := collectInCwd(t, outName)
 	if err == nil {
 		t.Fatal("expected CollectLogs to return an error when the archive file is missing, got nil")
 	}
@@ -129,7 +141,7 @@ func TestCollectLogs_Success_ReturnsArchiveSize(t *testing.T) {
 
 	outName := "test-logs" + ArchiveExt
 
-	size, err := CollectLogs(outName)
+	size, err := collectInCwd(t, outName)
 	if err != nil {
 		t.Fatalf("CollectLogs failed: %v", err)
 	}
@@ -159,14 +171,14 @@ func TestCollectLogs_NoFilesArchived_ReturnsError(t *testing.T) {
 
 	original := writeArchive
 	t.Cleanup(func() { writeArchive = original })
-	writeArchive = func(outName string, files []string, blobs []archiveBlob) (int, error) {
+	writeArchive = func(outName string, entries []archiveEntry, blobs []archiveBlob) (int, error) {
 		// Writes a plausibly sized file, but archived none of the gathered
 		// source files.
 		return 0, os.WriteFile(outName, []byte(strings.Repeat("h", 512)), 0644)
 	}
 
 	outName := "test-logs" + ArchiveExt
-	_, err := CollectLogs(outName)
+	_, err := collectInCwd(t, outName)
 	if err == nil {
 		t.Fatal("expected CollectLogs to return an error when no gathered file was archived, got nil")
 	}
@@ -184,7 +196,7 @@ func TestCollectLogs_FailedRun_RemovesArchive(t *testing.T) {
 
 	original := writeArchive
 	t.Cleanup(func() { writeArchive = original })
-	writeArchive = func(outName string, files []string, blobs []archiveBlob) (int, error) {
+	writeArchive = func(outName string, entries []archiveEntry, blobs []archiveBlob) (int, error) {
 		if err := os.WriteFile(outName, []byte(strings.Repeat("h", 512)), 0644); err != nil {
 			return 0, err
 		}
@@ -192,11 +204,37 @@ func TestCollectLogs_FailedRun_RemovesArchive(t *testing.T) {
 	}
 
 	outName := "test-logs" + ArchiveExt
-	if _, err := CollectLogs(outName); err == nil {
+	if _, err := collectInCwd(t, outName); err == nil {
 		t.Fatal("expected CollectLogs to return an error, got nil")
 	}
 
 	if _, err := os.Stat(outName); !os.IsNotExist(err) {
 		t.Errorf("expected the partial archive %s to be removed, stat err: %v", outName, err)
+	}
+}
+
+// TestCollectLogs_ArchiveCreatedByAnotherProcess_IsNotRemoved covers the race
+// where outName appears between the existence check and the exclusive create:
+// that file belongs to someone else, so a failed run must leave it.
+func TestCollectLogs_ArchiveCreatedByAnotherProcess_IsNotRemoved(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Chdir(tmpDir)
+	seedDiagnosticContent(t)
+
+	original := writeArchive
+	t.Cleanup(func() { writeArchive = original })
+	writeArchive = func(outName string, entries []archiveEntry, blobs []archiveBlob) (int, error) {
+		if err := os.WriteFile(outName, []byte("someone else's"), 0644); err != nil {
+			return 0, err
+		}
+		return 0, fmt.Errorf("failed to create archive file %s: %w", outName, fs.ErrExist)
+	}
+
+	outName := "test-logs" + ArchiveExt
+	if _, err := collectInCwd(t, outName); err == nil {
+		t.Fatal("expected CollectLogs to return an error, got nil")
+	}
+	if got, err := os.ReadFile(outName); err != nil || string(got) != "someone else's" {
+		t.Errorf("another process's file was changed or removed: %q, %v", got, err)
 	}
 }

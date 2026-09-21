@@ -263,7 +263,8 @@ and a contract change touches all of those repos.
   `0` means delete straight after upload. Keep the distinction.
 - **Config lookup order**: the system path (`/etc/enigma-sensor/config.json` or
   `C:\ProgramData\EnigmaSensor\config.json`) wins over `./config.json`. A file that exists but fails
-  validation stops startup; it does not fall through to the next path.
+  validation stops startup; it does not fall through to the next path. `config.Paths` and
+  `config.FindPath` hold this order for both the sensor and `collect-logs`.
 - **New config fields** must be string, int, int64, float64, bool or a pointer to one, so the
   reflection-based `SENSOR_*` overrides can set them. Lists are comma-separated strings (see
   `zeek.excluded_subnets`). Add a default and bounds in `ValidateAndSetDefaults` and a row in the
@@ -272,9 +273,14 @@ and a contract change touches all of those repos.
   but `sensor.go`, `pcapingest/watcher.go` and `main.go` compare errors with `==`, so a rejected key
   is retried and buffered like any failure. Use `errors.Is`. The mock uploaders in `sensor_test.go`
   and `watcher_test.go` return the bare error, which is why tests pass.
-- **The API key is logged today (known, to be ticketed).** `main.go` logs the whole config with
-  `%+v` at startup, key included, and `collect-logs` archives config and logs unredacted. Do not add
-  more of this; see Code Standards.
+- **Never print the config directly.** `%+v` on `Config` prints `enigma_api.api_key`; log
+  `cfg.Redacted()` instead. `collect-logs` masks `config.json` by its JSON structure
+  (`internal/collect_logs/redact_config.go`): every string under `enigma_api` except `server` and
+  `ca_cert_file`, and any field named like a secret. A config that is not valid JSON is left out.
+  Logs are masked line by line (`redact.go`) for the literal key plus the `"api_key": "..."` and
+  `APIKey:...` shapes older sensors logged; masking keeps file length so tar sizes stay valid. A new
+  secret field needs `Redacted()`, and a new public `enigma_api` field is masked in bundles unless
+  added to `publicAPISettings`. Captures are archived unmasked.
 - **`logging.level` has no effect.** Logging uses the standard `log` package with no levels.
 - **Installers duplicate validation and config.** The Network ID rules exist in `config/config.go`,
   `installer/install-enigma-sensor.sh` and `installer/windows/enigma-sensor-installer.iss`. The

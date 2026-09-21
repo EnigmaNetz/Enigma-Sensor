@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -31,12 +30,13 @@ Usage: enigma-sensor [collect-logs] [--version|-v] [--help|-h]
 Runs a network capture and processing session using config.json.
 
 Options:
-  collect-logs    Package logs, captures, config, and diagnostics into an archive for support
+  collect-logs    Package logs, captures, config (API key masked), and diagnostics for support
   --version, -v   Print version and exit
   --help, -h      Show this help message and exit
 
 Configuration:
-  The sensor loads its configuration from config.json in the working directory by default.
+  The sensor loads /etc/enigma-sensor/config.json (C:\ProgramData\EnigmaSensor\config.json on
+  Windows) if it exists, otherwise config.json in the working directory.
   You can customize logging, capture, and Enigma API settings in this file.
   See config.example.json for a template and documentation of all options.
 
@@ -71,38 +71,22 @@ func main() {
 				fmt.Fprintf(os.Stderr, "Failed to collect logs: %v\n", err)
 				os.Exit(1)
 			}
+			if abs, err := filepath.Abs(outName); err == nil {
+				outName = abs
+			}
 			fmt.Printf("Created %s (%d bytes) with logs, config, and diagnostics.\n", outName, size)
 			return
 		}
 	}
-	// Load config from config.json
-	var configPaths []string
-	if runtime.GOOS == "windows" {
-		configPaths = []string{
-			`C:\\ProgramData\\EnigmaSensor\\config.json`,
-			"config.json",
-		}
-	} else {
-		configPaths = []string{
-			"/etc/enigma-sensor/config.json",
-			"config.json",
-		}
-	}
-	var cfg *config.Config
-	var err error
-	for _, path := range configPaths {
-		cfg, err = config.LoadConfig(path)
-		if err == nil {
-			break
-		}
-		// If the file exists but has validation errors, stop and report the error
-		// rather than trying the next config path
-		if !errors.Is(err, os.ErrNotExist) {
-			log.Fatalf("Failed to load config from %s: %v", path, err)
-		}
-	}
-	if cfg == nil {
+	// Load the first config file that exists. A file that exists but fails
+	// validation stops startup rather than falling through to the next path.
+	configPath, err := config.FindPath(config.Paths(runtime.GOOS))
+	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
+	}
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		log.Fatalf("Failed to load config from %s: %v", configPath, err)
 	}
 
 	// Set up standard logger to log to file if specified
@@ -123,7 +107,7 @@ func main() {
 		log.Printf("Log rotation configured: max size %dMB, retention %d days, max backups %d", cfg.Logging.MaxSizeMB, cfg.Logging.LogRetentionDays, cfg.Logging.MaxBackups)
 	}
 
-	log.Printf("Loaded config: %+v", cfg)
+	log.Printf("Loaded config from %s: %+v", configPath, cfg.Redacted())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

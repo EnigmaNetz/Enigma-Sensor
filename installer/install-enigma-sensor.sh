@@ -240,29 +240,20 @@ case "$OS_ID" in
       exit 1
     fi
     ;;
-  centos|rhel|fedora)
-    # --- Install Zeek, tcpdump, and dependencies ---
-    # Pin Zeek to 8.0.5 to avoid breaking changes from new releases
-    yum install -y epel-release || true
-    yum install -y zeek-8.0.5-0 tcpdump || dnf install -y zeek-8.0.5-0 tcpdump
-    # --- Find and install Enigma Sensor .rpm package ---
-    PKG=$(ls ./*.rpm 2>/dev/null | head -n1)
-    if [ -z "$PKG" ]; then
-      echo "ERROR: No .rpm package found in the current directory."
-      exit 1
-    fi
-    yum install -y "$PKG" || dnf install -y "$PKG"
-    ;;
   *)
     echo "ERROR: Unsupported Linux distribution: $OS_ID"
+    echo "  The installer supports Ubuntu and Debian. On other distributions, run the sensor in Docker:"
+    echo "    docker run ... ghcr.io/enigmanetz/enigma-sensor:latest"
     exit 1
     ;;
 esac
 
 # --- Write config file only if it doesn't exist ---
+# The config holds the API key, so only root may read it. The umask applies
+# while the file is created, so it is never readable by others, even briefly.
 mkdir -p /etc/enigma-sensor
 if [ ! -f /etc/enigma-sensor/config.json ]; then
-  cat > /etc/enigma-sensor/config.json <<EOF
+  (umask 077 && cat > /etc/enigma-sensor/config.json <<EOF
 {
   "network_id": "$ENIGMA_NETWORK_ID",
   "logging": {
@@ -289,7 +280,10 @@ if [ ! -f /etc/enigma-sensor/config.json ]; then
   }
 }
 EOF
+  )
 fi
+# Also tighten a config left world-readable by an earlier installer version.
+chmod 600 /etc/enigma-sensor/config.json
 
 # --- Create necessary directories ---
 mkdir -p /var/log/enigma-sensor

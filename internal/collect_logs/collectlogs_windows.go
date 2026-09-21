@@ -12,11 +12,13 @@ import (
 // ArchiveExt is the archive extension used on Windows.
 const ArchiveExt = ".zip"
 
-// writeArchiveDefault writes a zip archive containing the given on-disk files
+// writeArchiveDefault writes a zip archive containing the given on-disk entries
 // and generated blobs. It returns the number of on-disk source files actually
 // written into the archive; the generated blobs are not counted.
-func writeArchiveDefault(outName string, files []string, blobs []archiveBlob) (int, error) {
-	out, err := os.Create(outName)
+func writeArchiveDefault(outName string, entries []archiveEntry, blobs []archiveBlob) (int, error) {
+	// Never overwrite an existing file. The mode has no effect on Windows: the
+	// archive takes its permissions from the folder it is written to.
+	out, err := os.OpenFile(outName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create archive file %s: %w", outName, err)
 	}
@@ -25,10 +27,10 @@ func writeArchiveDefault(outName string, files []string, blobs []archiveBlob) (i
 
 	written := 0
 	writeErr := func() error {
-		for _, path := range files {
-			if err := addFileToZip(zipWriter, path); err != nil {
+		for _, entry := range entries {
+			if err := addFileToZip(zipWriter, entry); err != nil {
 				// Non-fatal: a source file that cannot be archived is skipped.
-				fmt.Fprintf(os.Stderr, "warning: skipped %s: %v\n", path, err)
+				fmt.Fprintf(os.Stderr, "warning: skipped %s: %v\n", entry.Path, err)
 				continue
 			}
 			written++
@@ -57,22 +59,14 @@ func writeArchiveDefault(outName string, files []string, blobs []archiveBlob) (i
 	return written, nil
 }
 
-func addFileToZip(zipWriter *zip.Writer, path string) error {
-	f, err := os.Open(path)
+func addFileToZip(zipWriter *zip.Writer, entry archiveEntry) error {
+	f, _, _, err := openEntry(entry)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
-	info, err := f.Stat()
-	if err != nil {
-		return err
-	}
-	if !info.Mode().IsRegular() {
-		return fmt.Errorf("not a regular file: %s", path)
-	}
-
-	w, err := zipWriter.Create(path)
+	w, err := zipWriter.Create(entry.Name)
 	if err != nil {
 		return err
 	}

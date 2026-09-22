@@ -310,10 +310,6 @@ func TestConfig_ValidateAndSetDefaults(t *testing.T) {
 		t.Errorf("Expected default interface to be 'any', got %q", cfg.Capture.Interface)
 	}
 
-	if cfg.Logging.Level != "info" {
-		t.Errorf("Expected default log level to be 'info', got %q", cfg.Logging.Level)
-	}
-
 	// Test logging defaults
 	if cfg.Logging.MaxSizeMB != 50 {
 		t.Errorf("Expected default MaxSizeMB to be 50, got %d", cfg.Logging.MaxSizeMB)

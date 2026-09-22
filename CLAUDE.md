@@ -281,7 +281,6 @@ and a contract change touches all of those repos.
   `APIKey:...` shapes older sensors logged; masking keeps file length so tar sizes stay valid. A new
   secret field needs `Redacted()`, and a new public `enigma_api` field is masked in bundles unless
   added to `publicAPISettings`. Captures are archived unmasked.
-- **`logging.level` has no effect.** Logging uses the standard `log` package with no levels.
 - **Installers duplicate validation and config.** The Network ID rules exist in `config/config.go`,
   `installer/install-enigma-sensor.sh` and `installer/windows/enigma-sensor-installer.iss`. The
   Linux installer writes its own config JSON; Windows copies `config.example.json`; Docker copies

@@ -230,8 +230,6 @@ Invalid values stop the sensor at startup with a message naming the field. The p
 | `logging.max_backups` | `5` | Rotated logs to keep (1 to 10) |
 | `pcap_ingest.*` | disabled | Offline PCAP processing, see below |
 
-`logging.level` is accepted but currently has no effect.
-
 ### Environment variable overrides
 
 Every setting can be overridden with `SENSOR_<SECTION>_<FIELD>` in upper case; top-level fields use

@@ -10,8 +10,6 @@ services:
     volumes:
       - ./logs:/app/logs
       - ./captures:/app/captures
-    environment:
-      - LOG_LEVEL=INFO
     restart: unless-stopped
 
   # HTTP load generators using curl

@@ -17,8 +17,6 @@ type Config struct {
 
 	// Logging configuration
 	Logging struct {
-		// Level is the minimum log level to output (debug, info, warn, error)
-		Level string `json:"level"`
 		// File is the path to the log file. If empty, logs to stdout only
 		File string `json:"file"`
 		// MaxSizeMB is the maximum size of log file before rotation (min 10MB, max 500MB)
@@ -148,9 +146,6 @@ func (config *Config) ValidateAndSetDefaults() error {
 	}
 	config.NetworkID = strings.TrimSpace(config.NetworkID)
 
-	if config.Logging.Level == "" {
-		config.Logging.Level = "info"
-	}
 	// Validate and set MaxSizeMB with bounds: min 10MB, max 500MB, default 50MB
 	if config.Logging.MaxSizeMB == 0 {
 		config.Logging.MaxSizeMB = 50 // 50MB default

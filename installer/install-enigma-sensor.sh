@@ -257,7 +257,6 @@ if [ ! -f /etc/enigma-sensor/config.json ]; then
 {
   "network_id": "$ENIGMA_NETWORK_ID",
   "logging": {
-    "level": "info",
     "file": "/var/log/enigma-sensor/enigma-sensor.log",
     "max_size_mb": 100,
     "log_retention_days": 7

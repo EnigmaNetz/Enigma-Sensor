@@ -111,13 +111,11 @@ func minimalConfig(loop bool) *config.Config {
 			RetentionHours:       intPtr(24),
 		},
 		Logging: struct {
-			Level            string `json:"level"`
 			File             string `json:"file"`
 			MaxSizeMB        int64  `json:"max_size_mb"`
 			LogRetentionDays int    `json:"log_retention_days"`
 			MaxBackups       int    `json:"max_backups"`
 		}{
-			Level:            "info",
 			File:             "",
 			MaxSizeMB:        100,
 			LogRetentionDays: 1,

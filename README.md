@@ -214,7 +214,7 @@ Invalid values stop the sensor at startup with a message naming the field. The p
 | `enigma_api.upload` | `false` | Upload logs. The installers set `true` |
 | `enigma_api.ca_cert_file` | none | PEM (Privacy-Enhanced Mail format) CA (certificate authority) certificate to trust instead of the system store; for on-prem |
 | `enigma_api.max_payload_size_mb` | `25` | Logs larger than this are split and uploaded in several requests |
-| `capture.interface` | `any` | Interface to capture on, or a comma-separated list. On Linux, capturing several named interfaces needs `mergecap` (from Wireshark) to combine them |
+| `capture.interface` | `any` | Interface to capture on, or a comma-separated list. On Linux and macOS, several named interfaces are captured separately and merged by timestamp. They must share a link type (for example, all Ethernet). If they do not, the sensor logs the error and exits, and the service manager restarts it into the same error, so nothing is uploaded until `capture.interface` is fixed |
 | `capture.window_seconds` | none | Length of each capture window. The installers and example config use `60` |
 | `capture.loop` | `false` | Keep capturing. `false` runs one window and exits. The installers set `true` |
 | `capture.output_dir` | none | Working directory for captures and Zeek output |

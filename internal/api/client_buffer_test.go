@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -87,4 +88,77 @@ func TestLogUploader_BufferPurgeOld(t *testing.T) {
 	entries, err := os.ReadDir(bufDir)
 	require.NoError(t, err)
 	require.Equal(t, 0, len(entries))
+}
+
+// Test that a 410 is neither retried nor buffered
+func TestLogUploader_410NotRetriedOrBuffered(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	dnsPath := filepath.Join(tmpDir, "dns.csv")
+	connPath := filepath.Join(tmpDir, "conn.csv")
+	require.NoError(t, os.WriteFile(dnsPath, []byte("h\na\n"), 0600))
+	require.NoError(t, os.WriteFile(connPath, []byte("h\nb\n"), 0600))
+
+	// Only one response: a retry would hit the mock's "unexpected call" error
+	mock := &mockPublishClient{uploadResponses: []uploadResponse{
+		{status: "gone", statusCode: 410, message: "gone", err: nil},
+	}}
+
+	uploader := &LogUploader{
+		client:           mock,
+		apiKey:           "k",
+		networkID:        "Test-Network-01",
+		retryCount:       3,
+		retryDelay:       time.Millisecond,
+		compressFunc:     compressData,
+		maxPayloadSizeMB: 25,
+		bufferDir:        filepath.Join(tmpDir, "buffer"),
+		bufferMaxAge:     2 * time.Hour,
+	}
+
+	err := uploader.UploadLogs(context.Background(), LogFiles{DNSPath: dnsPath, ConnPath: connPath})
+	require.True(t, errors.Is(err, ErrAPIGone), "expected ErrAPIGone, got: %v", err)
+	require.Equal(t, 1, mock.currentCall)
+
+	_, err = os.Stat(uploader.bufferDir)
+	require.True(t, os.IsNotExist(err), "a 410 payload must not be buffered")
+}
+
+// Test that a 410 while flushing the buffer stops before sending the current payload
+func TestLogUploader_410DuringFlushStops(t *testing.T) {
+	tmpDir := t.TempDir()
+	bufDir := filepath.Join(tmpDir, "buffer")
+	require.NoError(t, os.MkdirAll(bufDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(bufDir, "buf_20000101T000000Z_1.bin"), []byte("x"), 0o600))
+
+	dnsPath := filepath.Join(tmpDir, "dns.csv")
+	connPath := filepath.Join(tmpDir, "conn.csv")
+	require.NoError(t, os.WriteFile(dnsPath, []byte("h\na\n"), 0600))
+	require.NoError(t, os.WriteFile(connPath, []byte("h\nb\n"), 0600))
+
+	mock := &mockPublishClient{uploadResponses: []uploadResponse{
+		{status: "gone", statusCode: 410, message: "gone", err: nil},
+	}}
+
+	uploader := &LogUploader{
+		client:           mock,
+		apiKey:           "k",
+		networkID:        "Test-Network-01",
+		retryCount:       3,
+		retryDelay:       time.Millisecond,
+		compressFunc:     compressData,
+		maxPayloadSizeMB: 25,
+		bufferDir:        bufDir,
+		bufferMaxAge:     2 * time.Hour,
+	}
+
+	err := uploader.UploadLogs(context.Background(), LogFiles{DNSPath: dnsPath, ConnPath: connPath})
+	require.True(t, errors.Is(err, ErrAPIGone), "expected ErrAPIGone, got: %v", err)
+	require.Equal(t, 1, mock.currentCall)
+
+	// The buffered payload stays for a later run, and the current payload is not added
+	entries, err := os.ReadDir(bufDir)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.Equal(t, "buf_20000101T000000Z_1.bin", entries[0].Name())
 }

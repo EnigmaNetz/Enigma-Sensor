@@ -14,7 +14,6 @@ func intPtr(v int) *int { return &v }
 func newBaseConfig() Config {
 	cfg := Config{}
 	cfg.NetworkID = "original-network"
-	cfg.Logging.Level = "info"
 	cfg.Logging.File = "/var/log/sensor.log"
 	cfg.Logging.MaxSizeMB = 50
 	cfg.Logging.LogRetentionDays = 7
@@ -54,14 +53,14 @@ func TestApplyEnvOverrides_StringTopLevel(t *testing.T) {
 
 func TestApplyEnvOverrides_StringNested(t *testing.T) {
 	cfg := newBaseConfig()
-	t.Setenv("SENSOR_LOGGING_LEVEL", "debug")
+	t.Setenv("SENSOR_LOGGING_FILE", "/tmp/override.log")
 
 	err := ApplyEnvOverrides(&cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.Logging.Level != "debug" {
-		t.Errorf("expected Logging.Level to be %q, got %q", "debug", cfg.Logging.Level)
+	if cfg.Logging.File != "/tmp/override.log" {
+		t.Errorf("expected Logging.File to be %q, got %q", "/tmp/override.log", cfg.Logging.File)
 	}
 }
 
@@ -226,9 +225,6 @@ func TestApplyEnvOverrides_UnsetEnvDoesNotOverride(t *testing.T) {
 	if cfg.NetworkID != original.NetworkID {
 		t.Errorf("NetworkID changed: expected %q, got %q", original.NetworkID, cfg.NetworkID)
 	}
-	if cfg.Logging.Level != original.Logging.Level {
-		t.Errorf("Logging.Level changed: expected %q, got %q", original.Logging.Level, cfg.Logging.Level)
-	}
 	if cfg.Logging.File != original.Logging.File {
 		t.Errorf("Logging.File changed: expected %q, got %q", original.Logging.File, cfg.Logging.File)
 	}
@@ -297,7 +293,7 @@ func TestApplyEnvOverrides_InvalidFloat(t *testing.T) {
 func TestApplyEnvOverrides_MultipleOverridesAtOnce(t *testing.T) {
 	cfg := newBaseConfig()
 	t.Setenv("SENSOR_NETWORK_ID", "multi-test-network")
-	t.Setenv("SENSOR_LOGGING_LEVEL", "error")
+	t.Setenv("SENSOR_CAPTURE_INTERFACE", "eth1")
 	t.Setenv("SENSOR_CAPTURE_WINDOW_SECONDS", "300")
 	t.Setenv("SENSOR_ENIGMA_API_API_KEY", "multi-key-123")
 	t.Setenv("SENSOR_ZEEK_SAMPLING_PERCENTAGE", "75.5")
@@ -312,8 +308,8 @@ func TestApplyEnvOverrides_MultipleOverridesAtOnce(t *testing.T) {
 	if cfg.NetworkID != "multi-test-network" {
 		t.Errorf("NetworkID: expected %q, got %q", "multi-test-network", cfg.NetworkID)
 	}
-	if cfg.Logging.Level != "error" {
-		t.Errorf("Logging.Level: expected %q, got %q", "error", cfg.Logging.Level)
+	if cfg.Capture.Interface != "eth1" {
+		t.Errorf("Capture.Interface: expected %q, got %q", "eth1", cfg.Capture.Interface)
 	}
 	if cfg.Capture.WindowSeconds != 300 {
 		t.Errorf("Capture.WindowSeconds: expected 300, got %d", cfg.Capture.WindowSeconds)
@@ -358,7 +354,7 @@ func TestApplyEnvOverrides_AllFieldEnvVarNames(t *testing.T) {
 	// Each entry is envVarName -> description for human readability.
 	type fieldSpec struct {
 		envVar      string
-		description string // e.g. "NetworkID" or "Logging.Level"
+		description string // e.g. "NetworkID" or "Logging.File"
 	}
 
 	var expected []fieldSpec

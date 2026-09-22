@@ -125,7 +125,10 @@ Run `enigma-sensor-windows-<version>.exe` from
 
 The sensor writes its log twice:
 
-- `C:\ProgramData\EnigmaSensor\logs\enigma-sensor.log`: the service's console output.
+- `C:\ProgramData\EnigmaSensor\logs\enigma-sensor.log`: the service's console output. NSSM
+  rotates it once it passes 50 MB, checked at service start and while running, renaming the old
+  file with a timestamp.
+  The sensor deletes rotated files older than `logging.log_retention_days`.
 - `C:\Program Files\EnigmaSensor\logs\enigma-sensor.log`: the sensor's own rotated log.
 
 ```powershell
@@ -214,7 +217,7 @@ Invalid values stop the sensor at startup with a message naming the field. The p
 | `enigma_api.upload` | `false` | Upload logs. The installers set `true` |
 | `enigma_api.ca_cert_file` | none | PEM (Privacy-Enhanced Mail format) CA (certificate authority) certificate to trust instead of the system store; for on-prem |
 | `enigma_api.max_payload_size_mb` | `25` | Logs larger than this are split and uploaded in several requests |
-| `capture.interface` | `any` | Interface to capture on, or a comma-separated list. On Linux, capturing several named interfaces needs `mergecap` (from Wireshark) to combine them |
+| `capture.interface` | `any` | Interface to capture on, or a comma-separated list. On Linux and macOS, several named interfaces are captured separately and merged by timestamp. They must share a link type (for example, all Ethernet). If they do not, the sensor logs the error and exits, and the service manager restarts it into the same error, so nothing is uploaded until `capture.interface` is fixed |
 | `capture.window_seconds` | none | Length of each capture window. The installers and example config use `60` |
 | `capture.loop` | `false` | Keep capturing. `false` runs one window and exits. The installers set `true` |
 | `capture.output_dir` | none | Working directory for captures and Zeek output |
@@ -229,8 +232,6 @@ Invalid values stop the sensor at startup with a message naming the field. The p
 | `logging.log_retention_days` | `7` | Days to keep rotated logs (1 to 30) |
 | `logging.max_backups` | `5` | Rotated logs to keep (1 to 10) |
 | `pcap_ingest.*` | disabled | Offline PCAP processing, see below |
-
-`logging.level` is accepted but currently has no effect.
 
 ### Environment variable overrides
 
@@ -264,9 +265,12 @@ IPv4 addresses of the sensor host, and a session ID.
 If an upload fails three times, it is saved to `buffering.dir` and retried before the next upload,
 until it is older than `buffering.max_age_hours`.
 
-If the API rejects the API key (for example, a revoked key), the sensor currently treats it like any
-other failed upload: it keeps capturing, retries, and buffers. Check the log for `410 Gone` if a
-sensor's data stops arriving.
+If the API rejects the API key with `410 Gone` (for example, a revoked key), the upload is not
+retried or buffered, and the sensor stops capturing and exits with code 0. The Linux service
+(systemd `Restart=on-failure`) and the Windows service (NSSM set to exit on code 0) stay stopped.
+Docker's `--restart=unless-stopped` starts the container again, so it captures one more window,
+gets another 410 and exits again. Check the log for `410 Gone` if a sensor's data stops arriving,
+and start the service again after fixing the key.
 
 ---
 

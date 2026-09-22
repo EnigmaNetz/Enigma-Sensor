@@ -85,7 +85,7 @@ func defaultSources() sources {
 	case "windows":
 		// The Windows installer keeps config.example.json's relative paths,
 		// which already resolve against the executable's directory.
-		src.serviceLogDir = `C:\ProgramData\EnigmaSensor\logs`
+		src.serviceLogDir = config.WindowsServiceLogDir
 	case "linux":
 		// Matches the config installer/install-enigma-sensor.sh writes.
 		src.installLogDir = "/var/log/enigma-sensor"

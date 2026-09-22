@@ -6,7 +6,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -187,6 +186,8 @@ func (c *LinuxCapturer) runMultiInterfaceCapture(ctx context.Context, interfaces
 
 			// Wait for process to complete
 			if err := cmd.Wait(); err != nil {
+				// Nothing will process a failed interface's partial capture
+				os.Remove(outputFile)
 				mu.Lock()
 				captureErrors = append(captureErrors, fmt.Errorf("tcpdump capture failed for interface %s: %v", interfaceName, err))
 				mu.Unlock()
@@ -223,8 +224,12 @@ func (c *LinuxCapturer) runMultiInterfaceCapture(ctx context.Context, interfaces
 
 	// Multiple files: merge them into a single output file
 	mergedFile := filepath.Join(c.outputDir, fmt.Sprintf("capture_%s.pcap", timestamp))
-	if err := c.mergePcapFiles(outputFiles, mergedFile); err != nil {
-		return "", fmt.Errorf("failed to merge pcap files: %v", err)
+	if err := mergePcapFiles(outputFiles, mergedFile); err != nil {
+		// Nothing will process these files, so don't leave full-packet captures on disk
+		for _, file := range outputFiles {
+			os.Remove(file)
+		}
+		return "", fmt.Errorf("failed to merge pcap files: %w", err)
 	}
 
 	// Clean up individual interface files after successful merge
@@ -234,52 +239,4 @@ func (c *LinuxCapturer) runMultiInterfaceCapture(ctx context.Context, interfaces
 
 	log.Printf("[capture] Successfully merged %d interface captures into: %s", len(outputFiles), mergedFile)
 	return mergedFile, nil
-}
-
-// mergePcapFiles merges multiple pcap files into a single file using mergecap
-func (c *LinuxCapturer) mergePcapFiles(inputFiles []string, outputFile string) error {
-	args := []string{"-w", outputFile}
-	args = append(args, inputFiles...)
-
-	cmd := commandContext("mergecap", args...)
-	if err := cmd.Run(); err != nil {
-		// If mergecap is not available, use tcpdump to concatenate
-		return c.concatenatePcapFiles(inputFiles, outputFile)
-	}
-
-	return nil
-}
-
-// concatenatePcapFiles concatenates pcap files using tcpdump as fallback
-func (c *LinuxCapturer) concatenatePcapFiles(inputFiles []string, outputFile string) error {
-	// Use first file as base
-	if err := c.copyFile(inputFiles[0], outputFile); err != nil {
-		return fmt.Errorf("failed to copy first file %s: %v", inputFiles[0], err)
-	}
-
-	// Append remaining files (this is a simplified approach)
-	// In practice, proper pcap merging requires specialized tools
-	for _, file := range inputFiles[1:] {
-		// For now, just log the merge attempt
-		log.Printf("[capture] Would merge file: %s (mergecap not available)", file)
-	}
-	return nil
-}
-
-// copyFile copies a file from src to dst
-func (c *LinuxCapturer) copyFile(src, dst string) error {
-	input, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer input.Close()
-
-	output, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer output.Close()
-
-	_, err = io.Copy(output, input)
-	return err
 }

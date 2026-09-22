@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -90,7 +91,8 @@ type goneUploader struct {
 
 func (m *goneUploader) UploadLogs(ctx context.Context, files api.LogFiles) error {
 	atomic.AddInt32(m.calls, 1)
-	return api.ErrAPIGone
+	// Wrapped the way the real uploader wraps it (chunk wrap around the client wrap)
+	return fmt.Errorf("failed to upload chunk 1: %w", fmt.Errorf("API returned 410 Gone: %w", api.ErrAPIGone))
 }
 
 func minimalConfig(loop bool) *config.Config {
@@ -111,13 +113,11 @@ func minimalConfig(loop bool) *config.Config {
 			RetentionHours:       intPtr(24),
 		},
 		Logging: struct {
-			Level            string `json:"level"`
 			File             string `json:"file"`
 			MaxSizeMB        int64  `json:"max_size_mb"`
 			LogRetentionDays int    `json:"log_retention_days"`
 			MaxBackups       int    `json:"max_backups"`
 		}{
-			Level:            "info",
 			File:             "",
 			MaxSizeMB:        100,
 			LogRetentionDays: 1,
@@ -253,6 +253,106 @@ func TestRunSensor_StopsOnAPIGone(t *testing.T) {
 	t.Log("TestRunSensor_StopsOnAPIGone end reached")
 }
 
+// With loop on, only the 410 can end the run before the context deadline, so an
+// early return proves the capture loop saw the shutdown.
+func TestRunSensor_LoopStopsOnAPIGone(t *testing.T) {
+	var capCalls, procCalls, upCalls int32
+	cfg := minimalConfig(true)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	err := RunSensor(ctx, cfg,
+		&mockCapturer{calls: &capCalls},
+		&mockProcessor{calls: &procCalls},
+		&goneUploader{calls: &upCalls},
+		true, true,
+	)
+	if !errors.Is(err, ErrAPIGone) {
+		t.Fatalf("Expected ErrAPIGone, got: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("RunSensor kept looping after a 410 (returned after %v)", elapsed)
+	}
+	if ctx.Err() != nil {
+		t.Fatalf("RunSensor returned only because the context expired")
+	}
+
+	// Every capture must be cleaned up, including the ones that got a 410
+	for n := int32(1); n <= atomic.LoadInt32(&capCalls); n++ {
+		path := fmt.Sprintf("/tmp/fake_%d.pcap", n)
+		if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+			t.Errorf("%s was left on disk after a 410", path)
+		}
+	}
+}
+
+// waitingGoneUploader returns a 410 only once the capturer has made a few more
+// captures, so at least one is still queued when the only worker returns.
+type waitingGoneUploader struct {
+	capCalls *int32
+}
+
+func (m *waitingGoneUploader) UploadLogs(ctx context.Context, files api.LogFiles) error {
+	for atomic.LoadInt32(m.capCalls) < 3 {
+		time.Sleep(time.Millisecond)
+	}
+	return fmt.Errorf("API returned 410 Gone: %w", api.ErrAPIGone)
+}
+
+func TestRunSensor_APIGoneDeletesQueuedCaptures(t *testing.T) {
+	var capCalls, procCalls int32
+	cfg := minimalConfig(true)
+	cfg.Capture.MaxProcessingWorkers = 1
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := RunSensor(ctx, cfg,
+		&mockCapturer{calls: &capCalls},
+		&mockProcessor{calls: &procCalls},
+		&waitingGoneUploader{capCalls: &capCalls},
+		true, true,
+	)
+	if !errors.Is(err, ErrAPIGone) {
+		t.Fatalf("Expected ErrAPIGone, got: %v", err)
+	}
+	if atomic.LoadInt32(&procCalls) != 1 {
+		t.Fatalf("expected the single worker to process 1 capture, got %d", procCalls)
+	}
+	for n := int32(1); n <= atomic.LoadInt32(&capCalls); n++ {
+		path := fmt.Sprintf("/tmp/fake_%d.pcap", n)
+		if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+			t.Errorf("%s was left on disk after a 410", path)
+		}
+	}
+}
+
+// The ingest watcher only returns when its context ends, so a 410 from a
+// capture worker must still stop it rather than hang in wg.Wait.
+func TestRunSensor_APIGoneStopsIngestWatcher(t *testing.T) {
+	var capCalls, procCalls, upCalls int32
+	cfg := minimalConfig(false)
+	cfg.PcapIngest.Enabled = true
+	cfg.PcapIngest.WatchDir = t.TempDir() // stays empty, so the watcher never sees a 410 itself
+	cfg.PcapIngest.PollIntervalSeconds = 1
+	cfg.PcapIngest.FileStableSeconds = 1
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := RunSensor(ctx, cfg,
+		&mockCapturer{calls: &capCalls},
+		&mockProcessor{calls: &procCalls},
+		&goneUploader{calls: &upCalls},
+		true, true,
+	)
+	if !errors.Is(err, ErrAPIGone) {
+		t.Fatalf("Expected ErrAPIGone, got: %v", err)
+	}
+	if ctx.Err() != nil {
+		t.Fatalf("RunSensor returned only because the context expired: the ingest watcher kept it waiting")
+	}
+}
+
 func TestRunSensor_ConcurrentWorkers(t *testing.T) {
 	defer t.Log("TestRunSensor_ConcurrentWorkers completed")
 	var capCalls, procCalls int32
@@ -351,4 +451,43 @@ func TestValidateZipPath_RejectsPathTraversal(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPruneRotatedServiceLogs(t *testing.T) {
+	dir := t.TempDir()
+	old := time.Now().Add(-8 * 24 * time.Hour)
+	files := map[string]bool{ // name -> should survive
+		"enigma-sensor.log":                     true,  // live log, never pruned
+		"enigma-sensor-20260901T120000.000.log": false, // old rotated log
+		"enigma-sensor-20260920T120000.000.log": true,  // recent rotated log
+		"other-20260901T120000.000.log":         true,  // not ours
+	}
+	for name := range files {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if name != "enigma-sensor-20260920T120000.000.log" {
+			if err := os.Chtimes(path, old, old); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	pruneRotatedServiceLogs(dir, 7*24*time.Hour)
+
+	for name, survive := range files {
+		_, err := os.Stat(filepath.Join(dir, name))
+		if survive && err != nil {
+			t.Errorf("%s should have been kept: %v", name, err)
+		}
+		if !survive && !os.IsNotExist(err) {
+			t.Errorf("%s should have been deleted", name)
+		}
+	}
+}
+
+func TestPruneRotatedServiceLogs_MissingDir(t *testing.T) {
+	// Must not panic or create anything when the directory does not exist
+	pruneRotatedServiceLogs(filepath.Join(t.TempDir(), "absent"), time.Hour)
 }

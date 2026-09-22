@@ -125,7 +125,10 @@ Run `enigma-sensor-windows-<version>.exe` from
 
 The sensor writes its log twice:
 
-- `C:\ProgramData\EnigmaSensor\logs\enigma-sensor.log`: the service's console output.
+- `C:\ProgramData\EnigmaSensor\logs\enigma-sensor.log`: the service's console output. NSSM
+  rotates it once it passes 50 MB, checked at service start and while running, renaming the old
+  file with a timestamp.
+  The sensor deletes rotated files older than `logging.log_retention_days`.
 - `C:\Program Files\EnigmaSensor\logs\enigma-sensor.log`: the sensor's own rotated log.
 
 ```powershell

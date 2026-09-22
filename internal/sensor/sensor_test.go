@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -450,4 +451,43 @@ func TestValidateZipPath_RejectsPathTraversal(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPruneRotatedServiceLogs(t *testing.T) {
+	dir := t.TempDir()
+	old := time.Now().Add(-8 * 24 * time.Hour)
+	files := map[string]bool{ // name -> should survive
+		"enigma-sensor.log":                     true,  // live log, never pruned
+		"enigma-sensor-20260901T120000.000.log": false, // old rotated log
+		"enigma-sensor-20260920T120000.000.log": true,  // recent rotated log
+		"other-20260901T120000.000.log":         true,  // not ours
+	}
+	for name := range files {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if name != "enigma-sensor-20260920T120000.000.log" {
+			if err := os.Chtimes(path, old, old); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	pruneRotatedServiceLogs(dir, 7*24*time.Hour)
+
+	for name, survive := range files {
+		_, err := os.Stat(filepath.Join(dir, name))
+		if survive && err != nil {
+			t.Errorf("%s should have been kept: %v", name, err)
+		}
+		if !survive && !os.IsNotExist(err) {
+			t.Errorf("%s should have been deleted", name)
+		}
+	}
+}
+
+func TestPruneRotatedServiceLogs_MissingDir(t *testing.T) {
+	// Must not panic or create anything when the directory does not exist
+	pruneRotatedServiceLogs(filepath.Join(t.TempDir(), "absent"), time.Hour)
 }

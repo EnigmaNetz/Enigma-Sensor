@@ -381,6 +381,10 @@ func (c *Config) Redacted() Config {
 	return r
 }
 
+// WindowsServiceLogDir is where NSSM writes the Windows service's console output
+// (set in installer/windows/enigma-sensor-installer.iss).
+const WindowsServiceLogDir = `C:\ProgramData\EnigmaSensor\logs`
+
 // Paths returns the config files the sensor reads, in lookup order: the system
 // path an installer writes, then config.json in the working directory.
 func Paths(goos string) []string {

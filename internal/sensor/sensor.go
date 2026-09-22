@@ -237,6 +237,33 @@ func deletePCAPFile(pcapPath string, logPrefix string) {
 	}
 }
 
+// pruneRotatedServiceLogs deletes rotated service logs older than retention.
+// NSSM rotates enigma-sensor.log to enigma-sensor-<timestamp>.log but never
+// deletes the old files, so without this they grow without limit.
+func pruneRotatedServiceLogs(dir string, retention time.Duration) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-retention)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if matched, _ := filepath.Match("enigma-sensor-*.log", entry.Name()); !matched {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || !info.ModTime().Before(cutoff) {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		if err := os.Remove(path); err != nil {
+			log.Printf("[cleanup] Failed to delete rotated service log %s: %v", path, err)
+		}
+	}
+}
+
 // deleteZeekOutDir removes the zeek output directory containing the given PCAP file.
 func deleteZeekOutDir(pcapPath string, logPrefix string) {
 	zeekDir := filepath.Dir(pcapPath)
@@ -447,6 +474,9 @@ func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, proce
 			cleanOldZeekOutFolders(cfg.Capture.OutputDir, *cfg.Capture.RetentionHours)
 		} else if cfg.Capture.RetentionHours == nil {
 			cleanOldZeekOutFolders(cfg.Capture.OutputDir, cfg.Logging.LogRetentionDays*24)
+		}
+		if runtime.GOOS == "windows" {
+			pruneRotatedServiceLogs(config.WindowsServiceLogDir, time.Duration(cfg.Logging.LogRetentionDays)*24*time.Hour)
 		}
 		select {
 		case <-ctx.Done():

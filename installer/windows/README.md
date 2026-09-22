@@ -70,7 +70,7 @@ Uninstalling stops and removes the service. The config in `C:\ProgramData\Enigma
 | Path | Contents |
 | --- | --- |
 | `C:\ProgramData\EnigmaSensor\config.json` | Config, including the API key |
-| `C:\ProgramData\EnigmaSensor\logs\enigma-sensor.log` | Service console output. NSSM is not configured to rotate it |
+| `C:\ProgramData\EnigmaSensor\logs\enigma-sensor.log` | Service console output. NSSM rotates it once it passes 50 MB, checked at service start and while running; the sensor deletes rotated files older than `logging.log_retention_days` |
 | `C:\Program Files\EnigmaSensor\logs\enigma-sensor.log` | The sensor's own log, rotated per the `logging` settings |
 | `C:\Program Files\EnigmaSensor\captures\` | Captures and Zeek output |
 | `C:\Program Files\EnigmaSensor\zeek-windows\` | Extracted Zeek runtime |

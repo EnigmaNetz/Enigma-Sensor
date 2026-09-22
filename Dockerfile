@@ -1,7 +1,7 @@
 # Stage 1: builder
-# golang:1.24-bookworm provides Go 1.24 on Debian Bookworm (amd64)
+# golang:1.25-bookworm provides Go 1.25 on Debian Bookworm (amd64)
 # libpcap-dev is required at build time for github.com/google/gopacket (CGO)
-FROM golang:1.24-bookworm AS builder
+FROM golang:1.25-bookworm AS builder
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libpcap-dev \

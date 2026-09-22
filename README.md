@@ -262,9 +262,12 @@ IPv4 addresses of the sensor host, and a session ID.
 If an upload fails three times, it is saved to `buffering.dir` and retried before the next upload,
 until it is older than `buffering.max_age_hours`.
 
-If the API rejects the API key (for example, a revoked key), the sensor currently treats it like any
-other failed upload: it keeps capturing, retries, and buffers. Check the log for `410 Gone` if a
-sensor's data stops arriving.
+If the API rejects the API key with `410 Gone` (for example, a revoked key), the upload is not
+retried or buffered, and the sensor stops capturing and exits with code 0. The Linux service
+(systemd `Restart=on-failure`) and the Windows service (NSSM set to exit on code 0) stay stopped.
+Docker's `--restart=unless-stopped` starts the container again, so it captures one more window,
+gets another 410 and exits again. Check the log for `410 Gone` if a sensor's data stops arriving,
+and start the service again after fixing the key.
 
 ---
 

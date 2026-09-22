@@ -327,8 +327,13 @@ func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, proce
 					JA4SPath:   result.JA4SPath,
 				})
 				if uploadErr != nil {
-					if uploadErr == api.ErrAPIGone {
-						log.Printf("[sensor] Received 410 Gone from API because the API key is invalid. Stopping sensor and service as instructed.")
+					if errors.Is(uploadErr, api.ErrAPIGone) {
+						log.Printf("[sensor] Received 410 Gone from API: the API key is invalid or revoked. Stopping the sensor; update enigma_api.api_key and start the service again.")
+						// The service stays stopped after a 410, so nothing else would clean this capture up
+						deletePCAPFile(absPCAPPath, prefix)
+						if cfg.Capture.RetentionHours != nil && *cfg.Capture.RetentionHours == 0 {
+							deleteZeekOutDir(absPCAPPath, prefix)
+						}
 						triggerShutdown()
 						return
 					}
@@ -351,6 +356,11 @@ func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, proce
 		go worker(i)
 	}
 
+	// The watcher gets its own context so RunSensor can stop it on any return
+	// (410, signal, capture error); otherwise wg.Wait below would block forever
+	watchCtx, cancelWatch := context.WithCancel(ctx)
+	defer cancelWatch()
+
 	// Start PCAP ingest watcher if enabled
 	if cfg.PcapIngest.Enabled {
 		watcher := pcapingest.NewWatcher(pcapingest.WatcherConfig{
@@ -364,7 +374,7 @@ func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, proce
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := watcher.Run(ctx); err != nil {
+			if err := watcher.Run(watchCtx); err != nil {
 				if errors.Is(err, api.ErrAPIGone) {
 					triggerShutdown()
 				}
@@ -389,7 +399,20 @@ func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, proce
 
 	defer func() {
 		closeQueue()
+		cancelWatch()
 		wg.Wait()
+		// Workers return after a 410 and the service stays stopped, so delete
+		// any capture still queued rather than leaving it on disk
+		for pcapPath := range pcapQueue {
+			absPCAPPath, err := filepath.Abs(pcapPath)
+			if err != nil {
+				continue
+			}
+			deletePCAPFile(absPCAPPath, "[shutdown-cleanup]")
+			if cfg.Capture.RetentionHours != nil && *cfg.Capture.RetentionHours == 0 {
+				deleteZeekOutDir(absPCAPPath, "[shutdown-cleanup]")
+			}
+		}
 		// Check if any worker signaled API Gone during processing
 		select {
 		case <-shutdownCh:

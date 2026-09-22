@@ -163,8 +163,11 @@ func (u *LogUploader) uploadLogsSingle(ctx context.Context, files LogFiles) erro
 		return fmt.Errorf("failed to prepare log data: %v", err)
 	}
 
-	// Best-effort flush of any buffered payloads first
-	_ = u.flushBuffer(ctx)
+	// Best-effort flush of any buffered payloads first. A 410 during the flush
+	// means the key is revoked, so there is no point sending this payload either.
+	if err := u.flushBuffer(ctx); errors.Is(err, ErrAPIGone) {
+		return err
+	}
 
 	// Upload with retries
 	var lastErr error
@@ -173,6 +176,10 @@ func (u *LogUploader) uploadLogsSingle(ctx context.Context, files LogFiles) erro
 			return ctx.Err()
 		}
 		if err := u.upload(ctx, combinedData); err != nil {
+			// A 410 is final: retrying or buffering would only resend to a revoked key
+			if errors.Is(err, ErrAPIGone) {
+				return err
+			}
 			lastErr = err
 			time.Sleep(u.retryDelay)
 			continue
@@ -298,7 +305,7 @@ func (u *LogUploader) uploadLogsChunked(ctx context.Context, files LogFiles) err
 
 		// Upload this chunk
 		if err := u.uploadLogsSingle(ctx, chunkFiles); err != nil {
-			return fmt.Errorf("failed to upload chunk %d: %v", i+1, err)
+			return fmt.Errorf("failed to upload chunk %d: %w", i+1, err)
 		}
 	}
 

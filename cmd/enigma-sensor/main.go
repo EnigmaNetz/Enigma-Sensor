@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -139,8 +140,8 @@ func main() {
 	}
 
 	if err := sensor.RunSensor(ctx, cfg, capturer, proc, uploader); err != nil {
-		if err == api.ErrAPIGone || err == sensor.ErrAPIGone {
-			log.Printf("Sensor stopped due to 410 Gone from API because the API key is invalid. Exiting as instructed.")
+		if errors.Is(err, api.ErrAPIGone) || errors.Is(err, sensor.ErrAPIGone) {
+			log.Printf("Sensor stopped due to 410 Gone from API: the API key is invalid or revoked. Update enigma_api.api_key and start the service again.")
 			os.Exit(0)
 		}
 		log.Fatalf("Sensor exited with error: %v", err)

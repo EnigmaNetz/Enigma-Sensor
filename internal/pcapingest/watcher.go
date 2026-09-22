@@ -197,7 +197,7 @@ func (w *Watcher) processFile(ctx context.Context, srcPath, processingDir, proce
 			JA4SPath:   result.JA4SPath,
 		})
 		if uploadErr != nil {
-			if uploadErr == api.ErrAPIGone {
+			if errors.Is(uploadErr, api.ErrAPIGone) {
 				// Move to processed before returning the error
 				dstPath := filepath.Join(processedDir, fileName)
 				_ = os.Rename(procPath, dstPath)

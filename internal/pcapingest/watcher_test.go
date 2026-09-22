@@ -3,6 +3,7 @@ package pcapingest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -35,7 +36,8 @@ type mockUploader struct {
 func (m *mockUploader) UploadLogs(ctx context.Context, files api.LogFiles) error {
 	m.calls++
 	if m.goneErr {
-		return api.ErrAPIGone
+		// Wrapped the way the real uploader wraps it
+		return fmt.Errorf("failed to upload chunk 1: %w", fmt.Errorf("API returned 410 Gone: %w", api.ErrAPIGone))
 	}
 	if m.fail {
 		return errors.New("upload failed")

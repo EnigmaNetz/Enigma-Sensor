@@ -270,6 +270,8 @@ Filename: "{app}\nssm.exe"; Parameters: "install EnigmaSensor enigma-sensor-wind
 Filename: "{app}\nssm.exe"; Parameters: "set EnigmaSensor AppDirectory {app}"; WorkingDir: "{app}"
 Filename: "{app}\nssm.exe"; Parameters: "set EnigmaSensor AppStdout C:\\ProgramData\\EnigmaSensor\\logs\\enigma-sensor.log"; WorkingDir: "{app}"
 Filename: "{app}\nssm.exe"; Parameters: "set EnigmaSensor AppStderr C:\\ProgramData\\EnigmaSensor\\logs\\enigma-sensor.log"; WorkingDir: "{app}"
+; Exit 0 means the sensor chose to stop (a 410 for a revoked API key, or capture.loop off); stay stopped
+Filename: "{app}\nssm.exe"; Parameters: "set EnigmaSensor AppExit 0 Exit"; WorkingDir: "{app}"
 Filename: "{app}\nssm.exe"; Parameters: "set EnigmaSensor Start SERVICE_AUTO_START"; WorkingDir: "{app}"
 Filename: "{app}\nssm.exe"; Parameters: "set EnigmaSensor ObjectName LocalSystem"; WorkingDir: "{app}"
 Filename: "{app}\nssm.exe"; Parameters: "start EnigmaSensor"; WorkingDir: "{app}"

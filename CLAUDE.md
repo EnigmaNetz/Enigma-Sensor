@@ -228,8 +228,8 @@ config in the repo.
 - `metadata` is a string map from `internal/metadata/collector.go`: `network_id`, `machine_id`,
   `sensor_version`, `os_name`, `os_version`, `architecture`, `host_ips`, `zeek_version`,
   `session_id`.
-- Success is `statusCode` 200 in the response body. `statusCode` 410 means the key is invalid and is
-  meant to stop the sensor (exit 0), but see the 410 trap below.
+- Success is `statusCode` 200 in the response body. `statusCode` 410 means the key is invalid: the
+  upload is not retried or buffered, and the sensor stops and exits 0.
 - Payloads over `enigma_api.max_payload_size_mb` are split by line into several uploads.
 - An upload is tried 3 times, 5 seconds apart, then written to `buffering.dir`. Buffered payloads
   are retried oldest first before the next upload and purged after `buffering.max_age_hours`.
@@ -269,10 +269,10 @@ and a contract change touches all of those repos.
   reflection-based `SENSOR_*` overrides can set them. Lists are comma-separated strings (see
   `zeek.excluded_subnets`). Add a default and bounds in `ValidateAndSetDefaults` and a row in the
   README configuration table.
-- **410 shutdown does not trigger today (known, to be ticketed).** `client.go` wraps `ErrAPIGone`,
-  but `sensor.go`, `pcapingest/watcher.go` and `main.go` compare errors with `==`, so a rejected key
-  is retried and buffered like any failure. Use `errors.Is`. The mock uploaders in `sensor_test.go`
-  and `watcher_test.go` return the bare error, which is why tests pass.
+- **`ErrAPIGone` is always wrapped.** `client.go` wraps it, and the chunked upload wraps it again.
+  Check it with `errors.Is`, never `==`; the test mocks return wrapped errors to catch this. Exit 0
+  is how the sensor says "stay stopped": systemd (`Restart=on-failure`) and NSSM (`AppExit 0 Exit`)
+  honour it, Docker's `--restart=unless-stopped` does not.
 - **Never print the config directly.** `%+v` on `Config` prints `enigma_api.api_key`; log
   `cfg.Redacted()` instead. `collect-logs` masks `config.json` by its JSON structure
   (`internal/collect_logs/redact_config.go`): every string under `enigma_api` except `server` and

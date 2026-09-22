@@ -54,7 +54,7 @@ if [ -n "$missing" ]; then
   echo "ERROR: missing required tools:$missing"
   echo "       Install them and re-run, for example:"
   echo "       sudo apt-get update && sudo apt-get install -y dos2unix fakeroot"
-  echo "       Go 1.24+ and Docker must also be on PATH."
+  echo "       Go 1.25+ and Docker must also be on PATH."
   exit 1
 fi
 

@@ -12,7 +12,7 @@ The default branch is `main`. Branch from it and open pull requests against it.
 
 ## Prerequisites
 
-- Go 1.24
+- Go 1.25
 - Linux or macOS, to run the sensor: root, `tcpdump`, and Zeek 8.0.x at `/opt/zeek/bin/zeek` (the
   path is fixed in `internal/processor/linux/processor.go`)
 - Windows, to run the sensor: an administrator shell. `pktmon` is built in; Npcap is optional. Zeek

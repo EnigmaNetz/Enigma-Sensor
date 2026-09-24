@@ -38,5 +38,23 @@ jobs:
       if: runner.os != 'Windows'
       run: rm -f .out
 
+    # The ubuntu leg also writes a coverage profile (atomic is required with -race).
+    # Platform-gated packages are measured only on the leg that runs them.
     - name: Run tests
-      run: go test -v -race ./...
+      run: go test -v -race ${{ matrix.os == 'ubuntu-latest' && '-coverprofile=coverage.out -covermode=atomic' || '' }} ./...
+
+    - name: Coverage summary (report-only)
+      if: always() && matrix.os == 'ubuntu-latest'
+      continue-on-error: true
+      run: |
+        [ -f coverage.out ] && go tool cover -func=coverage.out | tail -1
+        go run ./.github/scripts/coveragesummary coverage.out >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload coverage report
+      if: always() && matrix.os == 'ubuntu-latest'
+      continue-on-error: true
+      uses: actions/upload-artifact@v7
+      with:
+        name: coverage-unit
+        path: coverage.out
+        if-no-files-found: ignore

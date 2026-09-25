@@ -38,5 +38,63 @@ jobs:
       if: runner.os != 'Windows'
       run: rm -f .out
 
+    # The ubuntu leg also writes a coverage profile (atomic is required with -race).
+    # Platform-gated packages are measured only on the leg that runs them.
     - name: Run tests
-      run: go test -v -race ./...
+      run: go test -v -race ${{ matrix.os == 'ubuntu-latest' && '-coverprofile=coverage.out -covermode=atomic' || '' }} ./...
+
+    # ReportGenerator reads Cobertura, not Go profiles; the converter comes through Go's
+    # checksum-verified module proxy. It needs Go >= 1.25, so this step alone may fetch
+    # that toolchain; the tests above still run on the matrix Go version.
+    - name: Convert coverage to Cobertura
+      if: always() && matrix.os == 'ubuntu-latest'
+      continue-on-error: true
+      env:
+        GOTOOLCHAIN: auto
+      run: |
+        if [ -f coverage.out ]; then
+          go tool cover -func=coverage.out | tail -1
+          go run github.com/boumenot/gocover-cobertura@v1.5.0 < coverage.out > coverage.xml
+        else
+          echo "No coverage.out was produced."
+        fi
+
+    - name: Set up .NET for ReportGenerator
+      if: always() && matrix.os == 'ubuntu-latest'
+      continue-on-error: true
+      uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
+      with:
+        dotnet-version: 8.x
+
+    - name: Summarize unit coverage (report-only)
+      if: always() && matrix.os == 'ubuntu-latest'
+      continue-on-error: true
+      uses: danielpalme/ReportGenerator-GitHub-Action@d3ebf1f760f7d8ab92cc44d9bcfee7ad73722a31  # v5.5.11
+      with:
+        reports: coverage.xml
+        targetdir: coverage-report-unit
+        reporttypes: MarkdownSummaryGithub;JsonSummary
+        title: Unit coverage (report-only)
+
+    - name: Add unit coverage to the job summary
+      if: always() && matrix.os == 'ubuntu-latest'
+      continue-on-error: true
+      run: |
+        if [ -f coverage-report-unit/SummaryGithub.md ]; then
+          cat coverage-report-unit/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY"
+        else
+          echo "No unit coverage report was produced." >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+    - name: Upload coverage report
+      if: always() && matrix.os == 'ubuntu-latest'
+      continue-on-error: true
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      with:
+        name: coverage-unit
+        path: |
+          coverage.out
+          coverage.xml
+          coverage-report-unit/Summary.json
+          coverage-report-unit/SummaryGithub.md
+        if-no-files-found: ignore

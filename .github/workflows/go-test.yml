@@ -44,10 +44,13 @@ jobs:
       run: go test -v -race ${{ matrix.os == 'ubuntu-latest' && '-coverprofile=coverage.out -covermode=atomic' || '' }} ./...
 
     # ReportGenerator reads Cobertura, not Go profiles; the converter comes through Go's
-    # checksum-verified module proxy.
+    # checksum-verified module proxy. It needs Go >= 1.25, so this step alone may fetch
+    # that toolchain; the tests above still run on the matrix Go version.
     - name: Convert coverage to Cobertura
       if: always() && matrix.os == 'ubuntu-latest'
       continue-on-error: true
+      env:
+        GOTOOLCHAIN: auto
       run: |
         if [ -f coverage.out ]; then
           go tool cover -func=coverage.out | tail -1

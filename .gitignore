@@ -11,3 +11,6 @@ zeek-windows/
 results/
 .mcp.json
 installer/debian/enigma-sensor_*_amd64/
+
+# Normalized coverage report written by CI (go-test.yml)
+coverage-normalized.json

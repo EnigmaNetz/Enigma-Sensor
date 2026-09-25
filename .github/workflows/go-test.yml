@@ -43,12 +43,45 @@ jobs:
     - name: Run tests
       run: go test -v -race ${{ matrix.os == 'ubuntu-latest' && '-coverprofile=coverage.out -covermode=atomic' || '' }} ./...
 
-    - name: Coverage summary (report-only)
+    # ReportGenerator reads Cobertura, not Go profiles; the converter comes through Go's
+    # checksum-verified module proxy.
+    - name: Convert coverage to Cobertura
       if: always() && matrix.os == 'ubuntu-latest'
       continue-on-error: true
       run: |
-        [ -f coverage.out ] && go tool cover -func=coverage.out | tail -1
-        go run ./.github/scripts/coveragesummary -suite unit -json-out coverage-normalized.json coverage.out >> "$GITHUB_STEP_SUMMARY"
+        if [ -f coverage.out ]; then
+          go tool cover -func=coverage.out | tail -1
+          go run github.com/boumenot/gocover-cobertura@v1.5.0 < coverage.out > coverage.xml
+        else
+          echo "No coverage.out was produced."
+        fi
+
+    - name: Set up .NET for ReportGenerator
+      if: always() && matrix.os == 'ubuntu-latest'
+      continue-on-error: true
+      uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
+      with:
+        dotnet-version: 8.x
+
+    - name: Summarize unit coverage (report-only)
+      if: always() && matrix.os == 'ubuntu-latest'
+      continue-on-error: true
+      uses: danielpalme/ReportGenerator-GitHub-Action@d3ebf1f760f7d8ab92cc44d9bcfee7ad73722a31  # v5.5.11
+      with:
+        reports: coverage.xml
+        targetdir: coverage-report-unit
+        reporttypes: MarkdownSummaryGithub;JsonSummary
+        title: Unit coverage (report-only)
+
+    - name: Add unit coverage to the job summary
+      if: always() && matrix.os == 'ubuntu-latest'
+      continue-on-error: true
+      run: |
+        if [ -f coverage-report-unit/SummaryGithub.md ]; then
+          cat coverage-report-unit/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY"
+        else
+          echo "No unit coverage report was produced." >> "$GITHUB_STEP_SUMMARY"
+        fi
 
     - name: Upload coverage report
       if: always() && matrix.os == 'ubuntu-latest'
@@ -58,5 +91,7 @@ jobs:
         name: coverage-unit
         path: |
           coverage.out
-          coverage-normalized.json
+          coverage.xml
+          coverage-report-unit/Summary.json
+          coverage-report-unit/SummaryGithub.md
         if-no-files-found: ignore

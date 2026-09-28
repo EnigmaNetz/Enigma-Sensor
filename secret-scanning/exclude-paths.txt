@@ -2,4 +2,5 @@ secret-scanning
 .git\\
 
 # Third-party Windows Zeek runtime bundle (~78 MB archive), not our code.
-installer/windows/zeek-runtime-win64\.zip$
+# It lived at internal/processor/windows/ before 2025-05-08, so match the file name anywhere.
+(^|/)zeek-runtime-win64\.zip$

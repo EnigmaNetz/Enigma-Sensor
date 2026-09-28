@@ -1,0 +1,5 @@
+secret-scanning
+.git\\
+
+# Third-party Windows Zeek runtime bundle (~78 MB archive), not our code.
+installer/windows/zeek-runtime-win64\.zip$

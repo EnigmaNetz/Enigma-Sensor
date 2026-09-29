@@ -10,10 +10,13 @@ OutputBaseFilename=enigma-sensor-installer
 Compression=lzma
 SolidCompression=yes
 PrivilegesRequired=admin
+LicenseFile=..\..\LICENSE
 
 [Files]
 Source: "..\\..\\bin\\enigma-sensor-windows-amd64.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\\..\\bin\\nssm.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\\..\\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
+Source: "..\\..\\THIRD_PARTY_NOTICES"; DestDir: "{app}"; DestName: "THIRD_PARTY_NOTICES.txt"; Flags: ignoreversion
 Source: "zeek-runtime-win64.zip"; DestDir: "{app}"; Flags: ignoreversion
 ; zeek-scripts/ are embedded in the binary (zeekscripts package) and written into
 ; the Zeek runtime's custom-scripts dir at startup, so they are no longer shipped here.

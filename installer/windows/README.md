@@ -33,13 +33,16 @@ The installer packages:
 | `nssm.exe` | `bin/nssm.exe`, committed |
 | `zeek-runtime-win64.zip` | This directory, committed. The sensor extracts it to `zeek-windows\` on every start |
 | `config.example.json` | Repository root. Used only to create the config, not installed |
+| `LICENSE.txt` | `LICENSE` at the repository root. Also shown as the license page |
+| `THIRD_PARTY_NOTICES.txt` | `THIRD_PARTY_NOTICES` at the repository root |
 
 Npcap is not packaged. The installer downloads it at install time if the user asks for it.
 
 ## What the installer does
 
-It needs administrator rights and installs to `C:\Program Files\EnigmaSensor`. After the directory
-page it shows up to two pages of its own, Npcap first (both are inserted after the directory page,
+It needs administrator rights and installs to `C:\Program Files\EnigmaSensor`. It opens with a
+license page: the user must accept `LICENSE` (PolyForm Internal Use 1.0.0) to continue; a `/SILENT`
+or `/VERYSILENT` install accepts it without showing the page. After the directory page it shows up to two pages of its own, Npcap first (both are inserted after the directory page,
 and Inno Setup places the later-created page first).
 
 1. **Npcap page** (skipped when `{sys}\Npcap\wpcap.dll` exists): an "Install Npcap (Recommended)"

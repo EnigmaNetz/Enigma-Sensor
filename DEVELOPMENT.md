@@ -96,7 +96,7 @@ CI runs in GitHub Actions.
 
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
-| `go-test.yml` | Push to `main`, every PR | `go test -v -race ./...` on Ubuntu, Windows and macOS |
+| `go-test.yml` | Push to `main`, every PR | `go test -v -race ./...` on Ubuntu, Windows and macOS; on Ubuntu, also fails if `THIRD_PARTY_NOTICES` is out of date |
 | `linux-install-test.yml` | Push to `main`, every PR | `scripts/test-linux-install.sh`, then builds the Docker image and checks its Zeek is 8.0.x |
 | `pr-build-artifacts.yml` | PR labelled `build:windows`, `build:linux`, `build:macos` or `build:all` | Builds installers and binaries as workflow artifacts (kept 7 days) |
 | `go-build-release.yml` | Any tag push | Builds everything and attaches it to the GitHub Release for that tag |

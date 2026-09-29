@@ -171,7 +171,8 @@ docker logs -f enigma-sensor
 
 ### macOS
 
-Download the `enigma-sensor-darwin-<version>` binary (amd64) from the release. There is no installer:
+Download `enigma-sensor-macos-<version>.tar.gz` (amd64) from the release and extract the
+`enigma-sensor-darwin-<version>` binary. There is no installer:
 
 - install Zeek 8.0.x so that it is at `/opt/zeek/bin/zeek` (the path is fixed);
 - make sure `tcpdump` is available and run the sensor as root;

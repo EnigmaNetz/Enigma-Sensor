@@ -125,10 +125,29 @@ does.
 
 ### Linux release zip
 
-Built in CI only. It holds `install-enigma-sensor.sh`, the `.deb`, and the bundled Zeek packages
-under `zeek/`. Running `installer/install-enigma-sensor.sh` straight from a checkout does not find
-the bundle and falls back to the OpenSUSE repository; see
+Built in CI only. It holds `install-enigma-sensor.sh`, the `.deb`, `LICENSE`,
+`THIRD_PARTY_NOTICES`, and the bundled Zeek packages under `zeek/`. Running
+`installer/install-enigma-sensor.sh` straight from a checkout does not find the bundle and falls back
+to the OpenSUSE repository; see
 [installer/linux/zeek/README.md](installer/linux/zeek/README.md).
+
+### License and third-party notices
+
+`LICENSE` (PolyForm Internal Use 1.0.0) and `THIRD_PARTY_NOTICES` at the repository root ship in
+every release artifact: the Windows installer, the `.deb` (`/usr/share/doc/enigma-sensor/`), the Linux
+release zip, the Linux and macOS binary archives, and the Docker image. Only the Windows installer
+shows `LICENSE` for acceptance.
+
+Regenerate `THIRD_PARTY_NOTICES` after changing `go.mod` or anything in `scripts/third-party-notices/`
+(go-licenses is pinned in the script):
+
+```sh
+scripts/third-party-notices/generate.sh
+```
+
+The Go section is generated. The Zeek, Spicy, Windows Zeek runtime and NSSM sections are maintained by
+hand in `scripts/third-party-notices/`; each subdirectory's README says what to update when the
+bundled Zeek packages, the Windows Zeek runtime or `nssm.exe` change.
 
 ### Windows installer
 

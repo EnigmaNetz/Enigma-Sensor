@@ -80,6 +80,7 @@ jobs:
         if: inputs.upload_to_release
         uses: softprops/action-gh-release@v3
         with:
+          fail_on_unmatched_files: true
           files: installer/windows/Output/enigma-sensor-windows-*.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -123,6 +124,7 @@ jobs:
           RELEASE_DIR="enigma-sensor-${{ inputs.artifact_prefix }}-linux-release"
           mkdir "$RELEASE_DIR"
           cp installer/install-enigma-sensor.sh "$RELEASE_DIR/"
+          cp LICENSE THIRD_PARTY_NOTICES "$RELEASE_DIR/"
           mkdir -p "$RELEASE_DIR/zeek"
           cp installer/linux/zeek/*.deb "$RELEASE_DIR/zeek/"
           cp installer/linux/zeek/SHA256SUMS "$RELEASE_DIR/zeek/"
@@ -130,6 +132,14 @@ jobs:
           cd "$RELEASE_DIR"
           zip -r "../${RELEASE_DIR}.zip" .
           cd ..
+
+      # The bare binary ships in an archive so its license and notices travel with it.
+      - name: Package Linux binary
+        if: inputs.upload_to_release
+        run: |
+          tar -czf enigma-sensor-linux-amd64-${{ inputs.artifact_prefix }}.tar.gz \
+            -C bin enigma-sensor-linux-amd64 \
+            -C .. LICENSE THIRD_PARTY_NOTICES
 
       - name: Upload Linux Package Artifact
         uses: actions/upload-artifact@v7
@@ -142,9 +152,10 @@ jobs:
         if: inputs.upload_to_release
         uses: softprops/action-gh-release@v3
         with:
+          fail_on_unmatched_files: true
           files: |
             enigma-sensor-*-linux-release.zip
-            bin/enigma-sensor-linux-amd64
+            enigma-sensor-linux-amd64-${{ inputs.artifact_prefix }}.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -169,8 +180,9 @@ jobs:
 
       - name: Create tarball
         run: |
+          cp LICENSE THIRD_PARTY_NOTICES bin/
           cd bin
-          tar -czf enigma-sensor-macos-${{ inputs.artifact_prefix }}.tar.gz enigma-sensor-darwin-*
+          tar -czf enigma-sensor-macos-${{ inputs.artifact_prefix }}.tar.gz enigma-sensor-darwin-* LICENSE THIRD_PARTY_NOTICES
 
       - name: Upload macOS Binary Artifact
         uses: actions/upload-artifact@v7
@@ -183,6 +195,7 @@ jobs:
         if: inputs.upload_to_release
         uses: softprops/action-gh-release@v3
         with:
-          files: bin/enigma-sensor-darwin-${{ inputs.artifact_prefix }}
+          fail_on_unmatched_files: true
+          files: bin/enigma-sensor-macos-${{ inputs.artifact_prefix }}.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

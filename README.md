@@ -303,3 +303,11 @@ is missing or does not parse, it falls back to `/var/log/enigma-sensor` and
 
 On Linux and macOS the archive is readable only by the user who ran it; on Windows it takes the
 permissions of the folder it is written to. `collect-logs` refuses to overwrite an existing file.
+
+---
+
+## License
+
+The Enigma AI Sensor is licensed under the [PolyForm Internal Use License 1.0.0](LICENSE): you may
+install and run it for your organization's internal operations, but not redistribute it. Third-party
+components are licensed separately; see [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).

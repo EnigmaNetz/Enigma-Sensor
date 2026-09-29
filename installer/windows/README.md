@@ -47,7 +47,8 @@ and Inno Setup places the later-created page first).
 
 1. **Npcap page** (skipped when `{sys}\Npcap\wpcap.dll` exists): an "Install Npcap (Recommended)"
    checkbox, unchecked by default. Npcap captures everything the network card receives; without it
-   the sensor uses `pktmon`, which only sees this computer's own traffic.
+   the sensor uses `pktmon`, which only sees this computer's own traffic. The page states that
+   Npcap's free license covers up to five computers.
 2. **Configuration page** (only when `C:\ProgramData\EnigmaSensor\config.json` does not exist): asks
    for the API key and Network ID. Both are required, and the Network ID is checked against the same
    rules as the sensor (1 to 64 characters; letters, numbers, spaces, hyphens and underscores;
@@ -94,7 +95,8 @@ Restart-Service EnigmaSensor
 ```
 
 Npcap is licensed separately by its authors; see the [Npcap license](https://npcap.com/oem/). The
-installer downloads it from npcap.com rather than redistributing it.
+installer downloads it from npcap.com rather than redistributing it. The free license covers up to
+five installs, and the installer's Npcap page says so.
 
 ## Version
 

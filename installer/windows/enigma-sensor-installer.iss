@@ -138,7 +138,9 @@ begin
     'This is recommended for comprehensive network monitoring.' + #13#10#13#10 +
     'Without Npcap, the sensor will use pktmon, which captures only traffic processed by this computer.' + #13#10#13#10 +
     'If you choose to install Npcap, you will see the Npcap installer after this setup completes. ' +
-    'Please accept the defaults in the Npcap installer.',
+    'Please accept the defaults in the Npcap installer.' + #13#10#13#10 +
+    'Npcap is licensed by Nmap Software LLC, not Enigma Networks. Its free license allows installation ' +
+    'on up to five computers; beyond that, an Npcap OEM license is required (https://npcap.com/oem/).',
     False, False);
   NpcapPage.Add('Install Npcap (Recommended)');
   NpcapPage.Values[0] := False;

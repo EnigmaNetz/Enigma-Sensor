@@ -64,6 +64,9 @@ RUN mkdir -p \
 # the run directory at processing time, so no separate zeek-scripts/ copy is needed.
 COPY --from=builder /src/enigma-sensor /usr/local/bin/enigma-sensor
 
+# The sensor's license, and third-party notices for the binary and the bundled Zeek packages.
+COPY LICENSE THIRD_PARTY_NOTICES /usr/share/doc/enigma-sensor/
+
 # Copy the example config as a template; operators mount or override config.json
 # at /etc/enigma-sensor/config.json to supply API keys and settings.
 COPY config.example.json /etc/enigma-sensor/config.template.json

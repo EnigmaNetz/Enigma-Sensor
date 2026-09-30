@@ -33,18 +33,22 @@ The installer packages:
 | `nssm.exe` | `bin/nssm.exe`, committed |
 | `zeek-runtime-win64.zip` | This directory, committed. The sensor extracts it to `zeek-windows\` on every start |
 | `config.example.json` | Repository root. Used only to create the config, not installed |
+| `LICENSE.txt` | `LICENSE` at the repository root. Also shown as the license page |
+| `THIRD_PARTY_NOTICES.txt` | `THIRD_PARTY_NOTICES` at the repository root |
 
 Npcap is not packaged. The installer downloads it at install time if the user asks for it.
 
 ## What the installer does
 
-It needs administrator rights and installs to `C:\Program Files\EnigmaSensor`. After the directory
-page it shows up to two pages of its own, Npcap first (both are inserted after the directory page,
+It needs administrator rights and installs to `C:\Program Files\EnigmaSensor`. It opens with a
+license page: the user must accept `LICENSE` (PolyForm Internal Use 1.0.0) to continue; a `/SILENT`
+or `/VERYSILENT` install accepts it without showing the page. After the directory page it shows up to two pages of its own, Npcap first (both are inserted after the directory page,
 and Inno Setup places the later-created page first).
 
 1. **Npcap page** (skipped when `{sys}\Npcap\wpcap.dll` exists): an "Install Npcap (Recommended)"
    checkbox, unchecked by default. Npcap captures everything the network card receives; without it
-   the sensor uses `pktmon`, which only sees this computer's own traffic.
+   the sensor uses `pktmon`, which only sees this computer's own traffic. The page states that
+   Npcap's free license covers up to five computers.
 2. **Configuration page** (only when `C:\ProgramData\EnigmaSensor\config.json` does not exist): asks
    for the API key and Network ID. Both are required, and the Network ID is checked against the same
    rules as the sensor (1 to 64 characters; letters, numbers, spaces, hyphens and underscores;
@@ -91,7 +95,8 @@ Restart-Service EnigmaSensor
 ```
 
 Npcap is licensed separately by its authors; see the [Npcap license](https://npcap.com/oem/). The
-installer downloads it from npcap.com rather than redistributing it.
+installer downloads it from npcap.com rather than redistributing it. The free license covers up to
+five installs, and the installer's Npcap page says so.
 
 ## Version
 

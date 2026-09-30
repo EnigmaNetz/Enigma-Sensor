@@ -1,0 +1,5 @@
+NSSM 2.24 (Windows only: bin/nssm.exe, installed as the service wrapper)
+https://nssm.cc
+
+NSSM is public domain. You may unconditionally use it and/or its source code
+for any purpose you wish.

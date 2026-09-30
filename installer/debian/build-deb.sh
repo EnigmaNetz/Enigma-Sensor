@@ -23,6 +23,7 @@ mkdir -p $PKG_DIR/DEBIAN
 mkdir -p $PKG_DIR/usr/local/bin
 mkdir -p $PKG_DIR/etc/systemd/system
 mkdir -p $PKG_DIR/etc/enigma-sensor
+mkdir -p $PKG_DIR/usr/share/doc/enigma-sensor
 
 # Copy control files
 cp DEBIAN/control $PKG_DIR/DEBIAN/
@@ -36,6 +37,9 @@ done
 
 # Copy binary (rename to enigma-sensor for install)
 cp $SENSOR_BIN $PKG_DIR/usr/local/bin/enigma-sensor
+
+# License and third-party notices
+cp ../../LICENSE ../../THIRD_PARTY_NOTICES $PKG_DIR/usr/share/doc/enigma-sensor/
 
 # Copy systemd service
 cp etc/systemd/system/enigma-sensor.service $PKG_DIR/etc/systemd/system/

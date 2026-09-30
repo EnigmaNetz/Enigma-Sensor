@@ -43,6 +43,15 @@ jobs:
     - name: Run tests
       run: go test -v -race ${{ matrix.os == 'ubuntu-latest' && '-coverprofile=coverage.out -covermode=atomic' || '' }} ./...
 
+    # THIRD_PARTY_NOTICES ships in every release artifact. Regenerate it and fail if the
+    # committed copy no longer matches go.mod or the hand-maintained sections. After the tests,
+    # and even when they fail, so a stale file and a failing test are both reported.
+    - name: Check THIRD_PARTY_NOTICES is up to date
+      if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' }}
+      run: |
+        scripts/third-party-notices/generate.sh
+        git diff --exit-code THIRD_PARTY_NOTICES
+
     # ReportGenerator reads Cobertura, not Go profiles; the converter comes through Go's
     # checksum-verified module proxy. It needs Go >= 1.25, so this step alone may fetch
     # that toolchain; the tests above still run on the matrix Go version.

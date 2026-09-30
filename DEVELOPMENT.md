@@ -96,7 +96,7 @@ CI runs in GitHub Actions.
 
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
-| `go-test.yml` | Push to `main`, every PR | `go test -v -race ./...` on Ubuntu, Windows and macOS |
+| `go-test.yml` | Push to `main`, every PR | `go test -v -race ./...` on Ubuntu, Windows and macOS; on Ubuntu, also fails if `THIRD_PARTY_NOTICES` is out of date |
 | `linux-install-test.yml` | Push to `main`, every PR | `scripts/test-linux-install.sh`, then builds the Docker image and checks its Zeek is 8.0.x |
 | `pr-build-artifacts.yml` | PR labelled `build:windows`, `build:linux`, `build:macos` or `build:all` | Builds installers and binaries as workflow artifacts (kept 7 days) |
 | `go-build-release.yml` | Any tag push | Builds everything and attaches it to the GitHub Release for that tag |
@@ -125,10 +125,29 @@ does.
 
 ### Linux release zip
 
-Built in CI only. It holds `install-enigma-sensor.sh`, the `.deb`, and the bundled Zeek packages
-under `zeek/`. Running `installer/install-enigma-sensor.sh` straight from a checkout does not find
-the bundle and falls back to the OpenSUSE repository; see
+Built in CI only. It holds `install-enigma-sensor.sh`, the `.deb`, `LICENSE`,
+`THIRD_PARTY_NOTICES`, and the bundled Zeek packages under `zeek/`. Running
+`installer/install-enigma-sensor.sh` straight from a checkout does not find the bundle and falls back
+to the OpenSUSE repository; see
 [installer/linux/zeek/README.md](installer/linux/zeek/README.md).
+
+### License and third-party notices
+
+`LICENSE` (PolyForm Internal Use 1.0.0) and `THIRD_PARTY_NOTICES` at the repository root ship in
+every release artifact: the Windows installer, the `.deb` (`/usr/share/doc/enigma-sensor/`), the Linux
+release zip, the Linux and macOS binary archives, and the Docker image. Only the Windows installer
+shows `LICENSE` for acceptance.
+
+Regenerate `THIRD_PARTY_NOTICES` after changing `go.mod` or anything in `scripts/third-party-notices/`
+(go-licenses is pinned in the script):
+
+```sh
+scripts/third-party-notices/generate.sh
+```
+
+The Go section is generated. The Zeek, Spicy, Windows Zeek runtime and NSSM sections are maintained by
+hand in `scripts/third-party-notices/`; each subdirectory's README says what to update when the
+bundled Zeek packages, the Windows Zeek runtime or `nssm.exe` change.
 
 ### Windows installer
 

@@ -171,7 +171,8 @@ docker logs -f enigma-sensor
 
 ### macOS
 
-Download the `enigma-sensor-darwin-<version>` binary (amd64) from the release. There is no installer:
+Download `enigma-sensor-macos-<version>.tar.gz` (amd64) from the release and extract the
+`enigma-sensor-darwin-<version>` binary. There is no installer:
 
 - install Zeek 8.0.x so that it is at `/opt/zeek/bin/zeek` (the path is fixed);
 - make sure `tcpdump` is available and run the sensor as root;
@@ -303,3 +304,11 @@ is missing or does not parse, it falls back to `/var/log/enigma-sensor` and
 
 On Linux and macOS the archive is readable only by the user who ran it; on Windows it takes the
 permissions of the folder it is written to. `collect-logs` refuses to overwrite an existing file.
+
+---
+
+## License
+
+The Enigma AI Sensor is licensed under the [PolyForm Internal Use License 1.0.0](LICENSE): you may
+install and run it for your organization's internal operations, but not redistribute it. Third-party
+components are licensed separately; see [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).

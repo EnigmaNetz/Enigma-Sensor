@@ -88,14 +88,16 @@ before it.
 The installer:
 
 - installs `tcpdump` from the distribution repositories;
-- installs Zeek 8.0.5 from the packages bundled in the zip (checked against `SHA256SUMS`), so no
-  third-party package repository is needed. If the bundle is missing or fails to install, it falls
-  back to the OpenSUSE Zeek repository;
+- installs Zeek 8.0.10 from the packages bundled in the zip for the host's Ubuntu release (checked
+  against `SHA256SUMS`), so no third-party package repository is needed. If the bundle is missing or
+  fails to install, it falls back to the OpenSUSE Zeek repository;
 - installs the `enigma-sensor` package, a systemd service that starts at boot;
 - writes `/etc/enigma-sensor/config.json` if it does not already exist, readable only by root
   (mode 0600, also applied to an existing config), then restarts the service.
 
-Re-running the installer upgrades the sensor and keeps the existing config.
+Re-running the installer upgrades the sensor and keeps the existing config. If Zeek cannot be
+upgraded to 8.0.10, the sensor is still installed on the existing Zeek, but the installer prints a
+warning and exits 3.
 
 | | Path |
 | --- | --- |
@@ -152,7 +154,7 @@ docker run -d \
 ```
 
 `--network=host` is required so the sensor sees the host's interfaces. The container runs as root so
-`tcpdump` can capture. The image bundles the same Zeek 8.0.5 packages as the Linux release.
+`tcpdump` can capture. The image is based on Ubuntu 24.04 and bundles the same Zeek 8.0.10 packages the Linux release installs on 24.04.
 
 The container builds its config from `config.example.json` plus environment variables:
 

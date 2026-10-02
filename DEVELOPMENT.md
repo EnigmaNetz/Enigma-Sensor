@@ -79,9 +79,12 @@ CI runs the tests natively on each platform.
 bash scripts/test-linux-install.sh
 ```
 
-Builds the `.deb`, assembles the release zip layout, and installs it in fresh `ubuntu:22.04` and
-`ubuntu:24.04` containers with the OpenSUSE Zeek repository blocked, to prove Zeek installs from the
-bundled packages.
+Builds the `.deb`, assembles the release zip layout, and installs it in fresh `ubuntu:22.04`,
+`ubuntu:24.04`, `debian:12` and `debian:13` containers with the OpenSUSE Zeek repository blocked, to
+prove each host installs Zeek from its matching bundled packages. It also checks that a tampered
+bundle is refused, upgrades a host running the previous release's Zeek 8.0.5 packages (taken from git
+history) with edited Zeek config files, and checks that a failed Zeek upgrade keeps the sensor and
+warns that Zeek is outdated.
 
 ### Load test
 
@@ -119,14 +122,14 @@ cd installer/debian
 ```
 
 Always rebuilds `bin/enigma-sensor-linux`, then writes `bin/enigma-sensor_<version>_amd64.deb`. The
-package installs `/usr/local/bin/enigma-sensor` and a systemd unit, depends on `zeek-core` and
-`tcpdump`, and enables and starts the service on install. It does not write a config; the installer
+package installs `/usr/local/bin/enigma-sensor` and a systemd unit, depends on `zeek-lts-core`
+(or the `zeek-core` earlier releases installed) and `tcpdump`, and enables and starts the service on install. It does not write a config; the installer
 does.
 
 ### Linux release zip
 
 Built in CI only. It holds `install-enigma-sensor.sh`, the `.deb`, `LICENSE`,
-`THIRD_PARTY_NOTICES`, and the bundled Zeek packages under `zeek/`. Running
+`THIRD_PARTY_NOTICES`, and the bundled Zeek packages under `zeek/ubuntu-22.04/` and `zeek/ubuntu-24.04/`. Running
 `installer/install-enigma-sensor.sh` straight from a checkout does not find the bundle and falls back
 to the OpenSUSE repository; see
 [installer/linux/zeek/README.md](installer/linux/zeek/README.md).

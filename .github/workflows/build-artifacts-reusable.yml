@@ -126,8 +126,7 @@ jobs:
           cp installer/install-enigma-sensor.sh "$RELEASE_DIR/"
           cp LICENSE THIRD_PARTY_NOTICES "$RELEASE_DIR/"
           mkdir -p "$RELEASE_DIR/zeek"
-          cp installer/linux/zeek/*.deb "$RELEASE_DIR/zeek/"
-          cp installer/linux/zeek/SHA256SUMS "$RELEASE_DIR/zeek/"
+          cp -r installer/linux/zeek/ubuntu-22.04 installer/linux/zeek/ubuntu-24.04 "$RELEASE_DIR/zeek/"
           cp bin/enigma-sensor_*.deb "$RELEASE_DIR/" || true
           cd "$RELEASE_DIR"
           zip -r "../${RELEASE_DIR}.zip" .

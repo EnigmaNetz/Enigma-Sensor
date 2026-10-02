@@ -11,8 +11,6 @@ System) traffic on the host while the sensor captures it, then summarises contai
   startup. It also sets `load_test` and `zeek.path`, which the sensor ignores.
 - The sensor container writes captures to `loadtest/captures/`, but the script counts files in
   `../captures/`.
-- `Dockerfile.sensor` installs Zeek from the OpenSUSE repository rather than the bundled packages
-  the real Docker image uses.
 
 No performance figures from this harness are current.
 

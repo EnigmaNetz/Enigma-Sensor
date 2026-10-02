@@ -116,17 +116,43 @@ case "$OS_ID" in
     apt update
     apt install -y curl gpg tcpdump
 
+    # --- Find the Enigma Sensor .deb package ---
+    # Found before Zeek so it can be installed in the same apt transaction (below).
+    sensor_debs=("$SCRIPT_DIR"/*.deb)
+    if [ ! -e "${sensor_debs[0]}" ]; then
+      sensor_debs=(./*.deb)
+    fi
+    PKG="${sensor_debs[0]}"
+    if [ ! -e "$PKG" ]; then
+      echo "ERROR: No .deb package found in $SCRIPT_DIR or the current directory."
+      exit 1
+    fi
+
     # --- Install Zeek from the packages bundled in the release ---
-    # The bundle is exactly Zeek 8.0.5-0, pinned to avoid breaking changes from
-    # newer Zeek releases. apt, not dpkg, so Zeek's shared library dependencies
-    # resolve from the distribution's own repositories.
+    # The bundle is exactly Zeek 8.0.10-0 (the zeek-lts packages), pinned to avoid
+    # breaking changes from newer Zeek releases. apt, not dpkg, so Zeek's shared
+    # library dependencies resolve from the distribution's own repositories.
+    #
+    # The release carries one set per Ubuntu build channel: the 24.04 build needs
+    # glibc 2.38, so 22.04 and Debian take the 22.04 build, which also runs on later
+    # releases.
+    #
+    # The sensor package joins the transaction: zeek-lts-* conflict with the
+    # zeek-core an earlier release installed, which the installed sensor package
+    # depends on. Swapping them together lets apt replace both instead of removing
+    # the sensor to resolve the conflict.
     install_zeek_bundled() {
-      [ -d "$SCRIPT_DIR/zeek" ] || return 1
-      if [ ! -f "$SCRIPT_DIR/zeek/SHA256SUMS" ]; then
+      local zeek_dir="$SCRIPT_DIR/zeek/ubuntu-22.04"
+      if [ "$OS_ID" = "ubuntu" ] && [ "${UBUNTU_MAJOR:-0}" -ge 24 ] 2>/dev/null; then
+        zeek_dir="$SCRIPT_DIR/zeek/ubuntu-24.04"
+      fi
+      [ -d "$zeek_dir" ] || return 1
+      echo "Installing Zeek from the bundled packages in $zeek_dir"
+      if [ ! -f "$zeek_dir/SHA256SUMS" ]; then
         echo "ERROR: the bundled Zeek packages carry no SHA256SUMS manifest."
         return 1
       fi
-      if ! ( cd "$SCRIPT_DIR/zeek" && sha256sum -c SHA256SUMS ); then
+      if ! ( cd "$zeek_dir" && sha256sum -c SHA256SUMS ); then
         echo "ERROR: the bundled Zeek packages fail checksum verification."
         return 1
       fi
@@ -136,13 +162,17 @@ case "$OS_ID" in
       zeek_debs=()
       while read -r _ zeek_deb_name; do
         [ -n "$zeek_deb_name" ] || continue
-        [ -f "$SCRIPT_DIR/zeek/$zeek_deb_name" ] || return 1
-        zeek_debs+=("$SCRIPT_DIR/zeek/$zeek_deb_name")
-      done < "$SCRIPT_DIR/zeek/SHA256SUMS"
+        [ -f "$zeek_dir/$zeek_deb_name" ] || return 1
+        zeek_debs+=("$zeek_dir/$zeek_deb_name")
+      done < "$zeek_dir/SHA256SUMS"
       [ "${#zeek_debs[@]}" -gt 0 ] || return 1
       # --no-install-recommends matches the Dockerfile so the published image and
       # a host install resolve the same package closure.
-      apt-get install -y --no-install-recommends "${zeek_debs[@]}" || return 1
+      if ! apt-get install -y --no-install-recommends "${zeek_debs[@]}" "$PKG"; then
+        echo "ERROR: apt could not install the bundled Zeek packages from $zeek_dir."
+        echo "       An unmet libc6 or libssl3 dependency means this bundle does not match $OS_ID $VERSION_ID."
+        return 1
+      fi
       # Retire the third-party repository a previous installer version configured.
       rm -f /etc/apt/trusted.gpg.d/security_zeek.gpg \
             /etc/apt/sources.list.d/security:zeek.list
@@ -168,7 +198,7 @@ case "$OS_ID" in
           ZEEK_RELEASE="xUbuntu_24.04"
           ;;
         *)
-          echo "ERROR: Unsupported Ubuntu version: $VERSION_ID for Zeek repo."
+          echo "ERROR: the OpenSUSE Zeek fallback supports Ubuntu 22.04 and 24.04 only, not $OS_ID $VERSION_ID."
           return 1
           ;;
       esac
@@ -198,8 +228,13 @@ case "$OS_ID" in
         apt update || { zeek_obs_cleanup; return 1; }
       fi
       # Constrain to the 8.0.x line: 8.1 and later carry breaking changes the
-      # sensor cannot take.
-      apt-get install -y 'zeek-core=8.0.*' || { zeek_obs_cleanup; return 1; }
+      # sensor cannot take. The repository's plain zeek-core moved to 9.0, so 8.0
+      # comes from the zeek-lts packages. zeekctl-lts and zeek-lts-client match the
+      # bundle and depend on the exact zeek-lts-core version, so apt upgrade cannot
+      # drift it off 8.0. The sensor package joins the transaction for the same
+      # reason as in install_zeek_bundled.
+      apt-get install -y 'zeek-lts-core=8.0.*' 'zeekctl-lts=8.0.*' 'zeek-lts-client=8.0.*' "$PKG" \
+        || { zeek_obs_cleanup; return 1; }
     }
 
     if install_zeek_bundled; then
@@ -212,30 +247,49 @@ case "$OS_ID" in
     fi
 
     # --- Warn when the installed Zeek is off the supported line ---
-    ZEEK_VER=$(dpkg-query -W -f='${Version}' zeek-core 2>/dev/null || echo none)
+    # zeek-core is what releases before 8.0.10 installed. Anything below 8.0.10 is
+    # missing security fixes: a host whose Zeek upgrade failed keeps its old Zeek
+    # and its sensor, so say so loudly rather than exit as if it were current.
+    ZEEK_MIN_VERSION=8.0.10-0
+    # Only a fully installed package counts: one that unpacked but failed to
+    # configure still reports its version.
+    zeek_installed_version() {
+      local state
+      state=$(dpkg-query -W -f='${Status} ${Version}' "$1" 2>/dev/null) || return 1
+      case "$state" in
+        "install ok installed "*) echo "${state#install ok installed }" ;;
+        *) return 1 ;;
+      esac
+    }
+    ZEEK_VER=$(zeek_installed_version zeek-lts-core || zeek_installed_version zeek-core || echo none)
     case "$ZEEK_VER" in
-      8.0.*) ;;
-      *) echo "WARNING: zeek-core version '$ZEEK_VER' is outside the supported 8.0.x line." ;;
+      8.0.*)
+        if dpkg --compare-versions "$ZEEK_VER" lt "$ZEEK_MIN_VERSION"; then
+          echo "WARNING: ******************************************************************"
+          echo "WARNING: Zeek $ZEEK_VER is installed, older than $ZEEK_MIN_VERSION, and is missing"
+          echo "WARNING: security fixes. The Zeek upgrade failed; see the errors above."
+          echo "WARNING: Fix the cause and re-run this script."
+          echo "WARNING: ******************************************************************"
+          ZEEK_OUTDATED=1
+        fi
+        ;;
+      *) echo "WARNING: Zeek version '$ZEEK_VER' is outside the supported 8.0.x line." ;;
     esac
 
-    # --- Find and install Enigma Sensor .deb package ---
-    sensor_debs=("$SCRIPT_DIR"/*.deb)
-    if [ ! -e "${sensor_debs[0]}" ]; then
-      sensor_debs=(./*.deb)
-    fi
-    PKG="${sensor_debs[0]}"
-    if [ ! -e "$PKG" ]; then
-      echo "ERROR: No .deb package found in $SCRIPT_DIR or the current directory."
-      exit 1
-    fi
-    if ! dpkg -i "$PKG"; then
-      apt-get install -f -y || true
+    # --- Install Enigma Sensor .deb package ---
+    # Skipped when the Zeek step already installed this exact package with Zeek, so
+    # the service is not stopped and started a second time.
+    PKG_VERSION=$(dpkg-deb -f "$PKG" Version)
+    if [ "$(dpkg-query -W -f='${Status} ${Version}' enigma-sensor 2>/dev/null || true)" != "install ok installed $PKG_VERSION" ]; then
+      if ! dpkg -i "$PKG"; then
+        apt-get install -f -y || true
+      fi
     fi
     # apt-get install -f resolves a broken install by removing the package and
     # exits 0, so check the end state instead of trusting the exit status.
     if [ "$(dpkg-query -W -f='${Status}' enigma-sensor 2>/dev/null || true)" != "install ok installed" ]; then
       echo "ERROR: the Enigma Sensor package could not be installed."
-      echo "       Its dependencies (zeek-core, tcpdump) are not satisfied on this host."
+      echo "       Its dependencies (zeek-lts-core, tcpdump) are not satisfied on this host."
       echo "       Install Zeek 8.0.x and re-run this script."
       exit 1
     fi
@@ -297,3 +351,10 @@ if command -v systemctl >/dev/null 2>&1; then
 fi
 
 echo "Enigma Sensor installed and configured."
+
+# The sensor runs, but on a Zeek missing security fixes: exit 3 so whatever ran
+# the installer sees a failure rather than a clean install.
+if [ "${ZEEK_OUTDATED:-0}" = "1" ]; then
+  echo "WARNING: Zeek $ZEEK_VER is older than $ZEEK_MIN_VERSION; exiting 3. See the warning above."
+  exit 3
+fi

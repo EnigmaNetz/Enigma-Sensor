@@ -19,8 +19,8 @@ SUBRULE='-----------------------------------------------------------------------
 
 cd "$REPO_ROOT"
 # The Linux Zeek version comes from the bundled package name, so an upgrade cannot leave it stale.
-ZEEK_DEB="$(ls installer/linux/zeek/zeek-core_*_amd64.deb)"
-ZEEK_VERSION="$(basename "$ZEEK_DEB" | sed -E 's/^zeek-core_([0-9.]+)-.*/\1/')"
+ZEEK_DEB="$(ls installer/linux/zeek/ubuntu-24.04/zeek-lts-core_*_amd64.deb)"
+ZEEK_VERSION="$(basename "$ZEEK_DEB" | sed -E 's/^zeek-lts-core_([0-9.]+)-.*/\1/')"
 MODCACHE="$(go env GOMODCACHE)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT

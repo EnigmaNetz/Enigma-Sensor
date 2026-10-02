@@ -22,7 +22,7 @@ RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
 
 
 # Stage 2: runtime
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -37,14 +37,15 @@ RUN apt-get update \
         libpcap0.8 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Zeek 8.0.5-0 from the packages bundled in this repository at
-# installer/linux/zeek/, the same set the Linux release zip ships. The version is
-# pinned to avoid breaking changes from newer Zeek releases, and bundling removes
-# any build-time dependency on a third-party package repository. apt, not dpkg,
+# Install Zeek 8.0.10-0 from the Ubuntu 24.04 packages bundled in this repository
+# at installer/linux/zeek/ubuntu-24.04/, the set the Linux release zip installs on
+# 24.04 hosts. The version is pinned to avoid breaking changes from newer Zeek
+# releases, and bundling removes any build-time dependency on a third-party
+# package repository. apt, not dpkg,
 # so Zeek's shared library dependencies resolve from Ubuntu's own repositories.
 # sha256sum -c runs before the install so a tampered blob fails the build rather
 # than being installed as root: apt performs no signature check on local files.
-COPY installer/linux/zeek/ /tmp/zeek/
+COPY installer/linux/zeek/ubuntu-24.04/ /tmp/zeek/
 RUN apt-get update \
     && (cd /tmp/zeek && sha256sum -c SHA256SUMS) \
     && apt-get install -y --no-install-recommends /tmp/zeek/*.deb \

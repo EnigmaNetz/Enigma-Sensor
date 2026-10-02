@@ -701,7 +701,7 @@ SOFTWARE.
 ================================================================================
 PART 2: Zeek
 
-Linux: the Zeek 8.0.5 packages in the release zip and the Docker image.
+Linux: the Zeek 8.0.10 packages in the release zip and the Docker image.
 Windows: the Zeek runtime installed with the sensor.
 ================================================================================
 

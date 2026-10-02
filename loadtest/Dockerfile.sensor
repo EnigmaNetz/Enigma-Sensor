@@ -1,5 +1,5 @@
 # Simplified Dockerfile for Performance Testing
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
 # Set non-interactive mode to avoid prompts
 ENV DEBIAN_FRONTEND=noninteractive
@@ -16,13 +16,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     software-properties-common \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Zeek from official repository
-# Pin Zeek to 8.0.5 to avoid breaking changes from new releases
-RUN curl -fsSL https://download.opensuse.org/repositories/security:zeek/xUbuntu_22.04/Release.key | gpg --dearmor | tee /etc/apt/trusted.gpg.d/security_zeek.gpg \
-    && echo "deb http://download.opensuse.org/repositories/security:/zeek/xUbuntu_22.04/ /" | tee /etc/apt/sources.list.d/security:zeek.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends zeek=8.0.5-0 \
-    && rm -rf /var/lib/apt/lists/*
+# Install Zeek from the 24.04 packages bundled in the repository, as the main
+# Dockerfile does.
+COPY installer/linux/zeek/ubuntu-24.04/ /tmp/zeek/
+RUN apt-get update \
+    && (cd /tmp/zeek && sha256sum -c SHA256SUMS) \
+    && apt-get install -y --no-install-recommends /tmp/zeek/*.deb \
+    && rm -rf /tmp/zeek /var/lib/apt/lists/*
 
 # Create app directory
 WORKDIR /app

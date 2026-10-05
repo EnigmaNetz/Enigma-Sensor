@@ -235,11 +235,13 @@ end;
 
 // Lets only SYSTEM and Administrators open config.json: it holds the API key, and
 // C:\ProgramData grants read access to every local user by inheritance. One
-// Set-Acl call writes the whole security descriptor at once, so access is never
+// SetAccessControl call writes owner, group and access list at once, so access is never
 // widened, even briefly: owner Administrators (so a file a standard user
 // created cannot be re-opened by them), and a protected list granting only SYSTEM
 // and Administrators full control, which drops inherited and stray explicit
-// entries. SIDs, not names, so it works on non-English Windows.
+// entries. SIDs, not names, so it works on non-English Windows. .NET is called
+// directly rather than through Set-Acl: a PowerShell 7 parent passes its module
+// path down, and Windows PowerShell then cannot load the module Set-Acl lives in.
 function RestrictConfigAcl(const Path: string): Boolean;
 var
   ResultCode: Integer;
@@ -251,10 +253,12 @@ begin
   DeleteFile(ErrorFile);
   Result := Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
       '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' +
-      '$ErrorActionPreference = ''Stop''; try { $sd = New-Object System.Security.AccessControl.FileSecurity; ' +
-      '$sd.SetSecurityDescriptorSddlForm(''O:BAG:SYD:PAI(A;;FA;;;SY)(A;;FA;;;BA)''); ' +
-      'Set-Acl -LiteralPath ''' + Path + ''' -AclObject $sd; exit 0 } ' +
-      'catch { Set-Content -LiteralPath ''' + ErrorFile + ''' -Value $_.Exception.Message; exit 1 }"',
+      '$ErrorActionPreference = ''Stop''; try { ' +
+      '$sd = [System.Security.AccessControl.FileSecurity]::new(); ' +
+      '$sd.SetSecurityDescriptorSddlForm(''O:BAG:SYD:PAI(A;;FA;;;SY)(A;;FA;;;BA)'', ' +
+      '[System.Security.AccessControl.AccessControlSections]''Owner, Group, Access''); ' +
+      '[System.IO.File]::SetAccessControl(''' + Path + ''', $sd); exit 0 } ' +
+      'catch { [System.IO.File]::WriteAllText(''' + ErrorFile + ''', $_.Exception.Message); exit 1 }"',
       '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
   if not Result then
   begin

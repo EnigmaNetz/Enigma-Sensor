@@ -31,7 +31,7 @@ The installer packages:
 | --- | --- |
 | `enigma-sensor-windows-amd64.exe` | `bin/`, built in step 1 |
 | `nssm.exe` | `bin/nssm.exe`, committed |
-| `zeek-runtime-win64.zip` | This directory, committed. The sensor extracts it to `zeek-windows\` on every start |
+| `zeek-runtime-win64.zip` | This directory, committed: the release asset built by Enigma-Zeek (see below). The sensor extracts it to `zeek-windows\` on every start |
 | `config.example.json` | Repository root. Used only to create the config, not installed |
 | `LICENSE.txt` | `LICENSE` at the repository root. Also shown as the license page |
 | `THIRD_PARTY_NOTICES.txt` | `THIRD_PARTY_NOTICES` at the repository root |
@@ -40,7 +40,7 @@ Npcap is not packaged. The installer downloads it at install time if the user as
 
 ## What the installer does
 
-It needs administrator rights and installs to `C:\Program Files\EnigmaSensor`. It opens with a
+It needs administrator rights and installs to `C:\Program Files (x86)\EnigmaSensor`. It opens with a
 license page: the user must accept `LICENSE` (PolyForm Internal Use 1.0.0) to continue; a `/SILENT`
 or `/VERYSILENT` install accepts it without showing the page. After the directory page it shows up to two pages of its own, Npcap first (both are inserted after the directory page,
 and Inno Setup places the later-created page first).
@@ -61,7 +61,7 @@ and Inno Setup places the later-created page first).
 5. **After installing**:
    - launches the Npcap installer if it was downloaded; the user clicks through it and setup waits;
    - registers the service with NSSM: runs as LocalSystem, starts automatically, working directory
-     `C:\Program Files\EnigmaSensor`, console output to
+     `C:\Program Files (x86)\EnigmaSensor`, console output to
      `C:\ProgramData\EnigmaSensor\logs\enigma-sensor.log`;
    - starts the service.
 
@@ -75,9 +75,31 @@ Uninstalling stops and removes the service. The config in `C:\ProgramData\Enigma
 | --- | --- |
 | `C:\ProgramData\EnigmaSensor\config.json` | Config, including the API key |
 | `C:\ProgramData\EnigmaSensor\logs\enigma-sensor.log` | Service console output. NSSM rotates it once it passes 50 MB, checked at service start and while running; the sensor deletes rotated files older than `logging.log_retention_days` |
-| `C:\Program Files\EnigmaSensor\logs\enigma-sensor.log` | The sensor's own log, rotated per the `logging` settings |
-| `C:\Program Files\EnigmaSensor\captures\` | Captures and Zeek output |
-| `C:\Program Files\EnigmaSensor\zeek-windows\` | Extracted Zeek runtime |
+| `C:\Program Files (x86)\EnigmaSensor\logs\enigma-sensor.log` | The sensor's own log, rotated per the `logging` settings |
+| `C:\Program Files (x86)\EnigmaSensor\captures\` | Captures and Zeek output |
+| `C:\Program Files (x86)\EnigmaSensor\zeek-windows\` | Extracted Zeek runtime |
+
+## Zeek runtime
+
+`zeek-runtime-win64.zip` is built by the [Enigma-Zeek](https://github.com/EnigmaNetz/Enigma-Zeek)
+repository from a pinned Zeek release and published as a GitHub release named
+`zeek-runtime-win64-<tag>-r<revision>`. It is Zeek 8.0.10, the same version as the Linux packages in
+`installer/linux/zeek/`, and its `BUILD-INFO.txt` records the versions and commits it was built from.
+
+To update it, publish a new runtime from Enigma-Zeek (its README), then replace the file here with
+the release asset and check it against the release's SHA-256:
+
+```sh
+gh release download zeek-runtime-win64-<tag>-r<revision> --repo EnigmaNetz/Enigma-Zeek --dir /tmp/zeek-win
+(cd /tmp/zeek-win && sha256sum -c zeek-runtime-win64.zip.sha256)
+cp /tmp/zeek-win/zeek-runtime-win64.zip /tmp/zeek-win/zeek-runtime-win64.zip.sha256 installer/windows/
+```
+
+`zeek-runtime-win64.zip.sha256` is committed next to the zip, so the repository records which
+release the zip came from; check it with `sha256sum -c` in this directory.
+
+The sensor extracts the zip over `zeek-windows\` on start without clearing it first, so files a
+previous runtime shipped and a new one dropped stay on upgraded hosts. Nothing loads them.
 
 ## Npcap
 

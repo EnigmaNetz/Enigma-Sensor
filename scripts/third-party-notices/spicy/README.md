@@ -8,4 +8,4 @@ from the new submodule commit whenever the bundled Zeek packages change.
 `LICENSE.3rdparty` includes pathfind (LGPL). It is used only by Spicy's compiler tools, which the
 packages do not ship; it is not in the `zeek` binary.
 
-The Windows runtime was built without Spicy (`have_spicy=no`), so none of this applies there.
+The Windows runtime is built without Spicy (`spicy: disabled` in its `BUILD-INFO.txt`), so none of this applies there.

@@ -249,9 +249,10 @@ and a contract change touches all of those repos.
 - **Zeek scripts differ by platform.** Linux and macOS pass the scripts embedded in
   `internal/processor/common/zeekscripts/` on the command line. Windows loads
   `site/custom-scripts/main.zeek` from `installer/windows/zeek-runtime-win64.zip`, which carries
-  its own copy of the JA3/JA4 script plus ASN (autonomous system number) and hostname enrichment;
-  on start the sensor writes the embedded sampling and DHCP scripts into that directory and adds
-  them to `main.zeek`. A change to the embedded JA3/JA4 script does not reach Windows unless the zip is rebuilt.
+  its own copy of the JA3/JA4 script; on start the sensor writes the embedded sampling and DHCP
+  scripts into that directory and adds them to `main.zeek`. The zip is built and published by the
+  Enigma-Zeek repository, so a change to the embedded JA3/JA4 script reaches Windows only through a
+  new Enigma-Zeek release.
 - **`ZeekLogFiles`** (`internal/processor/common/processor.go`) is the single list of uploaded logs.
   Both the subnet filter and the rename to `.xlsx` use it, so a new log added there is filtered
   automatically. The uploader's `LogFiles` and `CombinedLogs` still need the field added by hand.

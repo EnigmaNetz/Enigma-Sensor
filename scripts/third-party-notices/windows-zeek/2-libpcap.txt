@@ -1,4 +1,4 @@
-libpcap 1.10.5
+libpcap 1.10.6
 License: BSD-3-Clause
 https://www.tcpdump.org
 

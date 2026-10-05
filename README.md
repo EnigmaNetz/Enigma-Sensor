@@ -122,7 +122,7 @@ Run `enigma-sensor-windows-<version>.exe` from
   `C:\ProgramData\EnigmaSensor\config.json`. An existing config is kept.
 - If Npcap is not installed, it offers to download Npcap and launch its installer (unchecked by
   default). Without Npcap the sensor falls back to `pktmon`.
-- It installs to `C:\Program Files\EnigmaSensor` and registers the `EnigmaSensor` service (managed
+- It installs to `C:\Program Files (x86)\EnigmaSensor` and registers the `EnigmaSensor` service (managed
   by NSSM, the Non-Sucking Service Manager), set to start automatically.
 
 The sensor writes its log twice:
@@ -131,7 +131,7 @@ The sensor writes its log twice:
   rotates it once it passes 50 MB, checked at service start and while running, renaming the old
   file with a timestamp.
   The sensor deletes rotated files older than `logging.log_retention_days`.
-- `C:\Program Files\EnigmaSensor\logs\enigma-sensor.log`: the sensor's own rotated log.
+- `C:\Program Files (x86)\EnigmaSensor\logs\enigma-sensor.log`: the sensor's own rotated log.
 
 ```powershell
 Restart-Service EnigmaSensor    # after editing config.json

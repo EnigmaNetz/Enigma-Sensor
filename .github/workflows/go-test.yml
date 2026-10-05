@@ -10,7 +10,9 @@ permissions:
 
 jobs:
   test:
-    name: Run Tests
+    # The Go version is left out of the name so the required check names in the
+    # main ruleset stay the same across Go upgrades.
+    name: Run Tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:

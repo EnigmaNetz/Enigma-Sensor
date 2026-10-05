@@ -39,6 +39,15 @@ validate_network_id() {
   return 0
 }
 
+# Escapes a value for a JSON string literal in the config written below: the API
+# key and server address are not restricted to safe characters.
+json_escape() {
+  local value="$1"
+  value=${value//\\/\\\\}
+  value=${value//\"/\\\"}
+  printf '%s' "$value"
+}
+
 # --- Prompt for API Key if not set ---
 if [ -z "$ENIGMA_API_KEY" ]; then
   echo "ENIGMA_API_KEY environment variable not set."
@@ -49,6 +58,13 @@ if [ -z "$ENIGMA_API_KEY" ]; then
     exit 1
   fi
 fi
+# A real key never contains control characters; refuse one rather than write it.
+case "$ENIGMA_API_KEY" in
+  *[[:cntrl:]]*)
+    echo "ERROR: the API key contains control characters. Check that it was pasted correctly."
+    exit 1
+    ;;
+esac
 
 # --- Prompt for Network ID if not set ---
 if [ -z "$ENIGMA_NETWORK_ID" ]; then
@@ -307,9 +323,12 @@ esac
 # while the file is created, so it is never readable by others, even briefly.
 mkdir -p /etc/enigma-sensor
 if [ ! -f /etc/enigma-sensor/config.json ]; then
+  CONFIG_NETWORK_ID=$(json_escape "$ENIGMA_NETWORK_ID")
+  CONFIG_API_KEY=$(json_escape "$ENIGMA_API_KEY")
+  CONFIG_API_URL=$(json_escape "$ENIGMA_API_URL")
   (umask 077 && cat > /etc/enigma-sensor/config.json <<EOF
 {
-  "network_id": "$ENIGMA_NETWORK_ID",
+  "network_id": "$CONFIG_NETWORK_ID",
   "logging": {
     "file": "/var/log/enigma-sensor/enigma-sensor.log",
     "max_size_mb": 100,
@@ -323,8 +342,8 @@ if [ ! -f /etc/enigma-sensor/config.json ]; then
     "retention_hours": 24
   },
   "enigma_api": {
-    "api_key": "$ENIGMA_API_KEY",
-    "server": "$ENIGMA_API_URL",
+    "api_key": "$CONFIG_API_KEY",
+    "server": "$CONFIG_API_URL",
     "upload": true,
     "max_payload_size_mb": 25
   },

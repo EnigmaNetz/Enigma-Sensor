@@ -130,6 +130,9 @@ begin
     UserConfigPage := CreateInputQueryPage(wpSelectDir, 'Configuration', 'Enter your Enigma API Key and Network ID', 'This is required.');
     UserConfigPage.Add('API Key (from Enigma dashboard):', False);
     UserConfigPage.Add('A unique ID for this network (1-64 characters, letters/numbers/spaces/hyphens, e.g. "HQ-Firewall-01"):', False);
+    // Unattended installs supply both in the environment, as the Linux installer does.
+    UserConfigPage.Values[0] := GetEnv('ENIGMA_API_KEY');
+    UserConfigPage.Values[1] := GetEnv('ENIGMA_NETWORK_ID');
   end;
 
   NpcapPage := CreateInputOptionPage(wpSelectDir, 'Enhanced Network Capture',
@@ -173,7 +176,7 @@ begin
       // Check API Key is not empty
       if UserConfigPage.Values[0] = '' then
       begin
-        MsgBox('Please enter your API Key.', mbError, MB_OK);
+        SuppressibleMsgBox('Please enter your API Key.', mbError, MB_OK, IDOK);
         Result := False;
         Exit;
       end;
@@ -182,7 +185,7 @@ begin
       NetworkId := UserConfigPage.Values[1];
       if NetworkId = '' then
       begin
-        MsgBox('Please enter a Network ID.', mbError, MB_OK);
+        SuppressibleMsgBox('Please enter a Network ID.', mbError, MB_OK, IDOK);
         Result := False;
         Exit;
       end;
@@ -190,10 +193,10 @@ begin
       // Validate Network ID format
       if not IsValidNetworkId(NetworkId) then
       begin
-        MsgBox('Invalid Network ID. Requirements:' + #13#10 +
+        SuppressibleMsgBox('Invalid Network ID. Requirements:' + #13#10 +
           '- 1 to 64 characters' + #13#10 +
           '- Letters, numbers, spaces, hyphens, and underscores only' + #13#10 +
-          '- Must start and end with a letter or number', mbError, MB_OK);
+          '- Must start and end with a letter or number', mbError, MB_OK, IDOK);
         Result := False;
         Exit;
       end;
@@ -204,6 +207,51 @@ begin
   begin
     InstallNpcap := NpcapPage.Values[0];
   end;
+end;
+
+// Escapes a value for a JSON string: backslash, double quote, control characters,
+// and anything outside printable ASCII as \uXXXX, so the file stays pure ASCII
+// whatever code page it is saved in. The API key and Network ID are written into
+// config.json as string literals.
+function JsonEscape(const Value: string): string;
+var
+  I: Integer;
+  C: Char;
+begin
+  Result := '';
+  for I := 1 to Length(Value) do
+  begin
+    C := Value[I];
+    if C = '\' then
+      Result := Result + '\\'
+    else if C = '"' then
+      Result := Result + '\"'
+    else if (Ord(C) < 32) or (Ord(C) > 126) then
+      Result := Result + Format('\u%.4x', [Ord(C)])
+    else
+      Result := Result + C;
+  end;
+end;
+
+// Lets only SYSTEM and Administrators open config.json: it holds the API key, and
+// C:\ProgramData grants read access to every local user by inheritance. One
+// Set-Acl call writes the whole security descriptor at once, so access is never
+// widened, even briefly: owner Administrators (so a file a standard user
+// created cannot be re-opened by them), and a protected list granting only SYSTEM
+// and Administrators full control, which drops inherited and stray explicit
+// entries. SIDs, not names, so it works on non-English Windows.
+function RestrictConfigAcl(const Path: string): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+      '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' +
+      '$ErrorActionPreference = ''Stop''; try { $sd = New-Object System.Security.AccessControl.FileSecurity; ' +
+      '$sd.SetSecurityDescriptorSddlForm(''O:BAG:SYD:PAI(A;;FA;;;SY)(A;;FA;;;BA)''); ' +
+      'Set-Acl -LiteralPath ''' + Path + ''' -AclObject $sd; exit 0 } catch { exit 1 }"',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+  if not Result then
+    Log(Format('Restricting access to %s failed (result code %d)', [Path, ResultCode]));
 end;
 
 function FileReplaceString(const FileName, SearchString, ReplaceString: string): boolean;
@@ -230,24 +278,52 @@ begin
   end;
 end;
 
+// Writes and locks down config.json. Runs from PrepareToInstall, before any file
+// is installed or the service registered, so the service never starts without
+// its key. Returns an error message, or '' on success. A failure stops setup
+// before it installs anything, with a non-zero exit code even when silent.
+function PrepareConfig: String;
+var
+  ConfigPath: string;
+begin
+  Result := '';
+  ConfigPath := 'C:\ProgramData\EnigmaSensor\config.json';
+  if not ConfigExists then
+  begin
+    if not ForceDirectories(ExtractFileDir(ConfigPath)) then
+    begin
+      Result := 'Could not create ' + ExtractFileDir(ConfigPath) + '.';
+      Exit;
+    end;
+    ExtractTemporaryFile('config.example.json');
+    if not FileCopy(ExpandConstant('{tmp}\config.example.json'), ConfigPath, False) then
+      Result := 'Could not create ' + ConfigPath + '.'
+    // Locked before the key is written, so it is never readable by other users.
+    else if not RestrictConfigAcl(ConfigPath) then
+      Result := 'Could not restrict access to ' + ConfigPath + ', so the API key was not written. ' +
+        'See the setup log.'
+    else if not FileReplaceString(ConfigPath, '"api_key": "REPLACE_WITH_YOUR_API_KEY"', '"api_key": "' + JsonEscape(UserConfigPage.Values[0]) + '"') or
+       not FileReplaceString(ConfigPath, '"network_id": "REPLACE_WITH_YOUR_NETWORK_ID"', '"network_id": "' + JsonEscape(UserConfigPage.Values[1]) + '"') then
+      Result := 'Could not write the API key and Network ID to ' + ConfigPath + '.';
+    // Leave nothing behind on failure: a leftover config would make the next run
+    // treat it as an upgrade, skip the key and start the sensor with placeholders.
+    if (Result <> '') and FileExists(ConfigPath) and not DeleteFile(ConfigPath) then
+      Log('Could not remove the incomplete ' + ConfigPath);
+  end
+  else if not RestrictConfigAcl(ConfigPath) then
+    // An existing config, possibly left readable by every user by an earlier installer.
+    Result := 'Could not restrict access to ' + ConfigPath + ', which contains the API key. ' +
+      'See the setup log.';
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ExitCode: Integer;
-  ConfigPath: string;
 begin
   if CurStep = ssInstall then
   begin
     if FileExists(ExpandConstant('{app}\nssm.exe')) then
       Exec(ExpandConstant('{app}\nssm.exe'), 'stop EnigmaSensor', ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ExitCode);
-  end;
-  if (CurStep = ssPostInstall) and (not ConfigExists) then
-  begin
-    ConfigPath := 'C:\ProgramData\EnigmaSensor\config.json';
-    ExtractTemporaryFile('config.example.json');
-    FileCopy(ExpandConstant('{tmp}\config.example.json'), ConfigPath, False);
-
-    FileReplaceString(ConfigPath, '"api_key": "REPLACE_WITH_YOUR_API_KEY"', '"api_key": "' + UserConfigPage.Values[0] + '"');
-    FileReplaceString(ConfigPath, '"network_id": "REPLACE_WITH_YOUR_NETWORK_ID"', '"network_id": "' + UserConfigPage.Values[1] + '"');
   end;
 end;
 
@@ -259,7 +335,9 @@ end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
-  Result := '';
+  Result := PrepareConfig;
+  if Result <> '' then
+    Exit;
   if InstallNpcap and not IsNpcapInstalled then
   begin
     if DownloadNpcap then

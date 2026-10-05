@@ -606,6 +606,72 @@ else
   fail "failed upgrade: installer exits 3" "got '${installer_exit:-<no marker>}'"
 fi
 
+# --- Phase 8: config values are JSON-escaped (22.04 only) ----------------------
+# The API key is written into config.json as a JSON string. A quote or backslash
+# in it must not break the file, and a control character is refused. The config
+# is decoded on the host with Python's json module, which is strict like Go's.
+echo "=== Phase 8: config JSON escaping on ubuntu:22.04 ==="
+ESCAPE_KEY='ci-key-"quoted"-back\slash\'
+ESCAPE_SCRIPT=$(cat <<'CONTAINER'
+apt-get update >/dev/null
+cd /release
+bash install-enigma-sensor.sh
+echo "MARK installer_exit=$?"
+echo "MARK config_b64=$(base64 -w0 /etc/enigma-sensor/config.json 2>/dev/null)"
+CONTAINER
+)
+out=""
+status=0
+out=$(docker run --rm -i \
+  --add-host download.opensuse.org:127.0.0.1 \
+  -e "ENIGMA_API_KEY=$ESCAPE_KEY" \
+  -e "ENIGMA_NETWORK_ID=$TEST_NETWORK_ID" \
+  -e DEBIAN_FRONTEND=noninteractive \
+  -v "$RELEASE_DIR:/release" \
+  ubuntu:22.04 bash -s <<<"$ESCAPE_SCRIPT" 2>&1) || status=$?
+if [ "$status" -ne 0 ]; then
+  printf '%s\n' "$out"
+  fail "escaping: container run completed" "docker run exited $status"
+fi
+if [ "$(mark_value "$out" installer_exit)" = "0" ]; then
+  pass "escaping: installer exit status is 0"
+else
+  printf '%s\n' "$out"
+  fail "escaping: installer exit status is 0" "got '$(mark_value "$out" installer_exit)'"
+fi
+decoded=$(mark_value "$out" config_b64 | base64 -d 2>/dev/null \
+  | python3 -c 'import json, sys; c = json.load(sys.stdin); print(c["enigma_api"]["api_key"] == sys.argv[1])' "$ESCAPE_KEY" 2>&1) || true
+if [ "$decoded" = "True" ]; then
+  pass "escaping: config.json is valid JSON and the key with a quote and backslashes round-trips"
+else
+  fail "escaping: config.json is valid JSON and the key with a quote and backslashes round-trips" "$decoded"
+fi
+
+CNTRL_SCRIPT=$(cat <<'CONTAINER'
+apt-get update >/dev/null
+cd /release
+bash install-enigma-sensor.sh
+echo "MARK installer_exit=$?"
+if [ -e /etc/enigma-sensor/config.json ]; then echo "MARK config=present"; else echo "MARK config=absent"; fi
+CONTAINER
+)
+out=""
+out=$(docker run --rm -i \
+  --add-host download.opensuse.org:127.0.0.1 \
+  -e "ENIGMA_API_KEY=$(printf 'ci-key\twith-tab')" \
+  -e "ENIGMA_NETWORK_ID=$TEST_NETWORK_ID" \
+  -e DEBIAN_FRONTEND=noninteractive \
+  -v "$RELEASE_DIR:/release" \
+  ubuntu:22.04 bash -s <<<"$CNTRL_SCRIPT" 2>&1) || true
+if [ "$(mark_value "$out" installer_exit)" != "0" ] && [ "$(mark_value "$out" config)" = "absent" ] \
+  && printf '%s' "$out" | grep -q 'contains control characters'; then
+  pass "escaping: a key with a control character is refused and no config is written"
+else
+  printf '%s\n' "$out"
+  fail "escaping: a key with a control character is refused and no config is written" \
+    "exit '$(mark_value "$out" installer_exit)', config '$(mark_value "$out" config)'"
+fi
+
 # --- Summary -----------------------------------------------------------------
 echo "=== Summary ==="
 if [ "$FAILURES" -ne 0 ]; then

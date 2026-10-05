@@ -1,4 +1,4 @@
-OpenSSL 3.5.0
+OpenSSL 3.6.3
 License: Apache-2.0
 https://www.openssl.org
 

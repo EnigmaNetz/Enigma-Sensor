@@ -1,3 +1,0 @@
-IPtoASN data (share/zeek/site/custom-scripts/data/ip2asn-combined.tsv)
-License: Public Domain (PDDL v1.0), https://opendatacommons.org/licenses/pddl/1.0/
-https://iptoasn.com, maintained by Frank Denis

@@ -161,7 +161,7 @@ Other references: `installer/linux/zeek/README.md` (bundled Zeek packages), `ins
 
 ## Project Overview
 
-The Enigma AI Sensor is a Go 1.24 agent installed on customer machines. Each loop it:
+The Enigma AI Sensor is a Go 1.25 agent installed on customer machines. Each loop it:
 
 PCAP is packet capture; gRPC is gRPC Remote Procedure Calls.
 

@@ -243,15 +243,25 @@ end;
 function RestrictConfigAcl(const Path: string): Boolean;
 var
   ResultCode: Integer;
+  ErrorFile: string;
+  ErrorText: AnsiString;
 begin
+  // PowerShell writes its error here, so the setup log says why it failed.
+  ErrorFile := ExpandConstant('{tmp}\config-acl-error.txt');
+  DeleteFile(ErrorFile);
   Result := Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
       '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' +
       '$ErrorActionPreference = ''Stop''; try { $sd = New-Object System.Security.AccessControl.FileSecurity; ' +
       '$sd.SetSecurityDescriptorSddlForm(''O:BAG:SYD:PAI(A;;FA;;;SY)(A;;FA;;;BA)''); ' +
-      'Set-Acl -LiteralPath ''' + Path + ''' -AclObject $sd; exit 0 } catch { exit 1 }"',
+      'Set-Acl -LiteralPath ''' + Path + ''' -AclObject $sd; exit 0 } ' +
+      'catch { Set-Content -LiteralPath ''' + ErrorFile + ''' -Value $_.Exception.Message; exit 1 }"',
       '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
   if not Result then
+  begin
     Log(Format('Restricting access to %s failed (result code %d)', [Path, ResultCode]));
+    if LoadStringFromFile(ErrorFile, ErrorText) then
+      Log('Restricting access failed with: ' + String(ErrorText));
+  end;
 end;
 
 function FileReplaceString(const FileName, SearchString, ReplaceString: string): boolean;

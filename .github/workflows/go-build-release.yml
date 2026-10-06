@@ -15,3 +15,48 @@ jobs:
       artifact_prefix: ${{ github.ref_name }}
       retention_days: 90
       upload_to_release: true
+
+  # Checksums and provenance are made from the assets as published, so they cover
+  # exactly the bytes customers download; the attestation shows this workflow
+  # published them. Customers verify with `gh attestation verify <file>
+  # --repo EnigmaNetz/Enigma-Sensor --signer-workflow
+  # EnigmaNetz/Enigma-Sensor/.github/workflows/go-build-release.yml`.
+  checksums-and-attestations:
+    name: Publish SHA256SUMS and attestations
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Download release assets
+        run: |
+          mkdir assets
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir assets --pattern 'enigma-sensor-*'
+          cd assets
+          expected=(
+            "enigma-sensor-windows-$TAG.exe"
+            "enigma-sensor-$TAG-linux-release.zip"
+            "enigma-sensor-linux-amd64-$TAG.tar.gz"
+            "enigma-sensor-macos-$TAG.tar.gz"
+          )
+          diff <(printf '%s\n' "${expected[@]}" | sort) <(printf '%s\n' * | sort) || {
+            echo "::error::Release assets differ from the expected set (< expected, > found)"
+            exit 1
+          }
+
+      - name: Write SHA256SUMS
+        working-directory: assets
+        run: sha256sum enigma-sensor-* > ../SHA256SUMS && cat ../SHA256SUMS
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-checksums: SHA256SUMS
+
+      - name: Upload SHA256SUMS to the release
+        run: gh release upload "$TAG" SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber

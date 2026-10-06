@@ -180,6 +180,37 @@ Download `enigma-sensor-macos-<version>.tar.gz` (amd64) from the release and ext
 - make sure `tcpdump` is available and run the sensor as root;
 - put `config.json` in the working directory (copy `config.example.json`).
 
+### Verifying a download
+
+Every release after v1.9.5 publishes a `SHA256SUMS` file and a build provenance attestation for
+each asset. The attestation shows the file was published by this repository's release workflow.
+
+To check the checksum, download `SHA256SUMS` next to the asset, then:
+
+```sh
+sha256sum --check --ignore-missing SHA256SUMS                        # Linux
+shasum -a 256 --check --ignore-missing SHA256SUMS                    # macOS
+```
+
+On Windows, in PowerShell (prints `True` when the file matches):
+
+```powershell
+$f = 'enigma-sensor-windows-<version>.exe'
+$expected = ((Get-Content SHA256SUMS | Where-Object { $_.EndsWith("  $f") }) -split ' ')[0]
+(Get-FileHash $f -Algorithm SHA256).Hash -eq $expected
+```
+
+To check the attestation, with the [GitHub CLI](https://cli.github.com/) signed in to any GitHub
+account (`gh auth login`):
+
+```sh
+gh attestation verify <downloaded file> --repo EnigmaNetz/Enigma-Sensor \
+  --signer-workflow EnigmaNetz/Enigma-Sensor/.github/workflows/go-build-release.yml
+```
+
+The Windows installer is not yet code-signed, so Windows may still warn that the publisher is
+unknown.
+
 ---
 
 ## Sending data to an on-prem Enigma AI install

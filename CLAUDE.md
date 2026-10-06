@@ -231,8 +231,15 @@ config in the repo.
 - Success is `statusCode` 200 in the response body. `statusCode` 410 means the key is invalid: the
   upload is not retried or buffered, and the sensor stops and exits 0.
 - Payloads over `enigma_api.max_payload_size_mb` are split by line into several uploads.
-- An upload is tried 3 times, 5 seconds apart, then written to `buffering.dir`. Buffered payloads
-  are retried oldest first before the next upload and purged after `buffering.max_age_hours`.
+- Each upload RPC has a 4m30s deadline (under Cloud Run's 300 s request timeout), and the connection
+  uses keepalive pings while an RPC is in flight. An upload is tried 3 times, then written to
+  `buffering.dir`; a cancelled upload is buffered too, and so is every remaining chunk of a chunked
+  one. Between attempts it waits half to all of `retryDelay` (5 s), doubled per retry, and the wait
+  ends early on cancellation. Buffered payloads are retried oldest first before the next upload and
+  purged after `buffering.max_age_hours`. Delivery is at least once: a timed-out or cancelled RPC the
+  Publisher had already accepted is sent again. Only one worker flushes the buffer at a time
+  (`flushMu`), and buffer files are written under a `.tmp` name and renamed, so a buffered payload is
+  never read by two workers at once and never uploaded half-written.
 
 Enigma-Publisher (`grpc_config.proto`) receives this, and Enigma-Data-Generator
 (`demo_generator/client/proto/publisher.proto`) imitates the sensor with the same contract.

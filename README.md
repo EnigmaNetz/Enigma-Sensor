@@ -296,8 +296,10 @@ Each upload carries the five Zeek logs (compressed) and a small set of sensor me
 ID, a machine ID, sensor and Zeek versions, operating system and architecture, up to ten private
 IPv4 addresses of the sensor host, and a session ID.
 
-If an upload fails three times, it is saved to `buffering.dir` and retried before the next upload,
-until it is older than `buffering.max_age_hours`.
+Each upload attempt times out after 4.5 minutes. If an upload fails three times (waiting 2.5 to 5
+seconds, then 5 to 10 seconds, between attempts), or is interrupted because the sensor is stopping,
+it is saved to `buffering.dir` and retried before the next upload, until it is older than
+`buffering.max_age_hours`.
 
 If the API rejects the API key with `410 Gone` (for example, a revoked key), the upload is not
 retried or buffered, and the sensor stops capturing and exits with code 0. The Linux service

@@ -3,7 +3,7 @@
 
 [Setup]
 AppName=Enigma Sensor
-AppVersion=1.9.4
+AppVersion=1.9.5
 DefaultDirName={autopf}\EnigmaSensor
 DefaultGroupName=Enigma Sensor
 OutputBaseFilename=enigma-sensor-installer

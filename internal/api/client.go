@@ -11,13 +11,16 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/protobuf/proto"
 
 	pb "EnigmaNetz/Enigma-Go-Sensor/internal/api/publish"
@@ -29,6 +32,24 @@ type grpcClient interface {
 	uploadExcelMethod(ctx context.Context, data []byte, employeeId string, metadata map[string]string) (string, int32, string, error)
 }
 
+const (
+	// defaultUploadTimeout bounds one upload RPC. It is generous because a
+	// payload of up to max_payload_size_mb of logs (compressed on the wire) over
+	// a slow customer uplink can take minutes; its job is to free a worker stuck
+	// on a hung connection, not to police slow ones. It is under Cloud Run's
+	// 300 s request timeout so the client's deadline, not the server's, fires.
+	defaultUploadTimeout = 4*time.Minute + 30*time.Second
+
+	// Keepalive pings only while an upload is in flight (PermitWithoutStream is
+	// false), so a half-open connection fails the RPC instead of hanging it.
+	keepaliveTime    = time.Minute
+	keepaliveTimeout = 20 * time.Second
+
+	// bufferTmpSuffix marks a buffered payload still being written; flushBuffer
+	// skips it so it never uploads half a file.
+	bufferTmpSuffix = ".tmp"
+)
+
 // LogUploader handles uploading logs to the gRPC server
 type LogUploader struct {
 	client           grpcClient
@@ -36,11 +57,15 @@ type LogUploader struct {
 	networkID        string
 	captureInterface string
 	retryCount       int
-	retryDelay       time.Duration
+	retryDelay       time.Duration                // base delay; doubles after each failed attempt, with jitter
+	uploadTimeout    time.Duration                // per-RPC deadline; 0 means defaultUploadTimeout
 	compressFunc     func([]byte) ([]byte, error) // for DI/testing
 	maxPayloadSizeMB int64                        // maximum payload size before chunking
 	bufferDir        string
 	bufferMaxAge     time.Duration
+	// flushMu lets one worker at a time flush the buffer directory, so a
+	// buffered payload is never read and uploaded by two workers at once.
+	flushMu sync.Mutex
 }
 
 // LogFiles contains paths to the log files to upload
@@ -93,12 +118,18 @@ func NewLogUploader(serverAddr string, apiKey string, networkID string, captureI
 	}
 	opts = append(opts, grpc.WithTransportCredentials(creds))
 
-	// Add keepalive options
+	opts = append(opts, grpc.WithKeepaliveParams(keepalive.ClientParameters{
+		Time:    keepaliveTime,
+		Timeout: keepaliveTimeout,
+	}))
 	opts = append(opts, grpc.WithDefaultServiceConfig(`{"loadBalancingConfig": [{"round_robin":{}}]}`))
 
-	conn, err := grpc.Dial(serverAddr, opts...)
+	// NewClient does not connect until the first RPC, as grpc.Dial without
+	// WithBlock did before. Unlike Dial, it resolves serverAddr through DNS
+	// itself, which round_robin above expects.
+	conn, err := grpc.NewClient(serverAddr, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to gRPC server: %v", err)
+		return nil, fmt.Errorf("failed to create gRPC client: %w", err)
 	}
 
 	return &LogUploader{
@@ -129,7 +160,7 @@ func (c *grpcClientImpl) uploadExcelMethod(ctx context.Context, data []byte, emp
 
 	resp, err := c.client.UploadExcelMethod(ctx, req)
 	if err != nil {
-		return "", 0, "", fmt.Errorf("gRPC call failed: %v", err)
+		return "", 0, "", fmt.Errorf("gRPC call failed: %w", err)
 	}
 
 	return resp.Status, resp.StatusCode, resp.Message, nil
@@ -172,16 +203,23 @@ func (u *LogUploader) uploadLogsSingle(ctx context.Context, files LogFiles) erro
 	// Upload with retries
 	var lastErr error
 	for i := 0; i < u.retryCount; i++ {
+		if i > 0 {
+			if err := u.waitBeforeRetry(ctx, i); err != nil {
+				return u.bufferCancelled(combinedData, err)
+			}
+		}
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return u.bufferCancelled(combinedData, ctx.Err())
 		}
 		if err := u.upload(ctx, combinedData); err != nil {
 			// A 410 is final: retrying or buffering would only resend to a revoked key
 			if errors.Is(err, ErrAPIGone) {
 				return err
 			}
+			if ctx.Err() != nil {
+				return u.bufferCancelled(combinedData, ctx.Err())
+			}
 			lastErr = err
-			time.Sleep(u.retryDelay)
 			continue
 		}
 		return nil
@@ -192,6 +230,15 @@ func (u *LogUploader) uploadLogsSingle(ctx context.Context, files LogFiles) erro
 		return fmt.Errorf("failed to upload after %d retries and also failed to buffer payload: %v; original error: %v", u.retryCount, err, lastErr)
 	}
 	return fmt.Errorf("failed to upload after %d retries: %w (payload buffered for retry)", u.retryCount, lastErr)
+}
+
+// bufferCancelled saves a payload whose upload was interrupted by cancellation,
+// so shutting down does not lose it. Writing to local disk needs no context.
+func (u *LogUploader) bufferCancelled(data []byte, ctxErr error) error {
+	if err := u.bufferSave(data); err != nil {
+		return fmt.Errorf("upload cancelled and failed to buffer payload: %v: %w", err, ctxErr)
+	}
+	return fmt.Errorf("upload cancelled: %w (payload buffered for retry)", ctxErr)
 }
 
 // uploadLogsChunked splits files and uploads each chunk separately
@@ -255,6 +302,7 @@ func (u *LogUploader) uploadLogsChunked(ctx context.Context, files LogFiles) err
 	}()
 
 	// Upload each chunk
+	var cancelErr error
 	for i := 0; i < maxChunks; i++ {
 		chunkFiles := LogFiles{}
 
@@ -303,13 +351,20 @@ func (u *LogUploader) uploadLogsChunked(ctx context.Context, files LogFiles) err
 			continue
 		}
 
-		// Upload this chunk
+		// Upload this chunk. After cancellation, keep going: each remaining
+		// chunk is then buffered instead of uploaded, so none is lost.
 		if err := u.uploadLogsSingle(ctx, chunkFiles); err != nil {
-			return fmt.Errorf("failed to upload chunk %d: %w", i+1, err)
+			err = fmt.Errorf("failed to upload chunk %d: %w", i+1, err)
+			if ctx.Err() == nil || errors.Is(err, ErrAPIGone) {
+				return err
+			}
+			if cancelErr == nil {
+				cancelErr = err
+			}
 		}
 	}
 
-	return nil
+	return cancelErr
 }
 
 // prepareLogData reads, compresses, and combines the log files
@@ -409,15 +464,46 @@ func (u *LogUploader) prepareLogData(files LogFiles) ([]byte, error) {
 	return u.compressFunc(jsonData)
 }
 
+// retryBackoff is the wait before retry number retry (1 for the first retry):
+// retryDelay doubled per earlier retry, then jittered to between half and all
+// of that, so workers that failed together do not retry together.
+func (u *LogUploader) retryBackoff(retry int) time.Duration {
+	d := u.retryDelay << (retry - 1)
+	if d <= 0 {
+		return 0
+	}
+	return d/2 + rand.N(d/2+1)
+}
+
+// waitBeforeRetry sleeps for the backoff before retry number retry, returning
+// early with ctx's error if ctx is cancelled.
+func (u *LogUploader) waitBeforeRetry(ctx context.Context, retry int) error {
+	t := time.NewTimer(u.retryBackoff(retry))
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
 // upload sends the compressed data to the server
 func (u *LogUploader) upload(ctx context.Context, data []byte) error {
 	// Generate metadata for the payload
 	metadataMap := metadata.GenerateMetadata(u.networkID, u.captureInterface)
 	log.Printf("[upload] Sending metadata to API: %+v", metadataMap)
 
-	_, statusCode, message, err := u.client.uploadExcelMethod(ctx, data, u.apiKey, metadataMap)
+	timeout := u.uploadTimeout
+	if timeout <= 0 {
+		timeout = defaultUploadTimeout
+	}
+	rpcCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	_, statusCode, message, err := u.client.uploadExcelMethod(rpcCtx, data, u.apiKey, metadataMap)
 	if err != nil {
-		return fmt.Errorf("gRPC call failed: %v", err)
+		return fmt.Errorf("gRPC call failed: %w", err)
 	}
 
 	if statusCode == 410 {
@@ -444,17 +530,31 @@ func (u *LogUploader) bufferSave(data []byte) error {
 	// Include monotonic nsec to avoid collisions
 	fname := fmt.Sprintf("buf_%s_%d.bin", ts, time.Now().UTC().UnixNano())
 	path := filepath.Join(u.bufferDir, fname)
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	// Write under a temporary name and rename, so a concurrent flush never
+	// sees a partly written payload.
+	tmp := path + bufferTmpSuffix
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		_ = os.Remove(tmp)
 		return fmt.Errorf("failed to write buffer file: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("failed to finalize buffer file: %w", err)
 	}
 	return nil
 }
 
-// flushBuffer attempts to send buffered payloads oldest-first and purges old entries
+// flushBuffer attempts to send buffered payloads oldest-first and purges old
+// entries. If another worker is already flushing, it returns at once and leaves
+// the buffer to that worker.
 func (u *LogUploader) flushBuffer(ctx context.Context) error {
 	if u.bufferDir == "" {
 		return nil
 	}
+	if !u.flushMu.TryLock() {
+		return nil
+	}
+	defer u.flushMu.Unlock()
 	entries, err := os.ReadDir(u.bufferDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -481,9 +581,14 @@ func (u *LogUploader) flushBuffer(ctx context.Context) error {
 		if statErr != nil {
 			continue
 		}
-		// Purge old files beyond retention
+		// Purge old files beyond retention, including a .tmp left by a crash
+		// between write and rename
 		if u.bufferMaxAge > 0 && info.ModTime().Add(u.bufferMaxAge).Before(now) {
 			_ = os.Remove(full)
+			continue
+		}
+		// A .tmp file is still being written (or was abandoned); never upload it
+		if strings.HasSuffix(e.Name(), bufferTmpSuffix) {
 			continue
 		}
 		// Try upload

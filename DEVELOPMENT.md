@@ -115,7 +115,7 @@ CI runs in GitHub Actions.
 | `linux-install-test.yml` | Push to `main`, every PR | `scripts/test-linux-install.sh`, then builds the Docker image and checks its Zeek is 8.0.x |
 | `windows-install-test.yml` | Push to `main`, every PR | Builds the Windows installer and runs `scripts/test-windows-install.ps1` |
 | `pr-build-artifacts.yml` | PR labelled `build:windows`, `build:linux`, `build:macos` or `build:all` | Builds installers and binaries as workflow artifacts (kept 7 days) |
-| `go-build-release.yml` | Any tag push | Builds everything and attaches it to the GitHub Release for that tag |
+| `go-build-release.yml` | Any tag push | Builds everything and attaches it to the GitHub Release for that tag, then publishes `SHA256SUMS` and a build provenance attestation for each asset |
 | `docker-publish.yml` | `v*` tag push | Builds and pushes `ghcr.io/enigmanetz/enigma-sensor` tagged with the version, `major.minor`, `major` and `latest` |
 
 `pr-build-artifacts.yml` and `go-build-release.yml` both call `build-artifacts-reusable.yml`. There

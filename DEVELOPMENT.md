@@ -84,7 +84,19 @@ Builds the `.deb`, assembles the release zip layout, and installs it in fresh `u
 prove each host installs Zeek from its matching bundled packages. It also checks that a tampered
 bundle is refused, upgrades a host running the previous release's Zeek 8.0.5 packages (taken from git
 history) with edited Zeek config files, and checks that a failed Zeek upgrade keeps the sensor and
-warns that Zeek is outdated.
+warns that Zeek is outdated. It also checks that an API key containing a quote and backslashes still
+produces valid JSON, and that a key with a control character is refused.
+
+### Windows install test
+
+```powershell
+pwsh scripts/test-windows-install.ps1
+```
+
+Runs the built Windows installer silently (in CI, `windows-install-test.yml` on a disposable
+runner) and checks that `config.json` is valid JSON with a key containing a quote and backslashes,
+that only SYSTEM and Administrators can access it, and that an upgrade locks down a config an earlier
+installer left readable. It installs the sensor service, so run it only on a throwaway machine.
 
 ### Load test
 
@@ -101,6 +113,7 @@ CI runs in GitHub Actions.
 | --- | --- | --- |
 | `go-test.yml` | Push to `main`, every PR | `go test -v -race ./...` on Ubuntu, Windows and macOS; on Ubuntu, also fails if `THIRD_PARTY_NOTICES` is out of date |
 | `linux-install-test.yml` | Push to `main`, every PR | `scripts/test-linux-install.sh`, then builds the Docker image and checks its Zeek is 8.0.x |
+| `windows-install-test.yml` | Push to `main`, every PR | Builds the Windows installer and runs `scripts/test-windows-install.ps1` |
 | `pr-build-artifacts.yml` | PR labelled `build:windows`, `build:linux`, `build:macos` or `build:all` | Builds installers and binaries as workflow artifacts (kept 7 days) |
 | `go-build-release.yml` | Any tag push | Builds everything and attaches it to the GitHub Release for that tag |
 | `docker-publish.yml` | `v*` tag push | Builds and pushes `ghcr.io/enigmanetz/enigma-sensor` tagged with the version, `major.minor`, `major` and `latest` |

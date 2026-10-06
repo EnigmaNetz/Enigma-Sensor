@@ -52,12 +52,24 @@ and Inno Setup places the later-created page first).
 2. **Configuration page** (only when `C:\ProgramData\EnigmaSensor\config.json` does not exist): asks
    for the API key and Network ID. Both are required, and the Network ID is checked against the same
    rules as the sensor (1 to 64 characters; letters, numbers, spaces, hyphens and underscores;
-   starting and ending with a letter or number).
-3. **Before installing**: if Npcap was chosen, downloads `https://npcap.com/dist/npcap-1.79.exe`.
-   If the download fails it shows a message and carries on without Npcap.
-4. **Installing**: stops an existing `EnigmaSensor` service, copies the files, and on a fresh install
-   writes `C:\ProgramData\EnigmaSensor\config.json` from `config.example.json` with the API key and
-   Network ID filled in. An existing config is never touched.
+   starting and ending with a letter or number). The fields start out filled from the
+   `ENIGMA_API_KEY` and `ENIGMA_NETWORK_ID` environment variables, the same ones the Linux
+   installer reads, so an unattended install takes its values from them. Run unattended installs with
+   both `/VERYSILENT` and `/SUPPRESSMSGBOXES`: then a missing or invalid value makes setup exit with
+   an error, where `/VERYSILENT` alone would show the error dialog and wait. Set the variables only in
+   the elevated shell that runs the installer: a UAC prompt can start setup without them, and
+   `setx /M` would leave the key readable by every user on the machine.
+3. **Before installing**: on a fresh install, writes `C:\ProgramData\EnigmaSensor\config.json`
+   from `config.example.json` with the API key and Network ID filled in (JSON-escaped). The config
+   holds the API key, so before the key is written its owner becomes Administrators and its
+   permissions are replaced with SYSTEM and Administrators only, with no inheritance from
+   `C:\ProgramData`. An existing config keeps its content, but its owner and permissions are reset the
+   same way, which locks down configs earlier installers left readable by every local user. If the
+   permissions cannot be set, setup stops with an error and installs nothing; on a fresh install it
+   also removes the incomplete config, so the next run asks for the key again. Then, if Npcap was
+   chosen, downloads `https://npcap.com/dist/npcap-1.79.exe`; if the download fails it shows a
+   message and carries on without Npcap.
+4. **Installing**: stops an existing `EnigmaSensor` service and copies the files.
 5. **After installing**:
    - launches the Npcap installer if it was downloaded; the user clicks through it and setup waits;
    - registers the service with NSSM: runs as LocalSystem, starts automatically, working directory

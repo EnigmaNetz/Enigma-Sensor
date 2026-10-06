@@ -1,0 +1,43 @@
+name: Windows Install Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-install:
+    name: Windows installer test
+    runs-on: windows-latest
+    # A blocked silent install would otherwise hold the runner for six hours.
+    timeout-minutes: 20
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Set up Go
+      uses: actions/setup-go@v7
+      with:
+        go-version: '1.25.x'
+        cache: true
+
+    - name: Build Windows binary
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Force -Path bin | Out-Null
+        go build -o bin/enigma-sensor-windows-amd64.exe ./cmd/enigma-sensor
+
+    - name: Build Windows installer
+      shell: pwsh
+      run: |
+        choco install innosetup --no-progress
+        & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer/windows/enigma-sensor-installer.iss
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    # Installs the sensor service on the runner, which is discarded after the job.
+    - name: Run Windows install test
+      shell: pwsh
+      run: ./scripts/test-windows-install.ps1

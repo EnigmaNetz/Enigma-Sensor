@@ -116,10 +116,36 @@ CI runs in GitHub Actions.
 | `windows-install-test.yml` | Push to `main`, every PR | Builds the Windows installer and runs `scripts/test-windows-install.ps1` |
 | `pr-build-artifacts.yml` | PR labelled `build:windows`, `build:linux`, `build:macos` or `build:all` | Builds installers and binaries as workflow artifacts (kept 7 days) |
 | `go-build-release.yml` | Any tag push | Builds everything and attaches it to the GitHub Release for that tag, then publishes `SHA256SUMS` and a build provenance attestation for each asset |
+| `proto-drift.yml` | Push to `main`, every PR into `main` | Fails if `internal/api/ingest/sensor_records.proto` differs from Enigma-Publisher's copy on `stage`, read with a scoped GitHub App token |
 | `docker-publish.yml` | `v*` tag push | Builds and pushes `ghcr.io/enigmanetz/enigma-sensor` tagged with the version, `major.minor`, `major` and `latest` |
 
 `pr-build-artifacts.yml` and `go-build-release.yml` both call `build-artifacts-reusable.yml`. There
 is no lint or format check in CI; run `gofmt -l .` before opening a PR.
+
+### The upload contract
+
+`internal/api/ingest/sensor_records.proto` is a byte-identical copy of Enigma-Publisher's
+`sensor_records.proto` (B1CF-2107). After copying a new version, regenerate the Go code with protoc
+3.15 or newer (proto3 `optional` fields) and the plugin versions recorded in the generated files'
+headers:
+
+```sh
+go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.6
+go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
+protoc -I internal/api/ingest \
+  --go_out=internal/api/ingest --go_opt=paths=source_relative \
+  --go-grpc_out=internal/api/ingest --go-grpc_opt=paths=source_relative \
+  sensor_records.proto
+```
+
+`internal/records/records_test.go` checks that Zeek's JSON logs map to the values the
+tab-separated logs gave, on fixtures in `internal/records/testdata`. After a Zeek upgrade or a
+change to the embedded scripts, regenerate them (needs Zeek) and rerun the tests:
+
+```sh
+bash internal/records/testdata/regenerate.sh
+go test ./internal/records/
+```
 
 Dependabot opens weekly grouped PRs for GitHub Actions versions.
 

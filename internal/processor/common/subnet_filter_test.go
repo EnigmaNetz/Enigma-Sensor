@@ -1,46 +1,27 @@
 package types
 
 import (
+	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// zeekHeader builds the standard Zeek TSV header for a log with the given path
-// name and #fields columns. The #separator line uses the literal "\x09" escape
-// exactly as Zeek writes it, so the filter's separator decoding is exercised.
-func zeekHeader(path string, fields ...string) []string {
-	return []string{
-		`#separator \x09`,
-		"#set_separator\t,",
-		"#empty_field\t(empty)",
-		"#unset_field\t-",
-		"#path\t" + path,
-		"#open\t2024-01-01-00-00-00",
-		"#fields\t" + strings.Join(fields, "\t"),
-		"#types\t" + strings.Repeat("string\t", len(fields)-1) + "string",
-	}
-}
-
-// writeLog joins header + data rows + a #close footer with a trailing newline
-// (matching real Zeek output) and writes it to runDir/name.
-func writeLog(t *testing.T, runDir, name string, header []string, rows ...string) string {
+// writeLog writes JSON log records, one per line with a trailing newline, as Zeek does with
+// LogAscii::use_json=T.
+func writeLog(t *testing.T, runDir, name string, records ...string) string {
 	t.Helper()
-	lines := append([]string{}, header...)
-	lines = append(lines, rows...)
-	lines = append(lines, "#close\t2024-01-01-00-01-00", "")
 	p := filepath.Join(runDir, name)
-	if err := os.WriteFile(p, []byte(strings.Join(lines, "\n")), 0644); err != nil {
+	if err := os.WriteFile(p, []byte(strings.Join(records, "\n")+"\n"), 0644); err != nil {
 		t.Fatalf("write %s: %v", name, err)
 	}
 	return p
 }
 
-func row(cols ...string) string { return strings.Join(cols, "\t") }
-
-// readDataRows returns the non-comment, non-empty rows of a log file.
-func readDataRows(t *testing.T, path string) []string {
+// readUIDs returns the uid (or the joined uids) of each record in a JSON log, in order.
+func readUIDs(t *testing.T, path string) []string {
 	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -48,199 +29,150 @@ func readDataRows(t *testing.T, path string) []string {
 	}
 	var out []string
 	for _, line := range strings.Split(string(data), "\n") {
-		if line == "" || strings.HasPrefix(line, "#") {
+		if line == "" {
 			continue
 		}
-		out = append(out, line)
+		var rec struct {
+			UID  string   `json:"uid"`
+			UIDs []string `json:"uids"`
+		}
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("record %q: %v", line, err)
+		}
+		if rec.UID != "" {
+			out = append(out, rec.UID)
+		} else {
+			out = append(out, strings.Join(rec.UIDs, ","))
+		}
 	}
 	return out
 }
 
+func equal(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestFilterExcludedSubnets_ConnDropsBySrcOrDst(t *testing.T) {
 	dir := t.TempDir()
-	hdr := zeekHeader("conn", "ts", "uid", "id.orig_h", "id.orig_p", "id.resp_h", "id.resp_p", "proto")
-	path := writeLog(t, dir, "conn.log", hdr,
-		row("1", "CA", "10.1.2.3", "1234", "8.8.8.8", "53", "udp"),      // orig in 10/8 -> drop
-		row("2", "CB", "192.168.1.5", "5555", "10.5.5.5", "443", "tcp"), // resp in 10/8 -> drop
-		row("3", "CC", "192.168.1.5", "5555", "8.8.8.8", "443", "tcp"),  // neither -> keep
+	path := writeLog(t, dir, "conn.log",
+		`{"ts":1.0,"uid":"CA","id.orig_h":"10.1.2.3","id.resp_h":"8.8.8.8"}`,
+		`{"ts":2.0,"uid":"CB","id.orig_h":"192.168.1.5","id.resp_h":"10.9.9.9"}`,
+		`{"ts":3.0,"uid":"CC","id.orig_h":"192.168.1.5","id.resp_h":"8.8.8.8"}`,
 	)
-
 	if err := FilterExcludedSubnets(dir, []string{"conn.log"}, []string{"10.0.0.0/8"}); err != nil {
 		t.Fatalf("FilterExcludedSubnets: %v", err)
 	}
-
-	rows := readDataRows(t, path)
-	if len(rows) != 1 {
-		t.Fatalf("expected 1 row kept, got %d: %v", len(rows), rows)
-	}
-	if !strings.Contains(rows[0], "CC") {
-		t.Errorf("expected only row CC kept, got %q", rows[0])
+	if got := readUIDs(t, path); !equal(got, []string{"CC"}) {
+		t.Fatalf("kept %v, want [CC]", got)
 	}
 }
 
-func TestFilterExcludedSubnets_DHCPAddressColumns(t *testing.T) {
+func TestFilterExcludedSubnets_DHCPAddressFields(t *testing.T) {
 	dir := t.TempDir()
-	// DHCP log with the dhcp-specific address columns and no id.orig_h/resp_h.
-	hdr := zeekHeader("dhcp", "ts", "uid", "mac", "client_addr", "server_addr", "requested_addr", "assigned_addr", "lease_time")
-	path := writeLog(t, dir, "dhcp.log", hdr,
-		// assigned_addr in 10/8 -> drop (client_addr unset)
-		row("1", "DA", "aa:bb:cc:dd:ee:01", "-", "192.168.1.1", "-", "10.0.0.50", "3600"),
-		// all address fields unset or out-of-range -> keep (unset markers skipped)
-		row("2", "DB", "aa:bb:cc:dd:ee:02", "-", "192.168.1.1", "(empty)", "-", "3600"),
-		// requested_addr in 10/8 -> drop
-		row("3", "DC", "aa:bb:cc:dd:ee:03", "192.168.1.9", "192.168.1.1", "10.9.9.9", "-", "3600"),
+	path := writeLog(t, dir, "dhcp.log",
+		`{"ts":1.0,"uids":["D1"],"client_addr":"192.168.1.20","server_addr":"192.168.1.1"}`,
+		`{"ts":2.0,"uids":["D2"],"client_addr":"192.168.1.21","assigned_addr":"10.0.0.21"}`,
+		`{"ts":3.0,"uids":["D3"],"requested_addr":"10.0.0.22"}`,
+		`{"ts":4.0,"uids":["D4"],"server_addr":"10.0.0.1"}`,
 	)
-
 	if err := FilterExcludedSubnets(dir, []string{"dhcp.log"}, []string{"10.0.0.0/8"}); err != nil {
 		t.Fatalf("FilterExcludedSubnets: %v", err)
 	}
-
-	rows := readDataRows(t, path)
-	if len(rows) != 1 || !strings.Contains(rows[0], "DB") {
-		t.Fatalf("expected only row DB kept, got %v", rows)
-	}
-}
-
-func TestFilterExcludedSubnets_PreservesHeadersAndFooter(t *testing.T) {
-	dir := t.TempDir()
-	hdr := zeekHeader("conn", "ts", "uid", "id.orig_h", "id.orig_p", "id.resp_h", "id.resp_p", "proto")
-	path := writeLog(t, dir, "conn.log", hdr,
-		row("1", "CA", "10.1.2.3", "1234", "8.8.8.8", "53", "udp"), // dropped
-	)
-	before, _ := os.ReadFile(path)
-
-	if err := FilterExcludedSubnets(dir, []string{"conn.log"}, []string{"10.0.0.0/8"}); err != nil {
-		t.Fatalf("FilterExcludedSubnets: %v", err)
-	}
-
-	after, _ := os.ReadFile(path)
-	afterStr := string(after)
-	// Every header/footer line must survive verbatim.
-	for _, want := range append(hdr, "#close\t2024-01-01-00-01-00") {
-		if !strings.Contains(afterStr, want) {
-			t.Errorf("header/footer line missing after filter: %q", want)
-		}
-	}
-	// Trailing newline preserved.
-	if !strings.HasSuffix(afterStr, "\n") {
-		t.Errorf("trailing newline not preserved")
-	}
-	// The data row must be gone.
-	if strings.Contains(afterStr, "\tCA\t") {
-		t.Errorf("dropped row still present")
-	}
-	if len(after) >= len(before) {
-		t.Errorf("expected file to shrink after dropping a row")
+	if got := readUIDs(t, path); !equal(got, []string{"D1"}) {
+		t.Fatalf("kept %v, want [D1]", got)
 	}
 }
 
 func TestFilterExcludedSubnets_FeatureOffLeavesFileUnchanged(t *testing.T) {
 	dir := t.TempDir()
-	hdr := zeekHeader("conn", "ts", "uid", "id.orig_h", "id.orig_p", "id.resp_h", "id.resp_p", "proto")
-	path := writeLog(t, dir, "conn.log", hdr,
-		row("1", "CA", "10.1.2.3", "1234", "8.8.8.8", "53", "udp"),
-	)
+	path := writeLog(t, dir, "conn.log", `{"ts":1.0,"uid":"CA","id.orig_h":"10.1.2.3","id.resp_h":"8.8.8.8"}`)
 	before, _ := os.ReadFile(path)
-
-	// Empty CIDR list = feature off: no rows should be dropped.
-	if err := FilterExcludedSubnets(dir, []string{"conn.log"}, nil); err != nil {
-		t.Fatalf("FilterExcludedSubnets: %v", err)
+	for _, cidrs := range [][]string{nil, {}, {"", "  "}} {
+		if err := FilterExcludedSubnets(dir, []string{"conn.log"}, cidrs); err != nil {
+			t.Fatalf("FilterExcludedSubnets(%q): %v", cidrs, err)
+		}
 	}
-
 	after, _ := os.ReadFile(path)
 	if string(before) != string(after) {
-		t.Errorf("file changed with feature off")
+		t.Fatal("file changed with filtering off")
+	}
+}
+
+func TestFilterExcludedSubnets_NothingDroppedLeavesFileUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	path := writeLog(t, dir, "conn.log", `{"ts":1.0,"uid":"CA","id.orig_h":"192.168.1.5","id.resp_h":"8.8.8.8"}`)
+	before, _ := os.ReadFile(path)
+	if err := FilterExcludedSubnets(dir, []string{"conn.log"}, []string{"10.0.0.0/8"}); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.ReadFile(path)
+	if string(before) != string(after) {
+		t.Fatal("file changed although no record was dropped")
+	}
+	if _, err := os.Stat(path + ".rewrite"); !os.IsNotExist(err) {
+		t.Fatal("temporary file left behind")
+	}
+}
+
+// dhcp.log has no conn_id, so a lease record with only some address fields is checked on those.
+func TestFilterExcludedSubnets_DHCPNeedsNoConnID(t *testing.T) {
+	dir := t.TempDir()
+	path := writeLog(t, dir, "dhcp.log", `{"ts":1.0,"uids":["D1"],"mac":"aa:bb:cc:dd:ee:ff"}`)
+	if err := FilterExcludedSubnets(dir, []string{"dhcp.log"}, []string{"10.0.0.0/8"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readUIDs(t, path); !equal(got, []string{"D1"}) {
+		t.Fatalf("kept %v, want [D1]", got)
 	}
 }
 
 func TestFilterExcludedSubnets_MissingFileIsNoOp(t *testing.T) {
-	dir := t.TempDir()
-	// ja3_ja4.log / ja4s.log frequently absent (e.g. on Linux). Must not error.
-	if err := FilterExcludedSubnets(dir, []string{"ja3_ja4.log", "ja4s.log"}, []string{"10.0.0.0/8"}); err != nil {
-		t.Fatalf("expected no-op for missing files, got %v", err)
+	if err := FilterExcludedSubnets(t.TempDir(), []string{"ja3_ja4.log"}, []string{"10.0.0.0/8"}); err != nil {
+		t.Fatalf("missing file should be a no-op, got %v", err)
 	}
 }
 
 func TestFilterExcludedSubnets_DNSAnswers(t *testing.T) {
 	dir := t.TempDir()
-	// Client and resolver are NOT in the excluded range; only an answer is.
-	// This is the leak the answers coverage closes.
-	hdr := zeekHeader("dns", "ts", "uid", "id.orig_h", "id.orig_p", "id.resp_h", "id.resp_p", "proto", "query", "qtype_name", "answers")
-	path := writeLog(t, dir, "dns.log", hdr,
-		// answers set contains an excluded IP among a public one -> drop
-		row("1", "DNSA", "192.168.1.10", "5300", "192.168.1.1", "53", "udp", "db.corp", "A", "93.184.216.34,10.50.1.5"),
-		// answers has a CNAME hostname + an out-of-range IP -> keep
-		row("2", "DNSB", "192.168.1.10", "5300", "192.168.1.1", "53", "udp", "www.example.com", "A", "cname.example.com,93.184.216.34"),
-		// answers unset -> keep
-		row("3", "DNSC", "192.168.1.10", "5300", "192.168.1.1", "53", "udp", "x.corp", "A", "-"),
+	path := writeLog(t, dir, "dns.log",
+		`{"ts":1.0,"uid":"N1","id.orig_h":"192.168.1.5","id.resp_h":"8.8.8.8","answers":["host.example","10.2.3.4"]}`,
+		`{"ts":2.0,"uid":"N2","id.orig_h":"192.168.1.5","id.resp_h":"8.8.8.8","answers":["93.184.216.34"]}`,
+		`{"ts":3.0,"uid":"N3","id.orig_h":"192.168.1.5","id.resp_h":"8.8.8.8","answers":[]}`,
+		`{"ts":4.0,"uid":"N4","id.orig_h":"192.168.1.5","id.resp_h":"8.8.8.8"}`,
 	)
-
 	if err := FilterExcludedSubnets(dir, []string{"dns.log"}, []string{"10.0.0.0/8"}); err != nil {
 		t.Fatalf("FilterExcludedSubnets: %v", err)
 	}
-
-	rows := readDataRows(t, path)
-	if len(rows) != 2 {
-		t.Fatalf("expected 2 rows kept (DNSB, DNSC), got %d: %v", len(rows), rows)
-	}
-	for _, r := range rows {
-		if strings.Contains(r, "DNSA") {
-			t.Errorf("DNSA should have been dropped (answer 10.50.1.5 in excluded subnet): %q", r)
-		}
-	}
-}
-
-func TestFilterExcludedSubnets_DNSAnswersCustomSetSeparator(t *testing.T) {
-	dir := t.TempDir()
-	// A log declaring a non-comma #set_separator must still split answers correctly.
-	hdr := []string{
-		`#separator \x09`,
-		"#set_separator\t;",
-		"#empty_field\t(empty)",
-		"#unset_field\t-",
-		"#path\tdns",
-		"#open\t2024-01-01-00-00-00",
-		"#fields\tts\tuid\tid.orig_h\tid.resp_h\tanswers",
-		"#types\ttime\tstring\taddr\taddr\tset[string]",
-	}
-	path := writeLog(t, dir, "dns.log", hdr,
-		row("1", "S1", "192.168.1.10", "192.168.1.1", "8.8.8.8;10.0.0.9"), // second answer excluded -> drop
-		row("2", "S2", "192.168.1.10", "192.168.1.1", "8.8.8.8;1.1.1.1"),  // both public -> keep
-	)
-
-	if err := FilterExcludedSubnets(dir, []string{"dns.log"}, []string{"10.0.0.0/8"}); err != nil {
-		t.Fatalf("FilterExcludedSubnets: %v", err)
-	}
-
-	rows := readDataRows(t, path)
-	if len(rows) != 1 || !strings.Contains(rows[0], "S2") {
-		t.Fatalf("expected only row S2 kept, got %v", rows)
+	if got := readUIDs(t, path); !equal(got, []string{"N2", "N3", "N4"}) {
+		t.Fatalf("kept %v, want [N2 N3 N4]", got)
 	}
 }
 
 func TestFilterExcludedSubnets_IPv6(t *testing.T) {
 	dir := t.TempDir()
-	hdr := zeekHeader("conn", "ts", "uid", "id.orig_h", "id.orig_p", "id.resp_h", "id.resp_p", "proto")
-	path := writeLog(t, dir, "conn.log", hdr,
-		row("1", "V6A", "fd00::1", "1234", "2001:4860:4860::8888", "53", "udp"),      // orig in fd00::/8 -> drop
-		row("2", "V6B", "2606:4700::1", "1234", "2001:4860:4860::8888", "53", "udp"), // out of range -> keep
+	path := writeLog(t, dir, "conn.log",
+		`{"ts":1.0,"uid":"V1","id.orig_h":"fd00::5","id.resp_h":"2001:db8::1"}`,
+		`{"ts":2.0,"uid":"V2","id.orig_h":"fe80::1","id.resp_h":"2001:db8::1"}`,
 	)
-
 	if err := FilterExcludedSubnets(dir, []string{"conn.log"}, []string{"fd00::/8"}); err != nil {
 		t.Fatalf("FilterExcludedSubnets: %v", err)
 	}
-
-	rows := readDataRows(t, path)
-	if len(rows) != 1 || !strings.Contains(rows[0], "V6B") {
-		t.Fatalf("expected only row V6B kept, got %v", rows)
+	if got := readUIDs(t, path); !equal(got, []string{"V2"}) {
+		t.Fatalf("kept %v, want [V2]", got)
 	}
 }
 
-// TestFilterExcludedSubnets_ReadErrorAborts pins the fail-closed contract: if a
-// present log cannot be read/parsed, filtering must return an error so the
-// caller aborts the window rather than uploading unfiltered data. Using a
-// directory in place of the log forces a non-NotExist read error deterministically,
-// independent of the test user's privileges.
+// When a present log cannot be read, filtering must return an error so the caller aborts the
+// window rather than uploading unfiltered data. A directory in place of the log forces a read
+// error independent of the test user's privileges.
 func TestFilterExcludedSubnets_ReadErrorAborts(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, "conn.log"), 0755); err != nil {
@@ -251,20 +183,78 @@ func TestFilterExcludedSubnets_ReadErrorAborts(t *testing.T) {
 	}
 }
 
+// A line the filter cannot read as a JSON record could hide an excluded address, so it stops the
+// upload and leaves the log as it was. A tab-separated log (Zeek not writing JSON) is refused the
+// same way.
+func TestFilterExcludedSubnets_UnreadableRecordAborts(t *testing.T) {
+	for name, line := range map[string]string{
+		"not JSON":        "1.0\tCA\t10.1.2.3\t8.8.8.8",
+		"truncated":       `{"ts":1.0,"uid":"CB","id.orig_h":"10.1.`,
+		"address not str": `{"ts":1.0,"uid":"CC","id.orig_h":42}`,
+		"no conn_id":      `{"ts":1.0,"uid":"CD","orig_h":"10.1.2.3"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := writeLog(t, dir, "conn.log", `{"ts":0.5,"uid":"C0","id.orig_h":"10.0.0.1","id.resp_h":"8.8.8.8"}`, line)
+			before, _ := os.ReadFile(path)
+			err := FilterExcludedSubnets(dir, []string{"conn.log"}, []string{"10.0.0.0/8"})
+			if err == nil || !strings.Contains(err.Error(), "line 2") {
+				t.Fatalf("err = %v, want a line 2 error", err)
+			}
+			after, _ := os.ReadFile(path)
+			if string(before) != string(after) {
+				t.Fatal("log changed although filtering failed")
+			}
+		})
+	}
+}
+
 func TestFilterExcludedSubnets_MultipleCIDRsAndTLSLog(t *testing.T) {
 	dir := t.TempDir()
-	hdr := zeekHeader("ja3_ja4", "ts", "uid", "id.orig_h", "id.resp_h", "ja3", "ja4")
-	path := writeLog(t, dir, "ja3_ja4.log", hdr,
-		row("1", "JA", "172.20.10.5", "1.1.1.1", "abc", "def"), // orig in 172.20.10.0/24 -> drop
-		row("2", "JB", "203.0.113.7", "1.1.1.1", "abc", "def"), // out of range -> keep
+	path := writeLog(t, dir, "ja3_ja4.log",
+		`{"ts":1.0,"uid":"JA","id.orig_h":"172.20.10.5","id.resp_h":"1.1.1.1","ja3":"abc"}`,
+		`{"ts":2.0,"uid":"JB","id.orig_h":"203.0.113.7","id.resp_h":"1.1.1.1","ja3":"abc"}`,
 	)
-
 	if err := FilterExcludedSubnets(dir, []string{"ja3_ja4.log"}, []string{"10.0.0.0/8", "172.20.10.0/24"}); err != nil {
 		t.Fatalf("FilterExcludedSubnets: %v", err)
 	}
+	if got := readUIDs(t, path); !equal(got, []string{"JB"}) {
+		t.Fatalf("kept %v, want [JB]", got)
+	}
+}
 
-	rows := readDataRows(t, path)
-	if len(rows) != 1 || !strings.Contains(rows[0], "JB") {
-		t.Fatalf("expected only row JB kept, got %v", rows)
+// The real Zeek output in the records package's fixtures: excluding the web server's subnet
+// drops its connections, the DNS answers that resolve to it and the TLS fingerprints, and keeps
+// everything else.
+func TestFilterExcludedSubnets_ZeekFixture(t *testing.T) {
+	src := filepath.Join("..", "..", "records", "testdata", "json")
+	dir := t.TempDir()
+	for _, name := range ZeekLogFiles {
+		copyFile(t, filepath.Join(src, name), filepath.Join(dir, name))
+	}
+	if err := FilterExcludedSubnets(dir, ZeekLogFiles, []string{"203.0.113.0/24"}); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]int{"conn.log": 13, "dns.log": 4, "dhcp.log": 1, "ja3_ja4.log": 0, "ja4s.log": 0} {
+		if got := len(readUIDs(t, filepath.Join(dir, name))); got != want {
+			t.Errorf("%s kept %d records, want %d", name, got, want)
+		}
+	}
+}
+
+func copyFile(t *testing.T, from, to string) {
+	t.Helper()
+	in, err := os.Open(from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer in.Close()
+	out, err := os.Create(to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+	if _, err := io.Copy(out, in); err != nil {
+		t.Fatal(err)
 	}
 }

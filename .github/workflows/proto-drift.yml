@@ -1,0 +1,70 @@
+name: Proto Drift
+
+# internal/api/ingest/sensor_records.proto is the typed sensor upload contract (B1CF-2107,
+# B1CF-2108). Enigma-Publisher holds the source of truth; this repo keeps a byte-identical copy
+# that sensor_records.pb.go is generated from. This check fails when the copy differs from the
+# Publisher's stage branch, whichever side changed. Stage, because a sensor built from main is
+# tested against the staging Publisher before release.
+#
+# It runs on every pull request into main and every push to main, with no path filter, so a
+# change made only in the Publisher turns the next run here red too.
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+# The Publisher is read with a scoped GitHub App token; GITHUB_TOKEN only checks out this repo.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  proto-drift:
+    name: Proto drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Dependabot pull requests get no access to the App secrets, and Dependabot here only bumps
+    # GitHub Actions, so it can never change the proto.
+    if: github.actor != 'dependabot[bot]'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Same pattern as the docs-drift template in Enigma-Release: a short-lived App token,
+      # read-only, scoped to the one repository it needs.
+      - name: Generate read-only App token for Enigma-Publisher
+        id: read-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: EnigmaNetz
+          repositories: Enigma-Publisher
+          permission-contents: read
+
+      - name: Compare sensor_records.proto with Enigma-Publisher
+        env:
+          GH_TOKEN: ${{ steps.read-token.outputs.token }}
+          LOCAL_PROTO: internal/api/ingest/sensor_records.proto
+        run: |
+          if ! gh api \
+            -H 'Accept: application/vnd.github.raw' \
+            'repos/EnigmaNetz/Enigma-Publisher/contents/sensor_records.proto?ref=stage' \
+            > "$RUNNER_TEMP/publisher.proto"; then
+            echo "::error::Could not read sensor_records.proto from Enigma-Publisher's stage branch. Either the Publisher's copy is not merged there yet, or the App lost read access to the repository."
+            exit 1
+          fi
+
+          if ! diff -u "$RUNNER_TEMP/publisher.proto" "$LOCAL_PROTO"; then
+            echo "::error file=${LOCAL_PROTO}::sensor_records.proto differs from Enigma-Publisher's copy on stage. Change the Publisher's first, copy it here byte for byte, then regenerate the Go code (see DEVELOPMENT.md)."
+            exit 1
+          fi
+          echo "sensor_records.proto matches Enigma-Publisher (stage)."

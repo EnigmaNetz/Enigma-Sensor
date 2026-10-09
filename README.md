@@ -13,7 +13,7 @@ It runs in a loop:
    lookups (`dns`), DHCP (Dynamic Host Configuration Protocol) leases (`dhcp`), and JA3/JA4 TLS
    client fingerprints (`ja3_ja4`) and JA4S server fingerprints (`ja4s`).
 3. **Filter** out any record that touches an excluded subnet, if configured.
-4. **Upload** the logs to the Enigma AI API, then delete the PCAP.
+4. **Upload** the records to the Enigma AI API, then delete the PCAP.
 
 For development, building and releasing, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
@@ -250,7 +250,7 @@ Invalid values stop the sensor at startup with a message naming the field. The p
 | `enigma_api.api_key` | none | API key. Without it (or with `upload: false`) the sensor captures and processes but uploads nothing |
 | `enigma_api.upload` | `false` | Upload logs. The installers set `true` |
 | `enigma_api.ca_cert_file` | none | PEM (Privacy-Enhanced Mail format) CA (certificate authority) certificate to trust instead of the system store; for on-prem |
-| `enigma_api.max_payload_size_mb` | `25` | Logs larger than this are split and uploaded in several requests |
+| `enigma_api.max_payload_size_mb` | `25` | Records larger than this (uncompressed) are split and uploaded in several requests. Capped at 96 |
 | `capture.interface` | `any` | Interface to capture on, or a comma-separated list. On Linux and macOS, several named interfaces are captured separately and merged by timestamp. They must share a link type (for example, all Ethernet). If they do not, the sensor logs the error and exits, and the service manager restarts it into the same error, so nothing is uploaded until `capture.interface` is fixed |
 | `capture.window_seconds` | none | Length of each capture window. The installers and example config use `60` |
 | `capture.loop` | `false` | Keep capturing. `false` runs one window and exits. The installers set `true` |
@@ -292,14 +292,20 @@ Drop files into `<watch_dir>/incoming/`. They move to `processing/`, then to `pr
 
 ## What gets uploaded
 
-Each upload carries the five Zeek logs (compressed) and a small set of sensor metadata: the network
-ID, a machine ID, sensor and Zeek versions, operating system and architecture, up to ten private
-IPv4 addresses of the sensor host, and a session ID.
+Zeek writes its logs as JSON, and the sensor maps each record into a fixed set of typed fields
+before upload. A field a newer Zeek version adds is not uploaded until it is added to that set, so
+upgrading Zeek cannot break ingest. Each upload carries the records (compressed), their count per
+log, and a small set of sensor metadata: the network ID, a machine ID, sensor and Zeek versions,
+operating system and architecture, up to ten private IPv4 addresses of the sensor host, and a
+session ID. A capture window with no records uploads nothing.
 
 Each upload attempt times out after 4.5 minutes. If an upload fails three times (waiting 2.5 to 5
 seconds, then 5 to 10 seconds, between attempts), or is interrupted because the sensor is stopping,
 it is saved to `buffering.dir` and retried before the next upload, until it is older than
 `buffering.max_age_hours`.
+
+If the API refuses an upload as invalid (status 400), it is not retried or buffered: sending it
+again cannot succeed. The sensor logs the refusal and carries on with the next window.
 
 If the API rejects the API key with `410 Gone` (for example, a revoked key), the upload is not
 retried or buffered, and the sensor stops capturing and exits with code 0. The Linux service

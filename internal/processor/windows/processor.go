@@ -76,7 +76,7 @@ func (p *Processor) ProcessPCAP(pcapPath string, opts types.ProcessOptions) (typ
 	zeekScript := toZeekPath(filepath.Join(zeekShareAbs, "site", "custom-scripts", "main.zeek"))
 
 	// Prepare Zeek command arguments with sampling
-	baseArgs := []string{"-r", zeekPcapPath, zeekScript, fmt.Sprintf("Log::default_logdir=%s", zeekRunDir), "-C"}
+	baseArgs := []string{"-r", zeekPcapPath, zeekScript, fmt.Sprintf("Log::default_logdir=%s", zeekRunDir), "-C", types.ZeekJSONLogsArg}
 
 	// For Windows, we handle sampling by modifying the search paths to use absolute paths
 	zeekArgs := prepareWindowsZeekArgsWithSampling(runDir, opts.SamplingPercentage, baseArgs)

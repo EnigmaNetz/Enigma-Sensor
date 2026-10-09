@@ -1,60 +1,49 @@
 package types
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
-	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 )
 
-// addressFields is the set of Zeek log column names that hold a single IP
-// address we filter on. Located by name via the log's #fields header (never by
-// hardcoded index) so the same code path covers every uploaded log:
+// addressFields is the set of Zeek log fields that hold a single IP address we filter on. The
+// same names cover every uploaded log:
 //   - conn, dns, ja3_ja4, ja4s: id.orig_h, id.resp_h
 //   - dhcp: client_addr, server_addr, requested_addr, assigned_addr
 //
-// A column name only appears here where it is genuinely an address, so keying
-// off the name alone is safe across all five logs.
-var addressFields = map[string]bool{
-	"id.orig_h":      true,
-	"id.resp_h":      true,
-	"client_addr":    true,
-	"server_addr":    true,
-	"requested_addr": true,
-	"assigned_addr":  true,
+// A field name only appears here where it is genuinely an address, so keying off the name alone
+// is safe across all five logs.
+var addressFields = []string{
+	"id.orig_h",
+	"id.resp_h",
+	"client_addr",
+	"server_addr",
+	"requested_addr",
+	"assigned_addr",
 }
 
-// addressSetFields names Zeek columns that hold a set/vector of values (joined
-// by the log's #set_separator) which may include IP addresses. dns.log "answers"
-// is the case that matters: a DNS reply resolving to an excluded-subnet IP would
-// otherwise leak that internal address even when the client/resolver are not in
-// an excluded subnet. Each element is checked individually; non-IP members
-// (CNAMEs, MX targets, TXT data, ...) are ignored.
-var addressSetFields = map[string]bool{
-	"answers": true,
-}
+// addressSetFields names Zeek fields that hold a list of values which may include IP addresses.
+// dns.log "answers" is the case that matters: a DNS reply resolving to an excluded-subnet IP
+// would otherwise leak that internal address even when the client and resolver are not in an
+// excluded subnet. Each element is checked; non-IP members (CNAMEs, MX targets, TXT data, ...)
+// are ignored.
+var addressSetFields = []string{"answers"}
 
-// zeekUnsetMarkers are the placeholder tokens Zeek writes for an absent value.
-// They are not addresses and must be skipped, not parsed.
-var zeekUnsetMarkers = map[string]bool{
-	"-":       true,
-	"(empty)": true,
-}
-
-// FilterExcludedSubnets rewrites each of the given Zeek TSV logs in runDir in
-// place, dropping any data row that references an excluded-subnet address —
-// either a source/destination address column (see addressFields) or an IP in a
-// set-valued column such as dns.log "answers" (see addressSetFields). Header/
-// footer lines (#separator, #fields, #types, #open, #close, ...) are preserved
-// verbatim. Missing log files are a no-op (JA3/JA4 may be absent, e.g. on
-// Linux). An empty/whitespace CIDR list turns the feature off.
+// FilterExcludedSubnets rewrites each of the given Zeek JSON logs in runDir in place, dropping
+// any record that references an excluded-subnet address: either a single address field (see
+// addressFields) or an IP in a list field such as dns.log "answers" (see addressSetFields).
+// Missing log files are a no-op (JA3/JA4 may be absent). An empty or whitespace CIDR list turns
+// the feature off.
 //
-// Filtering is a "do not upload it" guarantee, so any read/parse/write failure
-// on a present log is returned as an error rather than swallowed — the caller
-// aborts the capture window rather than risk uploading unfiltered data.
+// Filtering is a "do not upload it" guarantee, so any read, parse or write failure on a present
+// log, including a line that is not a JSON record, is returned as an error rather than
+// swallowed. The caller aborts the capture window rather than risk uploading unfiltered data.
+//
+// The logs are filtered in place, not only in the upload, because support bundles archive the
+// capture directories (internal/collect_logs).
 func FilterExcludedSubnets(runDir string, logFiles []string, excludedCIDRs []string) error {
 	nets := parseCIDRs(excludedCIDRs)
 	if len(nets) == 0 {
@@ -88,111 +77,76 @@ func parseCIDRs(cidrs []string) []*net.IPNet {
 	return nets
 }
 
-// filterLogFile drops excluded rows from a single Zeek TSV log, in place.
+// filterLogFile drops excluded records from a single Zeek JSON log, in place.
 func filterLogFile(logPath string, nets []*net.IPNet) error {
-	data, err := os.ReadFile(logPath)
+	// dhcp.log has no conn_id; every other uploaded log must carry one, so a record without it
+	// is refused rather than passed through unchecked.
+	requireConnID := filepath.Base(logPath) != "dhcp.log"
+	dropped, err := rewriteLog(logPath, func(line []byte) ([]byte, error) {
+		excluded, err := recordExcluded(line, nets, requireConnID)
+		if err != nil || excluded {
+			return nil, err
+		}
+		return line, nil
+	})
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("read: %w", err)
+		return err
 	}
-
-	lines := strings.Split(string(data), "\n")
-
-	sep := "\t"
-	setSep := ","
-	var addrIdx []int // single-IP columns
-	var setIdx []int  // set-of-values columns (e.g. dns answers)
-	for _, line := range lines {
-		if strings.HasPrefix(line, "#separator") {
-			sep = parseSeparator(line)
-			continue
-		}
-		if strings.HasPrefix(line, "#set_separator") {
-			// Delimited by the main separator, which is already known by now.
-			if parts := strings.Split(line, sep); len(parts) >= 2 && parts[1] != "" {
-				setSep = parts[1]
-			}
-			continue
-		}
-		if strings.HasPrefix(line, "#fields") {
-			// Drop the "#fields" token so the remaining indices align with data columns.
-			fields := strings.Split(line, sep)[1:]
-			for i, f := range fields {
-				switch {
-				case addressFields[f]:
-					addrIdx = append(addrIdx, i)
-				case addressSetFields[f]:
-					setIdx = append(setIdx, i)
-				}
-			}
-			break
-		}
+	if dropped > 0 {
+		log.Printf("[processor] Subnet filter dropped %d record(s) from %s", dropped, filepath.Base(logPath))
 	}
-	// No #fields header, or no address columns in this log: nothing to filter.
-	if len(addrIdx) == 0 && len(setIdx) == 0 {
-		return nil
-	}
-
-	out := make([]string, 0, len(lines))
-	dropped := 0
-	for _, line := range lines {
-		// Preserve every header/footer line and the trailing empty element
-		// (which round-trips a final newline) exactly as-is.
-		if line == "" || strings.HasPrefix(line, "#") {
-			out = append(out, line)
-			continue
-		}
-		if rowExcluded(strings.Split(line, sep), addrIdx, setIdx, setSep, nets) {
-			dropped++
-			continue
-		}
-		out = append(out, line)
-	}
-
-	if dropped == 0 {
-		return nil
-	}
-	if err := os.WriteFile(logPath, []byte(strings.Join(out, "\n")), 0644); err != nil {
-		return fmt.Errorf("write: %w", err)
-	}
-	log.Printf("[processor] Subnet filter dropped %d row(s) from %s", dropped, filepath.Base(logPath))
 	return nil
 }
 
-// rowExcluded reports whether the row references an excluded-subnet IP in any
-// single-IP column (addrIdx) or any set-valued column (setIdx, split on setSep).
-func rowExcluded(cols []string, addrIdx, setIdx []int, setSep string, nets []*net.IPNet) bool {
-	for _, idx := range addrIdx {
-		if idx < len(cols) && ipInNets(cols[idx], nets) {
-			return true
+// recordExcluded reports whether a JSON log record references an excluded-subnet IP in any
+// single address field or any element of a list field. With requireConnID, a record that has
+// neither id.orig_h nor id.resp_h is an error.
+func recordExcluded(line []byte, nets []*net.IPNet, requireConnID bool) (bool, error) {
+	var rec map[string]json.RawMessage
+	if err := json.Unmarshal(line, &rec); err != nil {
+		return false, fmt.Errorf("not a JSON log record: %w", err)
+	}
+	if requireConnID {
+		_, orig := rec["id.orig_h"]
+		_, resp := rec["id.resp_h"]
+		if !orig && !resp {
+			return false, fmt.Errorf("record has no id.orig_h or id.resp_h to check")
 		}
 	}
-	for _, idx := range setIdx {
-		if idx >= len(cols) {
+	for _, name := range addressFields {
+		raw, ok := rec[name]
+		if !ok {
 			continue
 		}
-		cell := cols[idx]
-		if cell == "" || zeekUnsetMarkers[cell] {
+		var addr string
+		if err := json.Unmarshal(raw, &addr); err != nil {
+			return false, fmt.Errorf("field %s: %w", name, err)
+		}
+		if ipInNets(addr, nets) {
+			return true, nil
+		}
+	}
+	for _, name := range addressSetFields {
+		raw, ok := rec[name]
+		if !ok {
 			continue
 		}
-		for _, v := range strings.Split(cell, setSep) {
+		var values []string
+		if err := json.Unmarshal(raw, &values); err != nil {
+			return false, fmt.Errorf("field %s: %w", name, err)
+		}
+		for _, v := range values {
 			if ipInNets(v, nets) {
-				return true
+				return true, nil
 			}
 		}
 	}
-	return false
+	return false, nil
 }
 
-// ipInNets reports whether val is a valid IP inside one of the excluded subnets.
-// Zeek unset markers and non-IP values (e.g. hostnames in a dns answers set)
-// return false.
+// ipInNets reports whether val is a valid IP inside one of the excluded subnets. Non-IP values
+// (e.g. hostnames in a dns answers list) return false.
 func ipInNets(val string, nets []*net.IPNet) bool {
-	if val == "" || zeekUnsetMarkers[val] {
-		return false
-	}
 	ip := net.ParseIP(val)
 	if ip == nil {
 		return false
@@ -203,25 +157,4 @@ func ipInNets(val string, nets []*net.IPNet) bool {
 		}
 	}
 	return false
-}
-
-// parseSeparator decodes a Zeek "#separator" header line. Zeek writes the
-// separator as an escape (e.g. "#separator \x09" for tab) using a literal space
-// delimiter, since the separator cannot delimit its own definition. Defaults to
-// tab if the line is malformed.
-func parseSeparator(line string) string {
-	parts := strings.SplitN(line, " ", 2)
-	if len(parts) < 2 {
-		return "\t"
-	}
-	sep := strings.TrimSpace(parts[1])
-	if strings.HasPrefix(sep, `\x`) {
-		if b, err := strconv.ParseUint(sep[2:], 16, 8); err == nil {
-			return string(rune(b))
-		}
-	}
-	if sep == "" {
-		return "\t"
-	}
-	return sep
 }

@@ -1,0 +1,10 @@
+#separator \x09
+#set_separator	,
+#empty_field	(empty)
+#unset_field	-
+#path	dhcp
+#open	2026-10-08-18-38-20
+#fields	ts	uids	client_addr	server_addr	mac	host_name	client_fqdn	domain	requested_addr	assigned_addr	lease_time	client_message	server_message	msg_types	duration	param_req_list
+#types	time	set[string]	addr	addr	string	string	string	string	addr	addr	interval	string	string	vector[string]	interval	string
+1790856000.013123	CRdT6w4PA64qWKmBk3,CJKFoj4bpHEhTeaRoj	192.168.50.10	192.168.50.1	00:11:22:33:44:55	test-host	test-host.corp.example	corp.example	192.168.50.10	192.168.50.10	86400.000000	-	lease granted, enjoy	DISCOVER,OFFER,REQUEST,ACK	0.039370	-
+#close	2026-10-08-18-38-20

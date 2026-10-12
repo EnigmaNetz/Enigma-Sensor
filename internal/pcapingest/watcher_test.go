@@ -37,7 +37,7 @@ func (m *mockUploader) UploadLogs(ctx context.Context, files api.LogFiles) error
 	m.calls++
 	if m.goneErr {
 		// Wrapped the way the real uploader wraps it
-		return fmt.Errorf("failed to upload chunk 1: %w", fmt.Errorf("API returned 410 Gone: %w", api.ErrAPIGone))
+		return fmt.Errorf("failed to upload records: conn log: %w", fmt.Errorf("API returned 410 Gone: %w", api.ErrAPIGone))
 	}
 	if m.fail {
 		return errors.New("upload failed")

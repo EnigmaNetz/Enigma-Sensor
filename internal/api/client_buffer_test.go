@@ -8,19 +8,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
+
+	"EnigmaNetz/Enigma-Go-Sensor/internal/api/ingest"
 )
 
 // Test buffering on temporary errors and flushing on recovery
 func TestLogUploader_BufferAndFlush(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create small test files
-	dnsPath := filepath.Join(tmpDir, "dns.csv")
-	connPath := filepath.Join(tmpDir, "conn.csv")
-	require.NoError(t, os.WriteFile(dnsPath, []byte("h\na\n"), 0600))
-	require.NoError(t, os.WriteFile(connPath, []byte("h\nb\n"), 0600))
-
 	// First call returns 500 (cause buffer), second and third succeed (flush + current)
 	mock := &mockPublishClient{uploadResponses: []uploadResponse{
 		{status: "fail", statusCode: 500, message: "server error", err: nil},
@@ -34,25 +30,32 @@ func TestLogUploader_BufferAndFlush(t *testing.T) {
 		networkID:        "Test-Network-01",
 		retryCount:       1,
 		retryDelay:       time.Millisecond,
-		compressFunc:     compressData,
 		maxPayloadSizeMB: 25,
-		bufferDir:        filepath.Join(tmpDir, "buffer"),
+		bufferDir:        filepath.Join(t.TempDir(), "buffer"),
 		bufferMaxAge:     2 * time.Hour,
 	}
 
 	// First upload should buffer and return error
-	err := uploader.UploadLogs(context.Background(), LogFiles{DNSPath: dnsPath, ConnPath: connPath})
+	err := uploader.UploadLogs(context.Background(), writeJSONLogs(t))
 	require.Error(t, err)
 
-	// Ensure a buffer file exists
+	// One buffered request, saved without the API key
 	entries, err := os.ReadDir(uploader.bufferDir)
 	require.NoError(t, err)
-	require.GreaterOrEqual(t, len(entries), 1)
+	require.Len(t, entries, 1)
+	data, err := os.ReadFile(filepath.Join(uploader.bufferDir, entries[0].Name()))
+	require.NoError(t, err)
+	var buffered ingest.UploadRecordsRequest
+	require.NoError(t, proto.Unmarshal(data, &buffered))
+	assert.Empty(t, buffered.ApiKey, "the API key must never be written to the buffer")
+	assert.NotEmpty(t, buffered.Records)
 
 	// Second upload should flush buffered first, then upload current
-	require.NoError(t, os.WriteFile(connPath, []byte("h\nc\n"), 0600))
-	err = uploader.UploadLogs(context.Background(), LogFiles{DNSPath: dnsPath, ConnPath: connPath})
+	err = uploader.UploadLogs(context.Background(), writeJSONLogs(t))
 	require.NoError(t, err)
+	require.Len(t, mock.requests, 3)
+	assert.Equal(t, "k", mock.requests[1].ApiKey, "the key is added back when the buffered request is sent")
+	assert.Equal(t, buffered.Records, mock.requests[1].Records)
 
 	// Buffer dir should be empty after successful flush
 	entries, err = os.ReadDir(uploader.bufferDir)
@@ -62,8 +65,7 @@ func TestLogUploader_BufferAndFlush(t *testing.T) {
 
 // Test that old buffered files are purged based on max age
 func TestLogUploader_BufferPurgeOld(t *testing.T) {
-	tmpDir := t.TempDir()
-	bufDir := filepath.Join(tmpDir, "buffer")
+	bufDir := filepath.Join(t.TempDir(), "buffer")
 	require.NoError(t, os.MkdirAll(bufDir, 0o755))
 
 	uploader := &LogUploader{
@@ -71,7 +73,6 @@ func TestLogUploader_BufferPurgeOld(t *testing.T) {
 		networkID:    "Test-Network-01",
 		retryCount:   1,
 		retryDelay:   time.Millisecond,
-		compressFunc: compressData,
 		bufferDir:    bufDir,
 		bufferMaxAge: time.Hour, // 1 hour
 	}
@@ -92,13 +93,6 @@ func TestLogUploader_BufferPurgeOld(t *testing.T) {
 
 // Test that a 410 is neither retried nor buffered
 func TestLogUploader_410NotRetriedOrBuffered(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	dnsPath := filepath.Join(tmpDir, "dns.csv")
-	connPath := filepath.Join(tmpDir, "conn.csv")
-	require.NoError(t, os.WriteFile(dnsPath, []byte("h\na\n"), 0600))
-	require.NoError(t, os.WriteFile(connPath, []byte("h\nb\n"), 0600))
-
 	// Only one response: a retry would hit the mock's "unexpected call" error
 	mock := &mockPublishClient{uploadResponses: []uploadResponse{
 		{status: "gone", statusCode: 410, message: "gone", err: nil},
@@ -110,13 +104,12 @@ func TestLogUploader_410NotRetriedOrBuffered(t *testing.T) {
 		networkID:        "Test-Network-01",
 		retryCount:       3,
 		retryDelay:       time.Millisecond,
-		compressFunc:     compressData,
 		maxPayloadSizeMB: 25,
-		bufferDir:        filepath.Join(tmpDir, "buffer"),
+		bufferDir:        filepath.Join(t.TempDir(), "buffer"),
 		bufferMaxAge:     2 * time.Hour,
 	}
 
-	err := uploader.UploadLogs(context.Background(), LogFiles{DNSPath: dnsPath, ConnPath: connPath})
+	err := uploader.UploadLogs(context.Background(), writeJSONLogs(t))
 	require.True(t, errors.Is(err, ErrAPIGone), "expected ErrAPIGone, got: %v", err)
 	require.Equal(t, 1, mock.currentCall)
 
@@ -124,17 +117,12 @@ func TestLogUploader_410NotRetriedOrBuffered(t *testing.T) {
 	require.True(t, os.IsNotExist(err), "a 410 payload must not be buffered")
 }
 
-// Test that a 410 while flushing the buffer stops before sending the current payload
-func TestLogUploader_410DuringFlushStops(t *testing.T) {
-	tmpDir := t.TempDir()
-	bufDir := filepath.Join(tmpDir, "buffer")
+// A payload an older sensor version buffered before the upgrade is still sent the old way, and
+// a 410 while flushing it stops before sending the current payload.
+func TestLogUploader_410DuringLegacyFlushStops(t *testing.T) {
+	bufDir := filepath.Join(t.TempDir(), "buffer")
 	require.NoError(t, os.MkdirAll(bufDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(bufDir, "buf_20000101T000000Z_1.bin"), []byte("x"), 0o600))
-
-	dnsPath := filepath.Join(tmpDir, "dns.csv")
-	connPath := filepath.Join(tmpDir, "conn.csv")
-	require.NoError(t, os.WriteFile(dnsPath, []byte("h\na\n"), 0600))
-	require.NoError(t, os.WriteFile(connPath, []byte("h\nb\n"), 0600))
 
 	mock := &mockPublishClient{uploadResponses: []uploadResponse{
 		{status: "gone", statusCode: 410, message: "gone", err: nil},
@@ -146,19 +134,65 @@ func TestLogUploader_410DuringFlushStops(t *testing.T) {
 		networkID:        "Test-Network-01",
 		retryCount:       3,
 		retryDelay:       time.Millisecond,
-		compressFunc:     compressData,
 		maxPayloadSizeMB: 25,
 		bufferDir:        bufDir,
 		bufferMaxAge:     2 * time.Hour,
 	}
 
-	err := uploader.UploadLogs(context.Background(), LogFiles{DNSPath: dnsPath, ConnPath: connPath})
+	err := uploader.UploadLogs(context.Background(), writeJSONLogs(t))
 	require.True(t, errors.Is(err, ErrAPIGone), "expected ErrAPIGone, got: %v", err)
-	require.Equal(t, 1, mock.currentCall)
+	require.Equal(t, 1, mock.legacyCalls, "the legacy payload goes through uploadExcelMethod")
+	require.Equal(t, []string{"k"}, mock.legacyKeys, "with the API key in employeeId")
+	require.Equal(t, [][]byte{[]byte("x")}, mock.legacyData, "and the buffered bytes unchanged")
+	require.Empty(t, mock.requests)
 
 	// The buffered payload stays for a later run, and the current payload is not added
 	entries, err := os.ReadDir(bufDir)
 	require.NoError(t, err)
 	require.Len(t, entries, 1)
 	require.Equal(t, "buf_20000101T000000Z_1.bin", entries[0].Name())
+}
+
+// A legacy payload the Publisher refuses with a 400 is deleted like a typed one, and a file that
+// is neither kind is left alone.
+func TestFlushBuffer_LegacyRefusedAndUnknownFiles(t *testing.T) {
+	bufDir := filepath.Join(t.TempDir(), "buffer")
+	require.NoError(t, os.MkdirAll(bufDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(bufDir, "buf_20000101T000000Z_1.bin"), []byte("x"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(bufDir, "notes.txt"), []byte("not a payload"), 0o600))
+
+	mock := &mockPublishClient{uploadResponses: []uploadResponse{{status: "error", statusCode: 400, message: "bad payload"}}}
+	uploader := &LogUploader{client: mock, apiKey: "k", networkID: "Test-Network-01", bufferDir: bufDir}
+
+	require.NoError(t, uploader.flushBuffer(context.Background()))
+
+	assert.Equal(t, 1, mock.legacyCalls)
+	entries, err := os.ReadDir(bufDir)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "notes.txt", entries[0].Name())
+}
+
+// A buffered request the Publisher refuses with a 400 can never succeed: it is deleted and the
+// flush carries on with the next one.
+func TestFlushBuffer_DropsRefusedRequest(t *testing.T) {
+	bufDir := filepath.Join(t.TempDir(), "buffer")
+	require.NoError(t, os.MkdirAll(bufDir, 0o755))
+	req, err := proto.Marshal(&ingest.UploadRecordsRequest{SchemaVersion: 1, Records: []byte("r")})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(bufDir, "buf_20000101T000000Z_1.rec"), req, 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(bufDir, "buf_20000101T000000Z_2.rec"), req, 0o600))
+
+	mock := &mockPublishClient{uploadResponses: []uploadResponse{
+		{status: "error", statusCode: 400, message: "Unsupported schemaVersion 1"},
+		{status: "success", statusCode: 200},
+	}}
+	uploader := &LogUploader{client: mock, apiKey: "k", networkID: "Test-Network-01", bufferDir: bufDir}
+
+	require.NoError(t, uploader.flushBuffer(context.Background()))
+
+	assert.Equal(t, 2, mock.currentCall)
+	entries, err := os.ReadDir(bufDir)
+	require.NoError(t, err)
+	assert.Empty(t, entries)
 }

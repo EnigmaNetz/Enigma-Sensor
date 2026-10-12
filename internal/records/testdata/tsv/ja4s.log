@@ -1,0 +1,10 @@
+#separator \x09
+#set_separator	,
+#empty_field	(empty)
+#unset_field	-
+#path	ja4s
+#open	2026-10-08-18-38-20
+#fields	ts	uid	id.orig_h	id.orig_p	id.resp_h	id.resp_p	ja4s	ja4s_hash	server_version	server_cipher	server_extensions	server_name
+#types	time	string	addr	port	addr	port	string	string	string	string	vector[string]	string
+1790856000.349419	CvlFWu15VAZDKRaYQa	192.168.50.10	50000	203.0.113.10	443	t771_4865_43-51	f9c608c9b9dc2a327c3e0f509bdb30c8	771	4865	43,51	example.com
+#close	2026-10-08-18-38-20

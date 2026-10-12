@@ -25,6 +25,12 @@ type ProcessOptions struct {
 	ExcludedSubnets []string
 }
 
+// ZeekJSONLogsArg makes Zeek write each log as JSON, one record per line (B1CF-2107/2108). The
+// uploader maps the JSON into typed records by field name, so a column a newer Zeek adds is
+// ignored rather than breaking ingest. It is a script option on the command line, the same way
+// sampling is set, so neither platform needs a different Zeek build.
+const ZeekJSONLogsArg = "LogAscii::use_json=T"
+
 // ZeekLogFiles is the single source of truth for the Zeek logs the sensor
 // uploads. Both FilterExcludedSubnets and RenameZeekLogsToXLSX key off this
 // list so "what we filter" and "what we upload" can never drift apart — adding

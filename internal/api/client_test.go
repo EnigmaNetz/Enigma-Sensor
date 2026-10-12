@@ -9,8 +9,6 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/base64"
-	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -26,32 +24,20 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+
+	"EnigmaNetz/Enigma-Go-Sensor/internal/api/ingest"
 )
 
-// Test helper functions
-func decompressData(data []byte) ([]byte, error) {
-	reader := bytes.NewReader(data)
-	zlibReader, err := zlib.NewReader(reader)
-	if err != nil {
-		return nil, err
-	}
-	defer zlibReader.Close()
-
-	return io.ReadAll(zlibReader)
-}
-
-func base64DecodeAndDecompress(data string) ([]byte, error) {
-	decoded, err := base64.StdEncoding.DecodeString(data)
-	if err != nil {
-		return nil, err
-	}
-	return decompressData(decoded)
-}
-
-// mockPublishClient implements the grpcClient interface for testing
+// mockPublishClient implements the grpcClient interface for testing. Both methods answer from
+// the same list of responses, in call order, and typed requests are kept for inspection.
 type mockPublishClient struct {
 	uploadResponses []uploadResponse
 	currentCall     int
+	requests        []*ingest.UploadRecordsRequest
+	legacyCalls     int
+	legacyKeys      []string
+	legacyData      [][]byte
 }
 
 type uploadResponse struct {
@@ -61,13 +47,53 @@ type uploadResponse struct {
 	err        error
 }
 
-func (m *mockPublishClient) uploadExcelMethod(ctx context.Context, data []byte, employeeId string, metadata map[string]string) (string, int32, string, error) {
+func (m *mockPublishClient) next() (string, int32, string, error) {
 	if m.currentCall >= len(m.uploadResponses) {
 		return "", 0, "", status.Error(codes.Internal, "unexpected call")
 	}
 	resp := m.uploadResponses[m.currentCall]
 	m.currentCall++
 	return resp.status, resp.statusCode, resp.message, resp.err
+}
+
+func (m *mockPublishClient) uploadRecords(_ context.Context, req *ingest.UploadRecordsRequest) (string, int32, string, error) {
+	m.requests = append(m.requests, proto.Clone(req).(*ingest.UploadRecordsRequest))
+	return m.next()
+}
+
+func (m *mockPublishClient) uploadExcelMethod(_ context.Context, data []byte, employeeID string, _ map[string]string) (string, int32, string, error) {
+	m.legacyCalls++
+	m.legacyKeys = append(m.legacyKeys, employeeID)
+	m.legacyData = append(m.legacyData, append([]byte(nil), data...))
+	return m.next()
+}
+
+// writeJSONLogs writes small Zeek JSON logs and returns their paths.
+func writeJSONLogs(t *testing.T) LogFiles {
+	t.Helper()
+	dir := t.TempDir()
+	files := LogFiles{
+		ConnPath: filepath.Join(dir, "conn.xlsx"),
+		DNSPath:  filepath.Join(dir, "dns.xlsx"),
+	}
+	require.NoError(t, os.WriteFile(files.ConnPath, []byte(
+		`{"ts":1.0,"uid":"C1","id.orig_h":"10.0.0.1","id.orig_p":5000,"id.resp_h":"10.0.0.2","id.resp_p":443,"proto":"tcp"}`+"\n"+
+			`{"ts":2.0,"uid":"C2","id.orig_h":"10.0.0.1","id.orig_p":5001,"id.resp_h":"10.0.0.2","id.resp_p":53,"proto":"udp"}`+"\n"), 0o600))
+	require.NoError(t, os.WriteFile(files.DNSPath, []byte(
+		`{"ts":2.0,"uid":"C2","id.orig_h":"10.0.0.1","id.orig_p":5001,"id.resp_h":"10.0.0.2","id.resp_p":53,"proto":"udp","query":"example.com"}`+"\n"), 0o600))
+	return files
+}
+
+// decodeRecords inflates and decodes a request's records, as the Subscriber does.
+func decodeRecords(t *testing.T, req *ingest.UploadRecordsRequest) *ingest.RecordBatch {
+	t.Helper()
+	r, err := zlib.NewReader(bytes.NewReader(req.Records))
+	require.NoError(t, err)
+	raw, err := io.ReadAll(r)
+	require.NoError(t, err)
+	var batch ingest.RecordBatch
+	require.NoError(t, proto.Unmarshal(raw, &batch))
+	return &batch
 }
 
 func TestNewLogUploaderCACertFile(t *testing.T) {
@@ -147,470 +173,252 @@ func generateTestCACertPEM(t *testing.T) []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
 }
 
-// TestLogUploader_UploadLogs verifies the LogUploader's UploadLogs method for various scenarios:
-// - Successful upload
-// - Retry on failure and eventual success
-// - All retries fail and error is returned
+// TestLogUploader_UploadLogs verifies UploadLogs for a successful upload, a retry that then
+// succeeds, and retries that all fail.
 func TestLogUploader_UploadLogs(t *testing.T) {
-	// Create temporary test files
-	tmpDir := t.TempDir()
-	dnsPath := filepath.Join(tmpDir, "dns.xlsx")
-	connPath := filepath.Join(tmpDir, "conn.log")
-
-	// Write test data
-	require.NoError(t, os.WriteFile(dnsPath, []byte("test dns data"), 0644))
-	require.NoError(t, os.WriteFile(connPath, []byte("test conn data"), 0644))
-
+	unavailable := uploadResponse{err: status.Error(codes.Unavailable, "server unavailable")}
+	ok := uploadResponse{status: "success", statusCode: 200, message: "ok"}
 	tests := []struct {
 		name            string
 		uploadResponses []uploadResponse
 		wantErr         bool
-		retryCount      int
+		calls           int
 	}{
-		{
-			name: "successful upload",
-			uploadResponses: []uploadResponse{
-				{
-					status:     "success",
-					statusCode: 200,
-					message:    "ok",
-					err:        nil,
-				},
-			},
-			wantErr:    false,
-			retryCount: 1,
-		},
-		{
-			name: "retry success",
-			uploadResponses: []uploadResponse{
-				{
-					status:     "",
-					statusCode: 0,
-					message:    "",
-					err:        status.Error(codes.Unavailable, "server unavailable"),
-				},
-				{
-					status:     "success",
-					statusCode: 200,
-					message:    "ok",
-					err:        nil,
-				},
-			},
-			wantErr:    false,
-			retryCount: 2,
-		},
-		{
-			name: "all retries fail",
-			uploadResponses: []uploadResponse{
-				{
-					status:     "",
-					statusCode: 0,
-					message:    "",
-					err:        status.Error(codes.Unavailable, "server unavailable"),
-				},
-				{
-					status:     "",
-					statusCode: 0,
-					message:    "",
-					err:        status.Error(codes.Unavailable, "server unavailable"),
-				},
-				{
-					status:     "",
-					statusCode: 0,
-					message:    "",
-					err:        status.Error(codes.Unavailable, "server unavailable"),
-				},
-			},
-			wantErr:    true,
-			retryCount: 3,
-		},
+		{name: "successful upload", uploadResponses: []uploadResponse{ok}, calls: 1},
+		{name: "retry success", uploadResponses: []uploadResponse{unavailable, ok}, calls: 2},
+		{name: "all retries fail", uploadResponses: []uploadResponse{unavailable, unavailable, unavailable}, wantErr: true, calls: 3},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create mock client
-			mock := &mockPublishClient{
-				uploadResponses: tt.uploadResponses,
-			}
-
-			// Create uploader with mock
+			mock := &mockPublishClient{uploadResponses: tt.uploadResponses}
 			uploader := &LogUploader{
-				client:       mock,
-				apiKey:       "test-key",
-				networkID:    "Test-Network-01",
-				retryCount:   3,
-				retryDelay:   time.Millisecond, // Short delay for tests
-				compressFunc: compressData,
+				client:     mock,
+				apiKey:     "test-key",
+				networkID:  "Test-Network-01",
+				retryCount: 3,
+				retryDelay: time.Millisecond,
 			}
 
-			// Test upload
-			err := uploader.UploadLogs(context.Background(), LogFiles{
-				DNSPath:  dnsPath,
-				ConnPath: connPath,
-			})
+			err := uploader.UploadLogs(context.Background(), writeJSONLogs(t))
 
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
 			}
-
-			// Verify retry count
-			assert.Equal(t, tt.retryCount, mock.currentCall)
+			assert.Equal(t, tt.calls, mock.currentCall)
+			assert.Zero(t, mock.legacyCalls, "new uploads never use uploadExcelMethod")
 		})
 	}
 }
 
-// TestLogUploader_PrepareLogData verifies that log data is correctly prepared, compressed, and can be decompressed and validated.
-func TestLogUploader_PrepareLogData(t *testing.T) {
-	// Create temporary test files
-	tmpDir := t.TempDir()
-	dnsPath := filepath.Join(tmpDir, "dns.xlsx")
-	connPath := filepath.Join(tmpDir, "conn.log")
+// The request carries the envelope the Publisher checks, and the records decode back.
+func TestUploadLogs_SendsTypedEnvelope(t *testing.T) {
+	mock := &mockPublishClient{uploadResponses: []uploadResponse{{status: "success", statusCode: 200}}}
+	uploader := &LogUploader{client: mock, apiKey: "test-key", networkID: "Test-Network-01", retryCount: 1}
 
-	dnsData := []byte("test dns data")
-	connData := []byte("test conn data")
+	require.NoError(t, uploader.UploadLogs(context.Background(), writeJSONLogs(t)))
 
-	require.NoError(t, os.WriteFile(dnsPath, dnsData, 0644))
-	require.NoError(t, os.WriteFile(connPath, connData, 0644))
+	require.Len(t, mock.requests, 1)
+	req := mock.requests[0]
+	assert.Equal(t, "test-key", req.ApiKey)
+	assert.EqualValues(t, 1, req.SchemaVersion)
+	assert.Equal(t, ingest.Compression_COMPRESSION_ZLIB, req.Compression)
+	assert.NotEmpty(t, req.SensorVersion)
+	assert.Equal(t, req.Metadata["sensor_version"], req.SensorVersion)
+	assert.Equal(t, "Test-Network-01", req.Metadata["network_id"])
+	assert.EqualValues(t, 2, req.Counts.Conn)
+	assert.EqualValues(t, 1, req.Counts.Dns)
 
-	uploader := &LogUploader{
-		apiKey:       "test-key",
-		networkID:    "Test-Network-01",
-		retryCount:   3,
-		retryDelay:   time.Second,
-		compressFunc: compressData,
-	}
-
-	// Test data preparation
-	compressed, err := uploader.prepareLogData(LogFiles{
-		DNSPath:  dnsPath,
-		ConnPath: connPath,
-	})
-	require.NoError(t, err)
-
-	// Decompress and verify
-	decompressed, err := decompressData(compressed)
-	require.NoError(t, err)
-
-	var combined CombinedLogs
-	require.NoError(t, json.Unmarshal(decompressed, &combined))
-
-	// Decode and decompress DNS data
-	dnsDecoded, err := base64DecodeAndDecompress(combined.DNS)
-	require.NoError(t, err)
-	assert.Equal(t, dnsData, dnsDecoded)
-
-	// Decode and decompress conn data
-	connDecoded, err := base64DecodeAndDecompress(combined.Conn)
-	require.NoError(t, err)
-	assert.Equal(t, connData, connDecoded)
+	batch := decodeRecords(t, req)
+	require.Len(t, batch.Conn, 2)
+	assert.Equal(t, "10.0.0.1", batch.Conn[0].OrigH)
+	assert.Equal(t, "example.com", batch.Dns[0].GetQuery())
 }
 
-// TestUploadLogs_ReadFileError simulates a failure to read one of the log files and expects an error from UploadLogs.
-func TestUploadLogs_ReadFileError(t *testing.T) {
-	mock := &mockPublishClient{
-		uploadResponses: []uploadResponse{{status: "success", statusCode: 200, message: "ok", err: nil}},
+// Logs larger than max_payload_size_mb go up in several requests, every record once.
+func TestUploadLogs_SplitsIntoBatches(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "conn.xlsx")
+	pad := strings.Repeat("x", 60*1024)
+	var lines []string
+	for i := 0; i < 40; i++ {
+		lines = append(lines, fmt.Sprintf(`{"ts":%d.0,"uid":"C%d","history":"%s"}`, i, i, pad))
 	}
-	uploader := &LogUploader{
-		client:       mock,
-		apiKey:       "test-key",
-		networkID:    "Test-Network-01",
-		retryCount:   1,
-		retryDelay:   time.Millisecond,
-		compressFunc: compressData,
+	require.NoError(t, os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600))
+
+	var responses []uploadResponse
+	for i := 0; i < 10; i++ {
+		responses = append(responses, uploadResponse{status: "success", statusCode: 200})
 	}
-	// Provide non-existent file paths for both logs (should error)
-	err := uploader.UploadLogs(context.Background(), LogFiles{
-		DNSPath:  "nonexistent_dns.log",
-		ConnPath: "nonexistent_conn.log",
-	})
+	mock := &mockPublishClient{uploadResponses: responses}
+	uploader := &LogUploader{client: mock, apiKey: "k", networkID: "Test-Network-01", retryCount: 1, maxPayloadSizeMB: 1}
+
+	require.NoError(t, uploader.UploadLogs(context.Background(), LogFiles{ConnPath: path}))
+
+	require.Greater(t, len(mock.requests), 1)
+	total := 0
+	for _, req := range mock.requests {
+		total += len(decodeRecords(t, req).Conn)
+		assert.LessOrEqual(t, int(req.Counts.Conn), 40)
+	}
+	assert.Equal(t, 40, total)
+}
+
+func TestUploadLogs_NoRecordsUploadsNothing(t *testing.T) {
+	mock := &mockPublishClient{}
+	uploader := &LogUploader{client: mock, apiKey: "k", networkID: "Test-Network-01", retryCount: 1}
+
+	require.NoError(t, uploader.UploadLogs(context.Background(), LogFiles{ConnPath: filepath.Join(t.TempDir(), "missing.xlsx")}))
+	assert.Zero(t, mock.currentCall)
+}
+
+// A log that cannot be read is an error, not an empty upload.
+func TestUploadLogs_ReadError(t *testing.T) {
+	mock := &mockPublishClient{}
+	uploader := &LogUploader{client: mock, apiKey: "k", networkID: "Test-Network-01", retryCount: 1}
+
+	err := uploader.UploadLogs(context.Background(), LogFiles{ConnPath: t.TempDir()}) // a directory, not a file
 	assert.Error(t, err)
-
-	// Provide only missing DNS log (should succeed)
-	tmpDir := t.TempDir()
-	connPath := filepath.Join(tmpDir, "conn.log")
-	assert.NoError(t, os.WriteFile(connPath, []byte("conn data"), 0644))
-	err = uploader.UploadLogs(context.Background(), LogFiles{
-		DNSPath:  filepath.Join(tmpDir, "missing_dns.log"),
-		ConnPath: connPath,
-	})
-	assert.NoError(t, err)
+	assert.Zero(t, mock.currentCall)
 }
 
-// TestUploadLogs_CompressError simulates a compression failure and expects an error from UploadLogs.
-func TestUploadLogs_CompressError(t *testing.T) {
-	uploader := &LogUploader{
-		apiKey:       "test-key",
-		networkID:    "Test-Network-01",
-		retryCount:   1,
-		retryDelay:   time.Millisecond,
-		compressFunc: func(_ []byte) ([]byte, error) { return nil, fmt.Errorf("compress error") },
+// An unreadable record is skipped and the rest are uploaded (internal/records).
+func TestUploadLogs_UnreadableRecordIsSkipped(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "conn.xlsx")
+	require.NoError(t, os.WriteFile(path, []byte(`{"ts":1.0,"uid":"C1"}`+"\nnot a record\n"+`{"ts":2.0,"uid":"C2"}`+"\n"), 0o600))
+	mock := &mockPublishClient{uploadResponses: []uploadResponse{{status: "success", statusCode: 200}}}
+	uploader := &LogUploader{client: mock, apiKey: "k", networkID: "Test-Network-01", retryCount: 1}
+
+	require.NoError(t, uploader.UploadLogs(context.Background(), LogFiles{ConnPath: path}))
+	require.Len(t, mock.requests, 1)
+	assert.EqualValues(t, 2, mock.requests[0].Counts.Conn)
+}
+
+// A log where nothing decodes (Zeek writing tab-separated logs, say) is an error, not a quiet
+// success with nothing uploaded.
+func TestUploadLogs_LogWithNoReadableRecordFails(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "conn.xlsx")
+	require.NoError(t, os.WriteFile(path, []byte("#separator \\x09\n#fields\tts\tuid\n1.0\tC1\n"), 0o600))
+	mock := &mockPublishClient{}
+	uploader := &LogUploader{client: mock, apiKey: "k", networkID: "Test-Network-01", retryCount: 1}
+
+	err := uploader.UploadLogs(context.Background(), LogFiles{ConnPath: path})
+	require.ErrorContains(t, err, "none of its 3 record(s)")
+	assert.Zero(t, mock.currentCall)
+}
+
+// writeBatchedLog writes n conn records of about 60 KB each, so max_payload_size_mb 1 makes
+// batches of 17.
+func writeBatchedLog(t *testing.T, n int) string {
+	t.Helper()
+	pad := strings.Repeat("x", 60*1024)
+	var lines []string
+	for i := 0; i < n; i++ {
+		lines = append(lines, fmt.Sprintf(`{"ts":%d.0,"uid":"C%d","history":"%s"}`, i, i, pad))
 	}
-	// Create temp files with valid data
-	tmpDir := t.TempDir()
-	dnsPath := filepath.Join(tmpDir, "dns.xlsx")
-	connPath := filepath.Join(tmpDir, "conn.log")
-	assert.NoError(t, os.WriteFile(dnsPath, []byte("dns"), 0644))
-	assert.NoError(t, os.WriteFile(connPath, []byte("conn"), 0644))
-	err := uploader.UploadLogs(context.Background(), LogFiles{
-		DNSPath:  dnsPath,
-		ConnPath: connPath,
-	})
-	assert.Error(t, err)
+	path := filepath.Join(t.TempDir(), "conn.xlsx")
+	require.NoError(t, os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600))
+	return path
 }
 
-// TestUploadLogs_UploadNon200 simulates a non-200 status code from the upload and expects an error from UploadLogs.
+// Once a batch fails every retry, the rest of the window is buffered without trying, so an
+// outage does not hold the worker for a full set of retries per batch.
+func TestUploadLogs_OutageBuffersRemainingBatchesWithoutTrying(t *testing.T) {
+	unavailable := uploadResponse{err: status.Error(codes.Unavailable, "down")}
+	mock := &mockPublishClient{uploadResponses: []uploadResponse{unavailable, unavailable, unavailable}}
+	bufDir := filepath.Join(t.TempDir(), "buffer")
+	uploader := &LogUploader{client: mock, apiKey: "k", networkID: "Test-Network-01", retryCount: 3,
+		retryDelay: time.Millisecond, maxPayloadSizeMB: 1, bufferDir: bufDir}
+
+	err := uploader.UploadLogs(context.Background(), LogFiles{ConnPath: writeBatchedLog(t, 40)})
+
+	require.ErrorIs(t, err, errRetriesExhausted)
+	assert.Equal(t, 3, mock.currentCall, "only the first batch is tried")
+	entries, readErr := os.ReadDir(bufDir)
+	require.NoError(t, readErr)
+	assert.Len(t, entries, 3, "every batch is buffered")
+}
+
+// A Publisher without uploadRecords is not retried: the batch is buffered on the first attempt
+// and the rest of the window with it.
+func TestUploadLogs_PublisherWithoutUploadRecordsBuffersAtOnce(t *testing.T) {
+	mock := &mockPublishClient{uploadResponses: []uploadResponse{{err: status.Error(codes.Unimplemented, "unknown method uploadRecords")}}}
+	bufDir := filepath.Join(t.TempDir(), "buffer")
+	uploader := &LogUploader{client: mock, apiKey: "k", networkID: "Test-Network-01", retryCount: 3,
+		retryDelay: time.Hour, maxPayloadSizeMB: 1, bufferDir: bufDir}
+
+	start := time.Now()
+	err := uploader.UploadLogs(context.Background(), LogFiles{ConnPath: writeBatchedLog(t, 40)})
+
+	require.ErrorIs(t, err, errRetriesExhausted)
+	assert.Less(t, time.Since(start), 5*time.Second, "no retry wait")
+	assert.Equal(t, 1, mock.currentCall)
+	entries, readErr := os.ReadDir(bufDir)
+	require.NoError(t, readErr)
+	assert.Len(t, entries, 3)
+}
+
+// A refusal on a later batch is reported too, not only the first failure.
+func TestUploadLogs_ReportsEveryFailedBatch(t *testing.T) {
+	mock := &mockPublishClient{uploadResponses: []uploadResponse{
+		{status: "success", statusCode: 200},
+		{status: "error", statusCode: 400, message: "Invalid counts"},
+		{status: "success", statusCode: 200},
+	}}
+	uploader := &LogUploader{client: mock, apiKey: "k", networkID: "Test-Network-01", retryCount: 3, maxPayloadSizeMB: 1}
+
+	err := uploader.UploadLogs(context.Background(), LogFiles{ConnPath: writeBatchedLog(t, 40)})
+
+	require.ErrorIs(t, err, errUploadRefused)
+	assert.ErrorContains(t, err, "batch 2")
+	assert.Equal(t, 3, mock.currentCall, "batch 3 is still sent")
+}
+
 func TestUploadLogs_UploadNon200(t *testing.T) {
-	tmpDir := t.TempDir()
-	dnsPath := filepath.Join(tmpDir, "dns.xlsx")
-	connPath := filepath.Join(tmpDir, "conn.log")
-	assert.NoError(t, os.WriteFile(dnsPath, []byte("dns"), 0644))
-	assert.NoError(t, os.WriteFile(connPath, []byte("conn"), 0644))
 	mock := &mockPublishClient{
-		uploadResponses: []uploadResponse{{status: "fail", statusCode: 500, message: "server error", err: nil}},
+		uploadResponses: []uploadResponse{{status: "fail", statusCode: 500, message: "server error"}},
 	}
-	uploader := &LogUploader{
-		client:       mock,
-		apiKey:       "test-key",
-		networkID:    "Test-Network-01",
-		retryCount:   1,
-		retryDelay:   time.Millisecond,
-		compressFunc: compressData,
-	}
-	err := uploader.UploadLogs(context.Background(), LogFiles{
-		DNSPath:  dnsPath,
-		ConnPath: connPath,
-	})
-	assert.Error(t, err)
+	uploader := &LogUploader{client: mock, apiKey: "test-key", networkID: "Test-Network-01", retryCount: 1, retryDelay: time.Millisecond}
+	assert.Error(t, uploader.UploadLogs(context.Background(), writeJSONLogs(t)))
 }
 
-// TestUploadLogs_ContextCancelled simulates context cancellation before upload and expects an error from UploadLogs.
-func TestUploadLogs_ContextCancelled(t *testing.T) {
-	tmpDir := t.TempDir()
-	dnsPath := filepath.Join(tmpDir, "dns.xlsx")
-	connPath := filepath.Join(tmpDir, "conn.log")
-	assert.NoError(t, os.WriteFile(dnsPath, []byte("dns"), 0644))
-	assert.NoError(t, os.WriteFile(connPath, []byte("conn"), 0644))
+// A 400 means the Publisher refused the request itself, so it is neither retried nor buffered.
+func TestUploadLogs_400NotRetriedOrBuffered(t *testing.T) {
 	mock := &mockPublishClient{
-		uploadResponses: []uploadResponse{{status: "success", statusCode: 200, message: "ok", err: nil}},
+		uploadResponses: []uploadResponse{{status: "error", statusCode: 400, message: "Unsupported schemaVersion 1; supported: 2"}},
 	}
-	uploader := &LogUploader{
-		client:       mock,
-		apiKey:       "test-key",
-		networkID:    "Test-Network-01",
-		retryCount:   1,
-		retryDelay:   time.Millisecond,
-		compressFunc: compressData,
-	}
+	bufDir := filepath.Join(t.TempDir(), "buffer")
+	uploader := &LogUploader{client: mock, apiKey: "k", networkID: "Test-Network-01", retryCount: 3, retryDelay: time.Millisecond, bufferDir: bufDir}
+
+	err := uploader.UploadLogs(context.Background(), writeJSONLogs(t))
+
+	require.ErrorIs(t, err, errUploadRefused)
+	assert.Equal(t, 1, mock.currentCall)
+	assert.NoDirExists(t, bufDir, "a refused upload must not be buffered")
+}
+
+// TestUploadLogs_ContextCancelled cancels before upload and expects an error from UploadLogs.
+func TestUploadLogs_ContextCancelled(t *testing.T) {
+	mock := &mockPublishClient{uploadResponses: []uploadResponse{{status: "success", statusCode: 200, message: "ok"}}}
+	uploader := &LogUploader{client: mock, apiKey: "test-key", networkID: "Test-Network-01", retryCount: 1, retryDelay: time.Millisecond}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	err := uploader.UploadLogs(ctx, LogFiles{
-		DNSPath:  dnsPath,
-		ConnPath: connPath,
-	})
-	assert.Error(t, err)
+	assert.Error(t, uploader.UploadLogs(ctx, writeJSONLogs(t)))
 }
 
-// TestUploadLogs_410Gone simulates the API returning 410 Gone and expects an error from UploadLogs.
+// TestUploadLogs_410Gone simulates the API returning 410 Gone and expects ErrAPIGone.
 func TestUploadLogs_410Gone(t *testing.T) {
-	tmpDir := t.TempDir()
-	dnsPath := filepath.Join(tmpDir, "dns.xlsx")
-	connPath := filepath.Join(tmpDir, "conn.log")
-	assert.NoError(t, os.WriteFile(dnsPath, []byte("dns"), 0644))
-	assert.NoError(t, os.WriteFile(connPath, []byte("conn"), 0644))
-	mock := &mockPublishClient{
-		uploadResponses: []uploadResponse{{status: "gone", statusCode: 410, message: "gone", err: nil}},
-	}
-	uploader := &LogUploader{
-		client:       mock,
-		apiKey:       "test-key",
-		networkID:    "Test-Network-01",
-		retryCount:   1,
-		retryDelay:   time.Millisecond,
-		compressFunc: compressData,
-	}
-	err := uploader.UploadLogs(context.Background(), LogFiles{
-		DNSPath:  dnsPath,
-		ConnPath: connPath,
-	})
+	mock := &mockPublishClient{uploadResponses: []uploadResponse{{status: "gone", statusCode: 410, message: "gone"}}}
+	uploader := &LogUploader{client: mock, apiKey: "test-key", networkID: "Test-Network-01", retryCount: 1, retryDelay: time.Millisecond}
+	err := uploader.UploadLogs(context.Background(), writeJSONLogs(t))
 	if !errors.Is(err, ErrAPIGone) {
 		t.Fatalf("expected error to be ErrAPIGone, got: %v", err)
 	}
 }
 
-// TestCalculateTotalFileSize tests the file size calculation functionality
-func TestCalculateTotalFileSize(t *testing.T) {
-	// Create temporary test files
-	tempDir := t.TempDir()
-
-	dnsFile := filepath.Join(tempDir, "dns.csv")
-	connFile := filepath.Join(tempDir, "conn.csv")
-
-	// Write test data
-	dnsData := "header1,header2\nvalue1,value2\n"
-	connData := "header1,header2\nvalue1,value2\nvalue3,value4\n"
-
-	require.NoError(t, os.WriteFile(dnsFile, []byte(dnsData), 0600))
-	require.NoError(t, os.WriteFile(connFile, []byte(connData), 0600))
-
-	uploader := &LogUploader{maxPayloadSizeMB: 25}
-
-	files := LogFiles{
-		DNSPath:  dnsFile,
-		ConnPath: connFile,
+func TestBatchBytes(t *testing.T) {
+	for mb, want := range map[int64]int{0: 25 << 20, 25: 25 << 20, 96: 96 << 20, 500: maxBatchBytes} {
+		assert.Equal(t, want, (&LogUploader{maxPayloadSizeMB: mb}).batchBytes(), "max_payload_size_mb %d", mb)
 	}
-
-	sizeMB, err := uploader.calculateTotalFileSize(files)
-	require.NoError(t, err)
-
-	// Should be 0 MB for small test files
-	assert.Equal(t, int64(0), sizeMB)
-
-	// Test with missing DNS file
-	files.DNSPath = ""
-	sizeMB, err = uploader.calculateTotalFileSize(files)
-	require.NoError(t, err)
-
-	assert.Equal(t, int64(0), sizeMB)
-}
-
-// TestSplitCSVFile tests the CSV file splitting functionality
-func TestSplitCSVFile(t *testing.T) {
-	tempDir := t.TempDir()
-	testFile := filepath.Join(tempDir, "test.csv")
-
-	// Create test CSV with header and multiple rows
-	content := "timestamp,src_ip,dst_ip,protocol\n"
-	for i := 0; i < 100; i++ {
-		content += "2023-01-01,192.168.1.1,10.0.0.1,tcp\n"
-	}
-
-	require.NoError(t, os.WriteFile(testFile, []byte(content), 0600))
-
-	tests := []struct {
-		name              string
-		maxSizeBytes      int64
-		minExpectedChunks int
-	}{
-		{"no_split", 10000, 1},     // Large enough to fit everything
-		{"split_multiple", 500, 2}, // Small enough to force splitting
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			chunks, err := splitCSVFile(testFile, tt.maxSizeBytes)
-			require.NoError(t, err)
-
-			assert.GreaterOrEqual(t, len(chunks), tt.minExpectedChunks)
-
-			// Verify each chunk has header
-			for i, chunkPath := range chunks {
-				data, err := os.ReadFile(chunkPath)
-				require.NoError(t, err)
-
-				lines := strings.Split(string(data), "\n")
-				assert.GreaterOrEqual(t, len(lines), 2, "Chunk %d should have at least header and one data line", i)
-
-				assert.Equal(t, "timestamp,src_ip,dst_ip,protocol", lines[0], "Chunk %d missing correct header", i)
-
-				// Clean up chunk files (except original)
-				if chunkPath != testFile {
-					os.Remove(chunkPath)
-				}
-			}
-		})
-	}
-}
-
-// TestUploadLogsChunking tests that large files trigger chunking behavior
-func TestUploadLogsChunking(t *testing.T) {
-	tempDir := t.TempDir()
-
-	// Create large test files that will exceed threshold
-	dnsFile := filepath.Join(tempDir, "dns.csv")
-	connFile := filepath.Join(tempDir, "conn.csv")
-
-	// Create files with enough data to trigger chunking (>1MB each)
-	largeContent := "timestamp,src_ip,dst_ip,protocol\n"
-	for i := 0; i < 50000; i++ {
-		largeContent += "2023-01-01,192.168.1.1,10.0.0.1,tcp\n"
-	}
-
-	require.NoError(t, os.WriteFile(dnsFile, []byte(largeContent), 0600))
-	require.NoError(t, os.WriteFile(connFile, []byte(largeContent), 0600))
-
-	// Mock client that records upload calls
-	// Need more responses now that we support 4 log types (HTTP/SSL added)
-	var responses []uploadResponse
-	for i := 0; i < 20; i++ { // Provide enough responses for multiple chunks
-		responses = append(responses, uploadResponse{"success", 200, "ok", nil})
-	}
-	mockClient := &mockPublishClient{
-		uploadResponses: responses,
-	}
-
-	uploader := &LogUploader{
-		client:           mockClient,
-		apiKey:           "test-key",
-		networkID:        "Test-Network-01",
-		retryCount:       1,
-		retryDelay:       time.Millisecond,
-		compressFunc:     compressData,
-		maxPayloadSizeMB: 1, // 1MB threshold to force chunking
-	}
-
-	files := LogFiles{
-		DNSPath:  dnsFile,
-		ConnPath: connFile,
-	}
-
-	ctx := context.Background()
-	err := uploader.UploadLogs(ctx, files)
-	require.NoError(t, err)
-
-	// Should have made multiple upload calls due to chunking
-	assert.GreaterOrEqual(t, mockClient.currentCall, 2, "Expected multiple upload calls due to chunking")
-}
-
-// TestUploadLogsSinglePath tests that small files use the single upload path
-func TestUploadLogsSinglePath(t *testing.T) {
-	tempDir := t.TempDir()
-
-	// Create small test files that won't trigger chunking
-	dnsFile := filepath.Join(tempDir, "dns.csv")
-	connFile := filepath.Join(tempDir, "conn.csv")
-
-	smallContent := "timestamp,src_ip,dst_ip,protocol\nvalue1,value2,value3,value4\n"
-
-	require.NoError(t, os.WriteFile(dnsFile, []byte(smallContent), 0600))
-	require.NoError(t, os.WriteFile(connFile, []byte(smallContent), 0600))
-
-	mockClient := &mockPublishClient{
-		uploadResponses: []uploadResponse{
-			{"success", 200, "ok", nil},
-		},
-	}
-
-	uploader := &LogUploader{
-		client:           mockClient,
-		apiKey:           "test-key",
-		networkID:        "Test-Network-01",
-		retryCount:       1,
-		retryDelay:       time.Millisecond,
-		compressFunc:     compressData,
-		maxPayloadSizeMB: 25, // Large threshold, won't trigger chunking
-	}
-
-	files := LogFiles{
-		DNSPath:  dnsFile,
-		ConnPath: connFile,
-	}
-
-	ctx := context.Background()
-	err := uploader.UploadLogs(ctx, files)
-	require.NoError(t, err)
-
-	// Should have made exactly one upload call
-	assert.Equal(t, 1, mockClient.currentCall)
 }

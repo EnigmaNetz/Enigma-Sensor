@@ -1,0 +1,15 @@
+#separator \x09
+#set_separator	,
+#empty_field	(empty)
+#unset_field	-
+#path	dns
+#open	2026-10-08-18-38-20
+#fields	ts	uid	id.orig_h	id.orig_p	id.resp_h	id.resp_p	proto	trans_id	rtt	query	qclass	qclass_name	qtype	qtype_name	rcode	rcode_name	AA	TC	RD	RA	Z	answers	TTLs	rejected
+#types	time	string	addr	port	addr	port	enum	count	interval	string	count	string	count	string	count	string	bool	bool	bool	bool	count	vector[string]	vector[interval]	bool
+1790856000.094148	Cj5C653qaTXsxKtqD2	192.168.50.10	53001	192.168.50.1	53	udp	4097	0.007250	example.com	1	C_INTERNET	1	A	0	NOERROR	F	F	T	T	0	203.0.113.10	300.000000	F
+1790856000.143052	CJioLj2aEkGc9R3T0b	192.168.50.10	53002	192.168.50.1	53	udp	4098	0.007250	www.example.org	1	C_INTERNET	1	A	0	NOERROR	F	F	T	T	0	edge.example.net,203.0.113.77	3600.000000,60.000000	F
+1790856000.191956	CcvuMe3KIDgdxGsNCd	192.168.50.10	53003	192.168.50.1	53	udp	4099	-	missing.example.com	1	C_INTERNET	1	A	3	NXDOMAIN	F	F	T	F	0	-	-	T
+1790856000.240861	CpuDPN1X7c0rKhM3Ik	192.168.50.10	53004	192.168.50.1	53	udp	4100	-	example.com	1	C_INTERNET	28	AAAA	0	NOERROR	F	F	T	F	0	-	-	T
+1790856000.289765	CRmE1y3QIW6Zmd10g1	192.168.50.10	53006	192.168.50.1	53	udp	4102	-	tun\x09nel\x0aline\x01.example.com	1	C_INTERNET	1	A	3	NXDOMAIN	F	F	T	F	0	-	-	T
+1790856000.338669	CIrGew2SfruONAsgA8	192.168.50.10	53005	192.168.50.1	53	udp	4101	0.007250	example.com	1	C_INTERNET	16	TXT	0	NOERROR	F	F	T	T	0	TXT 18 v=spf1 a\x2c mx\x2c -all,TXT 5 plain	120.000000,120.000000	F
+#close	2026-10-08-18-38-20

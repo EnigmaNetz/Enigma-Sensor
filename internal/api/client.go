@@ -1,13 +1,8 @@
 package api
 
 import (
-	"bufio"
-	"bytes"
-	"compress/zlib"
 	"context"
 	"crypto/x509"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -19,16 +14,24 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
+	"EnigmaNetz/Enigma-Go-Sensor/internal/api/ingest"
 	pb "EnigmaNetz/Enigma-Go-Sensor/internal/api/publish"
 	"EnigmaNetz/Enigma-Go-Sensor/internal/metadata"
+	"EnigmaNetz/Enigma-Go-Sensor/internal/records"
 )
 
 // grpcClient defines the interface for gRPC operations
 type grpcClient interface {
+	// uploadRecords sends typed records through SensorIngest.uploadRecords (B1CF-2108).
+	uploadRecords(ctx context.Context, req *ingest.UploadRecordsRequest) (string, int32, string, error)
+	// uploadExcelMethod is the old Zeek-log upload, used only to flush payloads an older sensor
+	// version buffered before an upgrade.
 	uploadExcelMethod(ctx context.Context, data []byte, employeeId string, metadata map[string]string) (string, int32, string, error)
 }
 
@@ -48,7 +51,32 @@ const (
 	// bufferTmpSuffix marks a buffered payload still being written; flushBuffer
 	// skips it so it never uploads half a file.
 	bufferTmpSuffix = ".tmp"
+
+	// bufferRecordsExt marks a buffered UploadRecordsRequest, saved without its API key.
+	// bufferLegacyExt marks an old Zeek-log payload buffered by a sensor version before typed
+	// uploads; it is still flushed through uploadExcelMethod after an upgrade.
+	bufferRecordsExt = ".rec"
+	bufferLegacyExt  = ".bin"
+
+	// maxRecordsPerUpload is the Publisher's limit (MAX_RECORDS_PER_UPLOAD in
+	// Enigma-Publisher's record-envelope.ts); it refuses a larger upload with a 400.
+	maxRecordsPerUpload = 1_000_000
+
+	// maxBatchBytes caps one batch's uncompressed size whatever max_payload_size_mb says. The
+	// Subscriber drops a batch that inflates past 128 MiB, and the Publisher refuses compressed
+	// records over 99 MiB.
+	maxBatchBytes = 96 * 1024 * 1024
+
+	// defaultPayloadSizeMB applies when max_payload_size_mb is unset (config validation sets 25).
+	defaultPayloadSizeMB = 25
 )
+
+// errUploadRefused marks a 400 from the Publisher: the request itself is invalid (for example
+// a schema version it does not accept), so retrying or buffering it can never succeed.
+var errUploadRefused = errors.New("upload refused by the Publisher")
+
+// errRetriesExhausted marks a batch that failed every retry and was buffered.
+var errRetriesExhausted = errors.New("upload failed every retry")
 
 // LogUploader handles uploading logs to the gRPC server
 type LogUploader struct {
@@ -57,10 +85,9 @@ type LogUploader struct {
 	networkID        string
 	captureInterface string
 	retryCount       int
-	retryDelay       time.Duration                // base delay; doubles after each failed attempt, with jitter
-	uploadTimeout    time.Duration                // per-RPC deadline; 0 means defaultUploadTimeout
-	compressFunc     func([]byte) ([]byte, error) // for DI/testing
-	maxPayloadSizeMB int64                        // maximum payload size before chunking
+	retryDelay       time.Duration // base delay; doubles after each failed attempt, with jitter
+	uploadTimeout    time.Duration // per-RPC deadline; 0 means defaultUploadTimeout
+	maxPayloadSizeMB int64         // maximum uncompressed batch size before splitting
 	bufferDir        string
 	bufferMaxAge     time.Duration
 	// flushMu lets one worker at a time flush the buffer directory, so a
@@ -77,21 +104,13 @@ type LogFiles struct {
 	JA4SPath   string
 }
 
-// CombinedLogs represents the compressed log data
-type CombinedLogs struct {
-	DNS    string `json:"dns"`    // base64 encoded compressed data
-	Conn   string `json:"conn"`   // base64 encoded compressed data
-	JA3JA4 string `json:"ja3ja4"` // base64 encoded compressed data
-	JA4S   string `json:"ja4s"`   // base64 encoded compressed data
-	DHCP   string `json:"dhcp"`   // base64 encoded compressed data
-}
-
 // ErrAPIGone is returned when the API responds with HTTP 410 (Gone), indicating the sensor should stop.
 var ErrAPIGone = errors.New("API returned 410 Gone: sensor should stop sending data and terminate")
 
 // grpcClientImpl implements the grpcClient interface
 type grpcClientImpl struct {
 	client pb.PublishServiceClient
+	ingest ingest.SensorIngestClient
 }
 
 // NewLogUploader creates a new log uploader instance
@@ -133,13 +152,12 @@ func NewLogUploader(serverAddr string, apiKey string, networkID string, captureI
 	}
 
 	return &LogUploader{
-		client:           &grpcClientImpl{client: pb.NewPublishServiceClient(conn)},
+		client:           &grpcClientImpl{client: pb.NewPublishServiceClient(conn), ingest: ingest.NewSensorIngestClient(conn)},
 		apiKey:           apiKey,
 		networkID:        networkID,
 		captureInterface: captureInterface,
 		retryCount:       3,
 		retryDelay:       5 * time.Second,
-		compressFunc:     compressData,
 		maxPayloadSizeMB: maxPayloadSizeMB,
 		bufferDir:        bufferDir,
 		bufferMaxAge:     time.Duration(bufferMaxAgeHours) * time.Hour,
@@ -166,32 +184,24 @@ func (c *grpcClientImpl) uploadExcelMethod(ctx context.Context, data []byte, emp
 	return resp.Status, resp.StatusCode, resp.Message, nil
 }
 
-// UploadLogs uploads the DNS and connection logs to the server
+func (c *grpcClientImpl) uploadRecords(ctx context.Context, req *ingest.UploadRecordsRequest) (string, int32, string, error) {
+	resp, err := c.ingest.UploadRecords(ctx, req)
+	if err != nil {
+		return "", 0, "", fmt.Errorf("gRPC call failed: %w", err)
+	}
+	return resp.Status, resp.StatusCode, resp.Message, nil
+}
+
+// UploadLogs maps the Zeek JSON logs into typed records and uploads them through
+// uploadRecords, split into batches no larger than max_payload_size_mb uncompressed. A batch is
+// retried and then buffered. Once one batch has failed every retry, the Publisher is treated as
+// down for the rest of the window: the remaining batches are buffered without trying, so an
+// outage does not hold the worker for a full set of retries per batch. A failure or
+// cancellation part way through loses none of the remaining batches. Every failed batch is
+// logged and returned. Logs with no records are not uploaded.
 func (u *LogUploader) UploadLogs(ctx context.Context, files LogFiles) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
-	}
-
-	// Check if files need to be chunked
-	totalSizeMB, err := u.calculateTotalFileSize(files)
-	if err != nil {
-		return fmt.Errorf("failed to calculate file size: %v", err)
-	}
-
-	if totalSizeMB > u.maxPayloadSizeMB {
-		return u.uploadLogsChunked(ctx, files)
-	}
-
-	// Use existing upload path for smaller files
-	return u.uploadLogsSingle(ctx, files)
-}
-
-// uploadLogsSingle uploads logs as a single payload (existing behavior)
-func (u *LogUploader) uploadLogsSingle(ctx context.Context, files LogFiles) error {
-	// Read and compress log files
-	combinedData, err := u.prepareLogData(files)
-	if err != nil {
-		return fmt.Errorf("failed to prepare log data: %v", err)
 	}
 
 	// Best-effort flush of any buffered payloads first. A 410 during the flush
@@ -200,268 +210,126 @@ func (u *LogUploader) uploadLogsSingle(ctx context.Context, files LogFiles) erro
 		return err
 	}
 
-	// Upload with retries
+	paths := records.LogPaths{
+		Conn:   files.ConnPath,
+		DNS:    files.DNSPath,
+		DHCP:   files.DHCPPath,
+		JA3JA4: files.JA3JA4Path,
+		JA4S:   files.JA4SPath,
+	}
+	limits := records.Limits{MaxBytes: u.batchBytes(), MaxRecords: maxRecordsPerUpload}
+
+	batches := 0
+	publisherDown := false
+	var failures []error
+	err := records.Read(paths, limits, func(b records.Batch) error {
+		batches++
+		var err error
+		if publisherDown {
+			if err = u.bufferRecords(u.newRecordsRequest(b)); err == nil {
+				err = errors.New("buffered without trying: an earlier batch failed every retry")
+			}
+		} else {
+			err = u.uploadBatch(ctx, b)
+		}
+		if err == nil {
+			return nil
+		}
+		// A 410 is final for every remaining batch too
+		if errors.Is(err, ErrAPIGone) {
+			return err
+		}
+		if errors.Is(err, errRetriesExhausted) {
+			publisherDown = true
+		}
+		err = fmt.Errorf("batch %d (%d records): %w", batches, b.Total(), err)
+		log.Printf("[upload] %v", err)
+		failures = append(failures, err)
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to upload records: %w", err)
+	}
+	if batches == 0 {
+		log.Printf("[upload] No records in this capture window; nothing to upload")
+	}
+	return errors.Join(failures...)
+}
+
+// batchBytes is the uncompressed size limit for one batch.
+func (u *LogUploader) batchBytes() int {
+	mb := u.maxPayloadSizeMB
+	if mb <= 0 {
+		mb = defaultPayloadSizeMB
+	}
+	if mb*1024*1024 > maxBatchBytes {
+		return maxBatchBytes
+	}
+	return int(mb * 1024 * 1024)
+}
+
+// newRecordsRequest builds the request for one batch, without the API key: the key is added
+// only for the RPC, so a buffered request never holds it on disk.
+func (u *LogUploader) newRecordsRequest(b records.Batch) *ingest.UploadRecordsRequest {
+	md := metadata.GenerateMetadata(u.networkID, u.captureInterface)
+	return &ingest.UploadRecordsRequest{
+		SchemaVersion: records.SchemaVersion,
+		SensorVersion: md["sensor_version"],
+		Counts:        b.Counts,
+		Compression:   ingest.Compression_COMPRESSION_ZLIB,
+		Metadata:      md,
+		Records:       b.Records,
+	}
+}
+
+// uploadBatch uploads one batch with retries, and buffers it when every attempt fails or the
+// upload is cancelled. A 410 or a 400 is final: neither is retried nor buffered.
+func (u *LogUploader) uploadBatch(ctx context.Context, b records.Batch) error {
+	req := u.newRecordsRequest(b)
+	log.Printf("[upload] Sending %d records (%d bytes compressed) with metadata: %+v", b.Total(), len(b.Records), req.Metadata)
+
 	var lastErr error
 	for i := 0; i < u.retryCount; i++ {
 		if i > 0 {
 			if err := u.waitBeforeRetry(ctx, i); err != nil {
-				return u.bufferCancelled(combinedData, err)
+				return u.bufferCancelled(req, err)
 			}
 		}
 		if ctx.Err() != nil {
-			return u.bufferCancelled(combinedData, ctx.Err())
+			return u.bufferCancelled(req, ctx.Err())
 		}
-		if err := u.upload(ctx, combinedData); err != nil {
-			// A 410 is final: retrying or buffering would only resend to a revoked key
-			if errors.Is(err, ErrAPIGone) {
-				return err
-			}
-			if ctx.Err() != nil {
-				return u.bufferCancelled(combinedData, ctx.Err())
-			}
-			lastErr = err
-			continue
+		err := u.sendRecords(ctx, req)
+		if err == nil {
+			return nil
 		}
-		return nil
+		if errors.Is(err, ErrAPIGone) || errors.Is(err, errUploadRefused) {
+			return err
+		}
+		if ctx.Err() != nil {
+			return u.bufferCancelled(req, ctx.Err())
+		}
+		lastErr = err
+		// A Publisher without uploadRecords will not have it on the next attempt either
+		if status.Code(err) == codes.Unimplemented {
+			break
+		}
 	}
 
-	// If we reach here, upload failed after retries. Buffer the payload for later.
-	if err := u.bufferSave(combinedData); err != nil {
-		return fmt.Errorf("failed to upload after %d retries and also failed to buffer payload: %v; original error: %v", u.retryCount, err, lastErr)
+	// If we reach here, upload failed after retries. Buffer the payload for later. Either way
+	// the batch counts as exhausted, so the rest of the window is not retried batch by batch.
+	if err := u.bufferRecords(req); err != nil {
+		return fmt.Errorf("%w and buffering failed too: %v; upload error: %w", errRetriesExhausted, err, lastErr)
 	}
-	return fmt.Errorf("failed to upload after %d retries: %w (payload buffered for retry)", u.retryCount, lastErr)
+	return fmt.Errorf("%w (payload buffered for retry): %w", errRetriesExhausted, lastErr)
 }
 
-// bufferCancelled saves a payload whose upload was interrupted by cancellation,
+// bufferCancelled saves a request whose upload was interrupted by cancellation,
 // so shutting down does not lose it. Writing to local disk needs no context.
-func (u *LogUploader) bufferCancelled(data []byte, ctxErr error) error {
-	if err := u.bufferSave(data); err != nil {
+func (u *LogUploader) bufferCancelled(req *ingest.UploadRecordsRequest, ctxErr error) error {
+	if err := u.bufferRecords(req); err != nil {
 		return fmt.Errorf("upload cancelled and failed to buffer payload: %v: %w", err, ctxErr)
 	}
-	return fmt.Errorf("upload cancelled: %w (payload buffered for retry)", ctxErr)
-}
-
-// uploadLogsChunked splits files and uploads each chunk separately
-func (u *LogUploader) uploadLogsChunked(ctx context.Context, files LogFiles) error {
-	// Calculate chunk size (90% of max to leave room for compression variance)
-	chunkSizeBytes := (u.maxPayloadSizeMB * 1024 * 1024 * 90) / 100
-
-	// Split DNS file if present
-	dnsChunks, err := splitCSVFile(files.DNSPath, chunkSizeBytes/5)
-	if err != nil {
-		return fmt.Errorf("failed to split DNS file: %v", err)
-	}
-
-	// Split connection file
-	connChunks, err := splitCSVFile(files.ConnPath, chunkSizeBytes/5)
-	if err != nil {
-		return fmt.Errorf("failed to split connection file: %v", err)
-	}
-
-	// Split JA3JA4 file if present
-	ja3ja4Chunks, err := splitCSVFile(files.JA3JA4Path, chunkSizeBytes/5)
-	if err != nil {
-		return fmt.Errorf("failed to split JA3JA4 file: %v", err)
-	}
-
-	// Split JA4S file if present
-	ja4sChunks, err := splitCSVFile(files.JA4SPath, chunkSizeBytes/5)
-	if err != nil {
-		return fmt.Errorf("failed to split JA4S file: %v", err)
-	}
-
-	// Split DHCP file if present
-	dhcpChunks, err := splitCSVFile(files.DHCPPath, chunkSizeBytes/5)
-	if err != nil {
-		return fmt.Errorf("failed to split DHCP file: %v", err)
-	}
-
-	// Determine maximum chunks needed
-	maxChunks := len(connChunks)
-	if len(dnsChunks) > maxChunks {
-		maxChunks = len(dnsChunks)
-	}
-	if len(ja3ja4Chunks) > maxChunks {
-		maxChunks = len(ja3ja4Chunks)
-	}
-	if len(ja4sChunks) > maxChunks {
-		maxChunks = len(ja4sChunks)
-	}
-	if len(dhcpChunks) > maxChunks {
-		maxChunks = len(dhcpChunks)
-	}
-
-	// Track temp files for cleanup
-	var tempFiles []string
-	defer func() {
-		for _, file := range tempFiles {
-			if file != files.DNSPath && file != files.ConnPath && file != files.JA3JA4Path && file != files.JA4SPath && file != files.DHCPPath {
-				os.Remove(file)
-			}
-		}
-	}()
-
-	// Upload each chunk
-	var cancelErr error
-	for i := 0; i < maxChunks; i++ {
-		chunkFiles := LogFiles{}
-
-		// Set DNS chunk path (or empty if no more chunks)
-		if i < len(dnsChunks) && dnsChunks[i] != "" {
-			chunkFiles.DNSPath = dnsChunks[i]
-			if dnsChunks[i] != files.DNSPath {
-				tempFiles = append(tempFiles, dnsChunks[i])
-			}
-		}
-
-		// Set connection chunk path (or empty if no more chunks)
-		if i < len(connChunks) && connChunks[i] != "" {
-			chunkFiles.ConnPath = connChunks[i]
-			if connChunks[i] != files.ConnPath {
-				tempFiles = append(tempFiles, connChunks[i])
-			}
-		}
-
-		// Set JA3JA4 chunk path (or empty if no more chunks)
-		if i < len(ja3ja4Chunks) && ja3ja4Chunks[i] != "" {
-			chunkFiles.JA3JA4Path = ja3ja4Chunks[i]
-			if ja3ja4Chunks[i] != files.JA3JA4Path {
-				tempFiles = append(tempFiles, ja3ja4Chunks[i])
-			}
-		}
-
-		// Set JA4S chunk path (or empty if no more chunks)
-		if i < len(ja4sChunks) && ja4sChunks[i] != "" {
-			chunkFiles.JA4SPath = ja4sChunks[i]
-			if ja4sChunks[i] != files.JA4SPath {
-				tempFiles = append(tempFiles, ja4sChunks[i])
-			}
-		}
-
-		// Set DHCP chunk path (or empty if no more chunks)
-		if i < len(dhcpChunks) && dhcpChunks[i] != "" {
-			chunkFiles.DHCPPath = dhcpChunks[i]
-			if dhcpChunks[i] != files.DHCPPath {
-				tempFiles = append(tempFiles, dhcpChunks[i])
-			}
-		}
-
-		// Skip empty chunks
-		if chunkFiles.DNSPath == "" && chunkFiles.ConnPath == "" && chunkFiles.JA3JA4Path == "" && chunkFiles.JA4SPath == "" && chunkFiles.DHCPPath == "" {
-			continue
-		}
-
-		// Upload this chunk. After cancellation, keep going: each remaining
-		// chunk is then buffered instead of uploaded, so none is lost.
-		if err := u.uploadLogsSingle(ctx, chunkFiles); err != nil {
-			err = fmt.Errorf("failed to upload chunk %d: %w", i+1, err)
-			if ctx.Err() == nil || errors.Is(err, ErrAPIGone) {
-				return err
-			}
-			if cancelErr == nil {
-				cancelErr = err
-			}
-		}
-	}
-
-	return cancelErr
-}
-
-// prepareLogData reads, compresses, and combines the log files
-func (u *LogUploader) prepareLogData(files LogFiles) ([]byte, error) {
-	// Read DNS log (allow missing)
-	dnsData, err := os.ReadFile(files.DNSPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			dnsData = []byte{} // treat missing DNS log as empty
-		} else {
-			return nil, fmt.Errorf("failed to read DNS log: %v", err)
-		}
-	}
-
-	// Read connection log (required)
-	connData, err := os.ReadFile(files.ConnPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read connection log: %v", err)
-	}
-
-	// Read JA3JA4 log (allow missing)
-	ja3ja4Data, err := os.ReadFile(files.JA3JA4Path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			ja3ja4Data = []byte{} // treat missing JA3JA4 log as empty
-		} else {
-			return nil, fmt.Errorf("failed to read JA3JA4 log: %v", err)
-		}
-	}
-
-	// Read JA4S log (allow missing)
-	ja4sData, err := os.ReadFile(files.JA4SPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			ja4sData = []byte{} // treat missing JA4S log as empty
-		} else {
-			return nil, fmt.Errorf("failed to read JA4S log: %v", err)
-		}
-	}
-
-	// Read DHCP log (allow missing)
-	dhcpData, err := os.ReadFile(files.DHCPPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			dhcpData = []byte{} // treat missing DHCP log as empty
-		} else {
-			return nil, fmt.Errorf("failed to read DHCP log: %v", err)
-		}
-	}
-
-	// Compress DNS data
-	dnsCompressed, err := u.compressFunc(dnsData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to compress DNS data: %v", err)
-	}
-
-	// Compress connection data
-	connCompressed, err := u.compressFunc(connData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to compress connection data: %v", err)
-	}
-
-	// Compress JA3JA4 data
-	ja3ja4Compressed, err := u.compressFunc(ja3ja4Data)
-	if err != nil {
-		return nil, fmt.Errorf("failed to compress JA3JA4 data: %v", err)
-	}
-
-	// Compress JA4S data
-	ja4sCompressed, err := u.compressFunc(ja4sData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to compress JA4S data: %v", err)
-	}
-
-	// Compress DHCP data
-	dhcpCompressed, err := u.compressFunc(dhcpData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to compress DHCP data: %v", err)
-	}
-
-	// Combine into JSON structure
-	combined := CombinedLogs{
-		DNS:    base64.StdEncoding.EncodeToString(dnsCompressed),
-		Conn:   base64.StdEncoding.EncodeToString(connCompressed),
-		JA3JA4: base64.StdEncoding.EncodeToString(ja3ja4Compressed),
-		JA4S:   base64.StdEncoding.EncodeToString(ja4sCompressed),
-		DHCP:   base64.StdEncoding.EncodeToString(dhcpCompressed),
-	}
-
-	// Marshal to JSON
-	jsonData, err := json.Marshal(combined)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal combined data: %v", err)
-	}
-
-	// Compress the combined JSON
-	return u.compressFunc(jsonData)
+	return fmt.Errorf("upload cancelled; payload buffered for retry: %w", ctxErr)
 }
 
 // retryBackoff is the wait before retry number retry (1 for the first retry):
@@ -488,37 +356,76 @@ func (u *LogUploader) waitBeforeRetry(ctx context.Context, retry int) error {
 	}
 }
 
-// upload sends the compressed data to the server
-func (u *LogUploader) upload(ctx context.Context, data []byte) error {
-	// Generate metadata for the payload
-	metadataMap := metadata.GenerateMetadata(u.networkID, u.captureInterface)
-	log.Printf("[upload] Sending metadata to API: %+v", metadataMap)
-
+// rpcContext bounds one upload RPC.
+func (u *LogUploader) rpcContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	timeout := u.uploadTimeout
 	if timeout <= 0 {
 		timeout = defaultUploadTimeout
 	}
-	rpcCtx, cancel := context.WithTimeout(ctx, timeout)
+	return context.WithTimeout(ctx, timeout)
+}
+
+// sendRecords sends one UploadRecordsRequest, adding the API key for the call only.
+func (u *LogUploader) sendRecords(ctx context.Context, req *ingest.UploadRecordsRequest) error {
+	rpcCtx, cancel := u.rpcContext(ctx)
+	defer cancel()
+
+	req.ApiKey = u.apiKey
+	_, statusCode, message, err := u.client.uploadRecords(rpcCtx, req)
+	req.ApiKey = ""
+	if err != nil {
+		// An un-upgraded Publisher (on-prem in particular) has no uploadRecords. Say so plainly:
+		// the batches are buffered and would otherwise age out without an obvious cause.
+		if status.Code(err) == codes.Unimplemented {
+			log.Printf("[upload] The Publisher does not support uploadRecords; it needs the B1CF-2107 upgrade. Batches are buffered until it has it or they age out.")
+		}
+		return fmt.Errorf("gRPC call failed: %w", err)
+	}
+	return statusError(statusCode, message)
+}
+
+// statusError maps the statusCode in a Publisher response to an error.
+func statusError(statusCode int32, message string) error {
+	switch statusCode {
+	case 200:
+		return nil
+	case 410:
+		return fmt.Errorf("API returned 410 Gone: sensor should stop sending data and terminate: %w", ErrAPIGone)
+	case 400:
+		return fmt.Errorf("%w: %s (code: 400)", errUploadRefused, message)
+	default:
+		return fmt.Errorf("upload failed: %s (code: %d)", message, statusCode)
+	}
+}
+
+// uploadLegacy sends an old Zeek-log payload buffered by a sensor version before typed uploads.
+func (u *LogUploader) uploadLegacy(ctx context.Context, data []byte) error {
+	metadataMap := metadata.GenerateMetadata(u.networkID, u.captureInterface)
+	log.Printf("[upload] Sending buffered legacy payload with metadata: %+v", metadataMap)
+
+	rpcCtx, cancel := u.rpcContext(ctx)
 	defer cancel()
 
 	_, statusCode, message, err := u.client.uploadExcelMethod(rpcCtx, data, u.apiKey, metadataMap)
 	if err != nil {
 		return fmt.Errorf("gRPC call failed: %w", err)
 	}
-
-	if statusCode == 410 {
-		return fmt.Errorf("API returned 410 Gone: sensor should stop sending data and terminate: %w", ErrAPIGone)
-	}
-
-	if statusCode != 200 {
-		return fmt.Errorf("upload failed: %s (code: %d)", message, statusCode)
-	}
-
-	return nil
+	return statusError(statusCode, message)
 }
 
-// bufferSave writes a compressed payload to disk for later retry
-func (u *LogUploader) bufferSave(data []byte) error {
+// bufferRecords writes a request, without its API key, to disk for later retry.
+func (u *LogUploader) bufferRecords(req *ingest.UploadRecordsRequest) error {
+	req.ApiKey = ""
+	data, err := proto.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("failed to encode buffered request: %w", err)
+	}
+	return u.bufferSave(data, bufferRecordsExt)
+}
+
+// bufferSave writes a payload to disk for later retry, named for its time so the oldest is
+// flushed first and with ext marking its format.
+func (u *LogUploader) bufferSave(data []byte, ext string) error {
 	if u.bufferDir == "" {
 		return nil
 	}
@@ -528,7 +435,7 @@ func (u *LogUploader) bufferSave(data []byte) error {
 	// Name encoded with timestamp for ordering
 	ts := time.Now().UTC().Format("20060102T150405Z")
 	// Include monotonic nsec to avoid collisions
-	fname := fmt.Sprintf("buf_%s_%d.bin", ts, time.Now().UTC().UnixNano())
+	fname := fmt.Sprintf("buf_%s_%d%s", ts, time.Now().UTC().UnixNano(), ext)
 	path := filepath.Join(u.bufferDir, fname)
 	// Write under a temporary name and rename, so a concurrent flush never
 	// sees a partly written payload.
@@ -542,6 +449,24 @@ func (u *LogUploader) bufferSave(data []byte) error {
 		return fmt.Errorf("failed to finalize buffer file: %w", err)
 	}
 	return nil
+}
+
+// sendBuffered uploads one buffered file in the format its extension names.
+func (u *LogUploader) sendBuffered(ctx context.Context, name string, data []byte) error {
+	if strings.HasSuffix(name, bufferRecordsExt) {
+		var req ingest.UploadRecordsRequest
+		if err := proto.Unmarshal(data, &req); err != nil {
+			return fmt.Errorf("%w: unreadable buffered request: %v", errUploadRefused, err)
+		}
+		return u.sendRecords(ctx, &req)
+	}
+	return u.uploadLegacy(ctx, data)
+}
+
+// isBufferedPayload reports whether name is a buffered payload this sensor can send. Anything
+// else in the buffer directory is left alone, and purged only by age.
+func isBufferedPayload(name string) bool {
+	return strings.HasSuffix(name, bufferRecordsExt) || strings.HasSuffix(name, bufferLegacyExt)
 }
 
 // flushBuffer attempts to send buffered payloads oldest-first and purges old
@@ -587,8 +512,9 @@ func (u *LogUploader) flushBuffer(ctx context.Context) error {
 			_ = os.Remove(full)
 			continue
 		}
-		// A .tmp file is still being written (or was abandoned); never upload it
-		if strings.HasSuffix(e.Name(), bufferTmpSuffix) {
+		// A .tmp file is still being written (or was abandoned), and any other file is not
+		// ours; never upload either
+		if !isBufferedPayload(e.Name()) {
 			continue
 		}
 		// Try upload
@@ -598,181 +524,19 @@ func (u *LogUploader) flushBuffer(ctx context.Context) error {
 			_ = os.Remove(full)
 			continue
 		}
-		if err := u.upload(ctx, data); err != nil {
+		if err := u.sendBuffered(ctx, e.Name(), data); err != nil {
+			// A refused payload can never succeed; drop it and carry on
+			if errors.Is(err, errUploadRefused) {
+				log.Printf("[upload] Dropping buffered payload %s: %v", e.Name(), err)
+				_ = os.Remove(full)
+				continue
+			}
 			// Stop on first failure (likely still down); keep file
+			log.Printf("[upload] Buffered payload %s not sent, kept for the next flush: %v", e.Name(), err)
 			return err
 		}
 		// Success: remove file
 		_ = os.Remove(full)
 	}
 	return nil
-}
-
-// compressData compresses byte data using zlib
-func compressData(data []byte) ([]byte, error) {
-	var buf bytes.Buffer
-	writer := zlib.NewWriter(&buf)
-
-	if _, err := writer.Write(data); err != nil {
-		return nil, fmt.Errorf("failed to write compressed data: %v", err)
-	}
-
-	if err := writer.Close(); err != nil {
-		return nil, fmt.Errorf("failed to close compressor: %v", err)
-	}
-
-	return buf.Bytes(), nil
-}
-
-// calculateTotalFileSize calculates the total size of log files in MB
-func (u *LogUploader) calculateTotalFileSize(files LogFiles) (int64, error) {
-	var totalSize int64
-
-	// Check DNS file size (optional)
-	if files.DNSPath != "" {
-		if stat, err := os.Stat(files.DNSPath); err == nil {
-			totalSize += stat.Size()
-		} else if !os.IsNotExist(err) {
-			return 0, fmt.Errorf("failed to stat DNS file: %v", err)
-		}
-	}
-
-	// Check conn file size (required)
-	if stat, err := os.Stat(files.ConnPath); err != nil {
-		return 0, fmt.Errorf("failed to stat connection file: %v", err)
-	} else {
-		totalSize += stat.Size()
-	}
-
-	// Check JA3JA4 file size (optional)
-	if files.JA3JA4Path != "" {
-		if stat, err := os.Stat(files.JA3JA4Path); err == nil {
-			totalSize += stat.Size()
-		} else if !os.IsNotExist(err) {
-			return 0, fmt.Errorf("failed to stat JA3JA4 file: %v", err)
-		}
-	}
-
-	// Check JA4S file size (optional)
-	if files.JA4SPath != "" {
-		if stat, err := os.Stat(files.JA4SPath); err == nil {
-			totalSize += stat.Size()
-		} else if !os.IsNotExist(err) {
-			return 0, fmt.Errorf("failed to stat JA4S file: %v", err)
-		}
-	}
-
-	// Check DHCP file size (optional)
-	if files.DHCPPath != "" {
-		if stat, err := os.Stat(files.DHCPPath); err == nil {
-			totalSize += stat.Size()
-		} else if !os.IsNotExist(err) {
-			return 0, fmt.Errorf("failed to stat DHCP file: %v", err)
-		}
-	}
-
-	// Convert to MB
-	return totalSize / (1024 * 1024), nil
-}
-
-// splitCSVFile splits a CSV file into chunks of specified size
-func splitCSVFile(filePath string, maxSizeBytes int64) ([]string, error) {
-	if filePath == "" {
-		return nil, nil // Skip empty files
-	}
-
-	file, err := os.Open(filePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil // Skip missing files
-		}
-		return nil, fmt.Errorf("failed to open file %s: %v", filePath, err)
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-
-	// Read header
-	if !scanner.Scan() {
-		return []string{filePath}, nil // Return original file if empty
-	}
-	header := scanner.Text()
-
-	var chunks []string
-	var currentChunk []string
-	var currentSize int64
-	chunkNum := 1
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		lineSize := int64(len(line) + 1) // +1 for newline
-
-		// Start new chunk if size exceeded
-		if currentSize > 0 && currentSize+lineSize > maxSizeBytes {
-			chunkPath, err := writeChunk(filePath, chunkNum, header, currentChunk)
-			if err != nil {
-				return nil, err
-			}
-			chunks = append(chunks, chunkPath)
-
-			currentChunk = currentChunk[:0] // Reset slice
-			currentSize = int64(len(header) + 1)
-			chunkNum++
-		}
-
-		currentChunk = append(currentChunk, line)
-		currentSize += lineSize
-	}
-
-	// Write final chunk if we have data
-	if len(currentChunk) > 0 {
-		chunkPath, err := writeChunk(filePath, chunkNum, header, currentChunk)
-		if err != nil {
-			return nil, err
-		}
-		chunks = append(chunks, chunkPath)
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("error reading file %s: %v", filePath, err)
-	}
-
-	// If no chunks were created, return original file
-	if len(chunks) == 0 {
-		return []string{filePath}, nil
-	}
-
-	return chunks, nil
-}
-
-// writeChunk writes a chunk of CSV data to a temporary file
-func writeChunk(originalPath string, chunkNum int, header string, lines []string) (string, error) {
-	dir := filepath.Dir(originalPath)
-	base := filepath.Base(originalPath)
-	ext := filepath.Ext(base)
-	name := strings.TrimSuffix(base, ext)
-
-	chunkPath := filepath.Join(dir, fmt.Sprintf("%s_chunk_%d%s", name, chunkNum, ext))
-
-	file, err := os.OpenFile(chunkPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
-	if err != nil {
-		return "", fmt.Errorf("failed to create chunk file: %v", err)
-	}
-	defer file.Close()
-
-	writer := bufio.NewWriter(file)
-
-	// Write header
-	if _, err := writer.WriteString(header + "\n"); err != nil {
-		return "", fmt.Errorf("failed to write header: %v", err)
-	}
-
-	// Write lines
-	for _, line := range lines {
-		if _, err := writer.WriteString(line + "\n"); err != nil {
-			return "", fmt.Errorf("failed to write line: %v", err)
-		}
-	}
-
-	return chunkPath, writer.Flush()
 }

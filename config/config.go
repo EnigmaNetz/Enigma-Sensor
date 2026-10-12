@@ -53,7 +53,8 @@ type Config struct {
 		CACertFile string `json:"ca_cert_file"`
 		// Upload is whether to upload captured data to the Enigma API
 		Upload bool `json:"upload"`
-		// MaxPayloadSizeMB is the maximum size of payload before chunking (default: 25MB)
+		// MaxPayloadSizeMB is the most uncompressed record data in one upload before it is split
+		// into several (default: 25MB, capped at 96MB)
 		MaxPayloadSizeMB int64 `json:"max_payload_size_mb"`
 	} `json:"enigma_api"`
 

@@ -13,6 +13,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"EnigmaNetz/Enigma-Go-Sensor/internal/api/ingest"
 )
 
 // blockingClient never answers: it waits until the RPC's context ends, like a
@@ -22,6 +24,10 @@ type blockingClient struct{}
 func (blockingClient) uploadExcelMethod(ctx context.Context, _ []byte, _ string, _ map[string]string) (string, int32, string, error) {
 	<-ctx.Done()
 	return "", 0, "", ctx.Err()
+}
+
+func (c blockingClient) uploadRecords(ctx context.Context, _ *ingest.UploadRecordsRequest) (string, int32, string, error) {
+	return c.uploadExcelMethod(ctx, nil, "", nil)
 }
 
 // countingClient succeeds after a short delay and counts uploads per payload.
@@ -39,13 +45,8 @@ func (c *countingClient) uploadExcelMethod(_ context.Context, data []byte, _ str
 	return "success", 200, "ok", nil
 }
 
-func writeTestLogs(t *testing.T) LogFiles {
-	t.Helper()
-	dir := t.TempDir()
-	files := LogFiles{DNSPath: filepath.Join(dir, "dns.log"), ConnPath: filepath.Join(dir, "conn.log")}
-	require.NoError(t, os.WriteFile(files.DNSPath, []byte("h\na\n"), 0o600))
-	require.NoError(t, os.WriteFile(files.ConnPath, []byte("h\nb\n"), 0o600))
-	return files
+func (c *countingClient) uploadRecords(ctx context.Context, req *ingest.UploadRecordsRequest) (string, int32, string, error) {
+	return c.uploadExcelMethod(ctx, req.Records, "", nil)
 }
 
 func TestUpload_RPCHasDeadline(t *testing.T) {
@@ -57,8 +58,10 @@ func TestUpload_RPCHasDeadline(t *testing.T) {
 	}
 
 	start := time.Now()
-	err := uploader.upload(context.Background(), []byte("payload"))
+	err := uploader.uploadLegacy(context.Background(), []byte("payload"))
+	require.ErrorIs(t, err, context.DeadlineExceeded)
 
+	err = uploader.sendRecords(context.Background(), &ingest.UploadRecordsRequest{})
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.Less(t, time.Since(start), 5*time.Second, "a hung RPC must not block past its deadline")
 }
@@ -71,7 +74,7 @@ func TestUpload_DefaultDeadline(t *testing.T) {
 	})
 	uploader := &LogUploader{client: client, apiKey: "k", networkID: "Test-Network-01"}
 
-	require.NoError(t, uploader.upload(context.Background(), []byte("payload")))
+	require.NoError(t, uploader.sendRecords(context.Background(), &ingest.UploadRecordsRequest{}))
 	require.True(t, ok, "the RPC context must carry a deadline")
 	assert.WithinDuration(t, time.Now().Add(defaultUploadTimeout), deadline, 5*time.Second)
 }
@@ -84,26 +87,33 @@ func (f clientFunc) uploadExcelMethod(ctx context.Context, _ []byte, _ string, _
 	return "success", 200, "ok", nil
 }
 
-func TestUploadLogs_CancelledChunkedUploadBuffersEveryChunk(t *testing.T) {
+func (f clientFunc) uploadRecords(ctx context.Context, _ *ingest.UploadRecordsRequest) (string, int32, string, error) {
+	return f.uploadExcelMethod(ctx, nil, "", nil)
+}
+
+func TestUploadLogs_CancelledUploadBuffersEveryBatch(t *testing.T) {
 	dir := t.TempDir()
-	// Twenty lines of 60 KB make a file over 1 MB, so with max_payload_size_mb 0
-	// it is chunked, one line per chunk.
-	const lines = 20
-	line := strings.Repeat("x", 60*1024)
+	// Forty records of 60 KB with max_payload_size_mb 1 make three batches of 17, 17 and 6.
+	const lines = 40
+	pad := strings.Repeat("x", 60*1024)
+	var records []string
+	for i := 0; i < lines; i++ {
+		records = append(records, fmt.Sprintf(`{"ts":%d.0,"uid":"C%d","history":"%s"}`, i, i, pad))
+	}
 	connPath := filepath.Join(dir, "conn.log")
-	require.NoError(t, os.WriteFile(connPath, []byte("h\n"+strings.Repeat(line+"\n", lines)), 0o600))
+	require.NoError(t, os.WriteFile(connPath, []byte(strings.Join(records, "\n")+"\n"), 0o600))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	bufDir := filepath.Join(dir, "buffer")
 	uploader := &LogUploader{
-		client:       cancelThenFailClient{cancel: cancel},
-		apiKey:       "k",
-		networkID:    "Test-Network-01",
-		retryCount:   3,
-		retryDelay:   time.Hour,
-		compressFunc: compressData,
-		bufferDir:    bufDir,
+		client:           cancelThenFailClient{cancel: cancel},
+		apiKey:           "k",
+		networkID:        "Test-Network-01",
+		retryCount:       3,
+		retryDelay:       time.Hour,
+		maxPayloadSizeMB: 1,
+		bufferDir:        bufDir,
 	}
 
 	err := uploader.UploadLogs(ctx, LogFiles{ConnPath: connPath})
@@ -111,7 +121,7 @@ func TestUploadLogs_CancelledChunkedUploadBuffersEveryChunk(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 	entries, readErr := os.ReadDir(bufDir)
 	require.NoError(t, readErr)
-	assert.Len(t, entries, lines, "every chunk is buffered after cancellation, not just the first")
+	assert.Len(t, entries, 3, "every batch is buffered after cancellation, not just the first")
 }
 
 func TestRetryBackoff_DoublesWithJitter(t *testing.T) {
@@ -143,23 +153,26 @@ func (c *failThenCancelClient) uploadExcelMethod(_ context.Context, _ []byte, _ 
 	return "fail", 500, "server error", nil
 }
 
+func (c *failThenCancelClient) uploadRecords(ctx context.Context, _ *ingest.UploadRecordsRequest) (string, int32, string, error) {
+	return c.uploadExcelMethod(ctx, nil, "", nil)
+}
+
 func TestUploadLogs_CancelStopsRetryWaitAndBuffers(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	client := &failThenCancelClient{cancel: cancel}
 	bufDir := filepath.Join(t.TempDir(), "buffer")
 	uploader := &LogUploader{
-		client:       client,
-		apiKey:       "k",
-		networkID:    "Test-Network-01",
-		retryCount:   3,
-		retryDelay:   time.Hour, // the wait must end on cancellation, not on this timer
-		compressFunc: compressData,
-		bufferDir:    bufDir,
+		client:     client,
+		apiKey:     "k",
+		networkID:  "Test-Network-01",
+		retryCount: 3,
+		retryDelay: time.Hour, // the wait must end on cancellation, not on this timer
+		bufferDir:  bufDir,
 	}
 
 	start := time.Now()
-	err := uploader.UploadLogs(ctx, writeTestLogs(t))
+	err := uploader.UploadLogs(ctx, writeJSONLogs(t))
 
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Less(t, time.Since(start), 5*time.Second)
@@ -167,7 +180,7 @@ func TestUploadLogs_CancelStopsRetryWaitAndBuffers(t *testing.T) {
 	entries, readErr := os.ReadDir(bufDir)
 	require.NoError(t, readErr)
 	require.Len(t, entries, 1, "a cancelled upload is buffered, not dropped")
-	assert.Regexp(t, `\.bin$`, entries[0].Name())
+	assert.Regexp(t, `\.rec$`, entries[0].Name())
 }
 
 func TestUploadLogs_CancelDuringRPCBuffers(t *testing.T) {
@@ -175,16 +188,15 @@ func TestUploadLogs_CancelDuringRPCBuffers(t *testing.T) {
 	defer cancel()
 	bufDir := filepath.Join(t.TempDir(), "buffer")
 	uploader := &LogUploader{
-		client:       cancelThenFailClient{cancel: cancel},
-		apiKey:       "k",
-		networkID:    "Test-Network-01",
-		retryCount:   3,
-		retryDelay:   time.Hour,
-		compressFunc: compressData,
-		bufferDir:    bufDir,
+		client:     cancelThenFailClient{cancel: cancel},
+		apiKey:     "k",
+		networkID:  "Test-Network-01",
+		retryCount: 3,
+		retryDelay: time.Hour,
+		bufferDir:  bufDir,
 	}
 
-	err := uploader.UploadLogs(ctx, writeTestLogs(t))
+	err := uploader.UploadLogs(ctx, writeJSONLogs(t))
 
 	require.ErrorIs(t, err, context.Canceled)
 	entries, readErr := os.ReadDir(bufDir)
@@ -202,21 +214,24 @@ func (c cancelThenFailClient) uploadExcelMethod(ctx context.Context, _ []byte, _
 	return "", 0, "", ctx.Err()
 }
 
+func (c cancelThenFailClient) uploadRecords(ctx context.Context, _ *ingest.UploadRecordsRequest) (string, int32, string, error) {
+	return c.uploadExcelMethod(ctx, nil, "", nil)
+}
+
 func TestUploadLogs_NoWaitAfterLastAttempt(t *testing.T) {
 	mock := &mockPublishClient{uploadResponses: []uploadResponse{
 		{status: "fail", statusCode: 500, message: "server error"},
 	}}
 	uploader := &LogUploader{
-		client:       mock,
-		apiKey:       "k",
-		networkID:    "Test-Network-01",
-		retryCount:   1,
-		retryDelay:   time.Hour,
-		compressFunc: compressData,
+		client:     mock,
+		apiKey:     "k",
+		networkID:  "Test-Network-01",
+		retryCount: 1,
+		retryDelay: time.Hour,
 	}
 
 	start := time.Now()
-	err := uploader.UploadLogs(context.Background(), writeTestLogs(t))
+	err := uploader.UploadLogs(context.Background(), writeJSONLogs(t))
 
 	require.Error(t, err)
 	assert.Less(t, time.Since(start), 5*time.Second, "the last failed attempt must not be followed by a backoff")
@@ -304,12 +319,12 @@ func TestBufferSave_LeavesNoTemporaryFile(t *testing.T) {
 	bufDir := filepath.Join(t.TempDir(), "buffer")
 	uploader := &LogUploader{bufferDir: bufDir}
 
-	require.NoError(t, uploader.bufferSave([]byte("payload")))
+	require.NoError(t, uploader.bufferSave([]byte("payload"), bufferRecordsExt))
 
 	entries, err := os.ReadDir(bufDir)
 	require.NoError(t, err)
 	require.Len(t, entries, 1)
-	assert.Regexp(t, `^buf_\d{8}T\d{6}Z_\d+\.bin$`, entries[0].Name())
+	assert.Regexp(t, `^buf_\d{8}T\d{6}Z_\d+\.rec$`, entries[0].Name())
 }
 
 func TestUpload_WrapsRPCError(t *testing.T) {
@@ -317,5 +332,9 @@ func TestUpload_WrapsRPCError(t *testing.T) {
 	mock := &mockPublishClient{uploadResponses: []uploadResponse{{err: sentinel}}}
 	uploader := &LogUploader{client: mock, apiKey: "k", networkID: "Test-Network-01"}
 
-	assert.ErrorIs(t, uploader.upload(context.Background(), []byte("payload")), sentinel)
+	assert.ErrorIs(t, uploader.uploadLegacy(context.Background(), []byte("payload")), sentinel)
+
+	mock = &mockPublishClient{uploadResponses: []uploadResponse{{err: sentinel}}}
+	uploader.client = mock
+	assert.ErrorIs(t, uploader.sendRecords(context.Background(), &ingest.UploadRecordsRequest{}), sentinel)
 }

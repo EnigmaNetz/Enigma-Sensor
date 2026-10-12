@@ -1,6 +1,7 @@
 package types
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -13,7 +14,7 @@ import (
 )
 
 // EnrichDHCPLog parses DHCP option 55 (parameter request list) from the
-// pcapng file and writes the values into the param_req_list column of the
+// capture and writes the values into the param_req_list field of the
 // Zeek-generated dhcp.log. Non-fatal: errors are logged and the function
 // returns nil so the main processing path is never interrupted.
 func EnrichDHCPLog(pcapPath, dhcpLogPath string) error {
@@ -94,56 +95,49 @@ func ExtractDHCPFingerprints(pcapPath string) (map[string]string, error) {
 	return result, nil
 }
 
-// PatchDHCPLog reads the Zeek dhcp.log TSV, fills in the param_req_list
-// column for any row whose MAC address appears in fingerprints, and writes
-// the file back in place.
+// PatchDHCPLog reads the Zeek dhcp.log (JSON, one record per line), sets param_req_list on any
+// record whose mac appears in fingerprints and has no param_req_list yet, and replaces the log
+// if anything changed. A line that is not a JSON record is copied unchanged: enrichment is best
+// effort, and the subnet filter refuses such a line afterwards.
 func PatchDHCPLog(logPath string, fingerprints map[string]string) error {
-	data, err := os.ReadFile(logPath)
+	_, err := rewriteLog(logPath, func(line []byte) ([]byte, error) {
+		if patched, ok := patchRecord(line, fingerprints); ok {
+			return patched, nil
+		}
+		return line, nil
+	})
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("read dhcp log: %w", err)
+		return fmt.Errorf("dhcp log: %w", err)
 	}
+	return nil
+}
 
-	lines := strings.Split(string(data), "\n")
-
-	macIdx, paramIdx := -1, -1
-	for _, line := range lines {
-		if strings.HasPrefix(line, "#fields\t") {
-			fields := strings.Split(line, "\t")[1:] // drop "#fields" prefix so indices match data columns
-			for i, f := range fields {
-				switch f {
-				case "mac":
-					macIdx = i
-				case "param_req_list":
-					paramIdx = i
-				}
-			}
-			break
-		}
+// patchRecord returns the record with param_req_list set, and true, when the record's mac has a
+// fingerprint and param_req_list is not already set.
+func patchRecord(line []byte, fingerprints map[string]string) ([]byte, bool) {
+	var rec map[string]json.RawMessage
+	if err := json.Unmarshal(line, &rec); err != nil {
+		return nil, false
 	}
-	if macIdx < 0 || paramIdx < 0 {
-		return nil
+	if _, set := rec["param_req_list"]; set {
+		return nil, false
 	}
-
-	changed := false
-	for i, line := range lines {
-		if strings.HasPrefix(line, "#") || line == "" {
-			continue
-		}
-		cols := strings.Split(line, "\t")
-		if macIdx >= len(cols) || paramIdx >= len(cols) {
-			continue
-		}
-		if fp, ok := fingerprints[cols[macIdx]]; ok && cols[paramIdx] == "-" {
-			cols[paramIdx] = fp
-			lines[i] = strings.Join(cols, "\t")
-			changed = true
-		}
+	var mac string
+	if err := json.Unmarshal(rec["mac"], &mac); err != nil {
+		return nil, false
 	}
-	if !changed {
-		return nil
+	fp, ok := fingerprints[mac]
+	if !ok {
+		return nil, false
 	}
-	return os.WriteFile(logPath, []byte(strings.Join(lines, "\n")), 0644)
+	value, err := json.Marshal(fp)
+	if err != nil {
+		return nil, false
+	}
+	rec["param_req_list"] = value
+	patched, err := json.Marshal(rec)
+	if err != nil {
+		return nil, false
+	}
+	return patched, true
 }

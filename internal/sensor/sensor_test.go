@@ -91,8 +91,8 @@ type goneUploader struct {
 
 func (m *goneUploader) UploadLogs(ctx context.Context, files api.LogFiles) error {
 	atomic.AddInt32(m.calls, 1)
-	// Wrapped the way the real uploader wraps it (chunk wrap around the client wrap)
-	return fmt.Errorf("failed to upload chunk 1: %w", fmt.Errorf("API returned 410 Gone: %w", api.ErrAPIGone))
+	// Wrapped the way the real uploader wraps it (UploadLogs and the records reader around the client wrap)
+	return fmt.Errorf("failed to upload records: conn log: %w", fmt.Errorf("API returned 410 Gone: %w", api.ErrAPIGone))
 }
 
 func minimalConfig(loop bool) *config.Config {

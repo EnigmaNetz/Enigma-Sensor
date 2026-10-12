@@ -126,4 +126,21 @@ func TestProcessPCAP_JA3JA4ScriptMaterialized(t *testing.T) {
 	}
 }
 
+// Zeek must write JSON logs: the uploader reads nothing else (B1CF-2108).
+func TestProcessPCAP_ZeekWritesJSONLogs(t *testing.T) {
+	runner := &capturingCmdRunner{}
+	p := NewProcessorWithDeps(fakeFS{}, runner, zeekBinary)
+	_, _ = p.ProcessPCAP(filepath.Join(t.TempDir(), "test.pcap"), types.ProcessOptions{SamplingPercentage: 100})
+
+	found := false
+	for _, a := range runner.args {
+		if a == types.ZeekJSONLogsArg {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected zeek args to include %q, got: %v", types.ZeekJSONLogsArg, runner.args)
+	}
+}
+
 // TODO: Add more granular unit tests with mocks for Zeek and file conversion.

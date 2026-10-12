@@ -87,7 +87,7 @@ func (p *Processor) ProcessPCAP(pcapPath string, opts types.ProcessOptions) (typ
 	log.Printf("[processor] Run directory: %s", runDir)
 
 	// Prepare Zeek command with sampling if needed
-	baseArgs := []string{"-r", pcapPath, fmt.Sprintf("Log::default_logdir=%s", runDir), "-C"}
+	baseArgs := []string{"-r", pcapPath, fmt.Sprintf("Log::default_logdir=%s", runDir), "-C", types.ZeekJSONLogsArg}
 	zeekArgs := types.PrepareZeekArgsWithSampling(runDir, opts.SamplingPercentage, baseArgs)
 
 	// Add DHCP fingerprint script so param_req_list appears in dhcp.log. Scripts are

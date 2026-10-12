@@ -97,3 +97,30 @@ func TestProcessPCAP(t *testing.T) {
 		t.Errorf("Expected non-empty XLSX paths, got: %+v", result)
 	}
 }
+
+// Zeek must write JSON logs: the uploader reads nothing else (B1CF-2108).
+func TestProcessPCAP_ZeekWritesJSONLogs(t *testing.T) {
+	zeekBaseDir := filepath.Join("zeek-windows", "zeek-runtime-win64")
+	if err := os.MkdirAll(zeekBaseDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll("zeek-windows")
+	fs := &mockFS{
+		existing:  map[string]bool{filepath.Clean(filepath.Join(zeekBaseDir, "bin", "zeek.exe")): true},
+		renameErr: map[string]error{},
+	}
+	var args []string
+	capture := func(name string, arg ...string) *exec.Cmd {
+		args = arg
+		return exec.Command("cmd", "/C", "echo")
+	}
+	p := NewTestProcessor(capture, fs)
+	_, _ = p.ProcessPCAP(filepath.Join(t.TempDir(), "test.pcap"), types.ProcessOptions{SamplingPercentage: 100})
+
+	for _, a := range args {
+		if a == types.ZeekJSONLogsArg {
+			return
+		}
+	}
+	t.Fatalf("expected zeek args to include %q, got: %v", types.ZeekJSONLogsArg, args)
+}

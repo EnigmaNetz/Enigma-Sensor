@@ -1,0 +1,234 @@
+// Typed sensor upload contract (B1CF-2107).
+//
+// This file is the source of truth. Enigma-Subscriber, Enigma-Data-Generator and Enigma-Sensor
+// each keep a byte-identical copy, and their CI fails if it drifts from this one. Change it here
+// first, then copy it to the other repos.
+//
+// It is deliberately separate from grpc_config.proto: the copies of that file already differ
+// between repos, so it cannot be checked for drift. The legacy uploadExcelMethod stays there.
+//
+// Code generation needs protoc 3.15 or newer: older versions reject `optional` in proto3.
+//
+// Compatibility rules:
+// - Adding an optional field to an existing record is backward compatible. An old reader skips
+//   the unknown field, so the column is simply missing until the Subscriber learns it.
+// - Adding a log type is NOT free. An old Subscriber skips the new repeated field and drops those
+//   records silently, and an upload carrying only the new type counts as 0 records, which the
+//   Publisher refuses. Deploy in this order: the Subscriber decodes it, then the Publisher adds
+//   the count key (RECORD_COUNT_KEYS), then senders start sending it.
+// - Renaming, retyping or removing a field is not compatible. Add the new schema version to the
+//   Subscriber, then to SUPPORTED_SCHEMA_VERSIONS in the Publisher, before any sender uses it.
+// - Never reuse a field number. When a field is removed, add its number and name to `reserved`
+//   in its message so neither can be reused by accident.
+
+syntax = "proto3";
+
+package enigma.ingest.v1;
+
+// Generated Go code lives in the Sensor.
+option go_package = "EnigmaNetz/Enigma-Go-Sensor/internal/api/ingest";
+
+service SensorIngest {
+  rpc uploadRecords(UploadRecordsRequest) returns (UploadRecordsResponse);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Envelope: the only part the Publisher reads. Everything it checks is constant time, so the
+// response time does not grow with the size of `records`.
+// ---------------------------------------------------------------------------------------------
+
+message UploadRecordsRequest {
+  string apiKey = 1;
+  // Version of the RecordBatch layout inside `records`. The Publisher refuses versions it does
+  // not know.
+  uint32 schemaVersion = 2;
+  string sensorVersion = 3;
+  RecordCounts counts = 4;
+  Compression compression = 5;
+  // The same string map uploadExcelMethod carries: network_id, machine_id, os_name, os_version,
+  // architecture, host_ips, zeek_version, session_id.
+  map<string, string> metadata = 6;
+  // A RecordBatch, serialized and then compressed with `compression`. Kept as bytes so the
+  // Publisher never decodes it.
+  bytes records = 7;
+}
+
+message RecordCounts {
+  uint32 conn = 1;
+  uint32 dns = 2;
+  uint32 dhcp = 3;
+  uint32 ja3Ja4 = 4;
+  uint32 ja4s = 5;
+}
+
+enum Compression {
+  // Refused. Senders must set compression explicitly.
+  COMPRESSION_UNSPECIFIED = 0;
+  // zlib (RFC 1950), the format the sensor already uses for uploadExcelMethod.
+  COMPRESSION_ZLIB = 1;
+}
+
+// Same shape as uploadExcelResponse: the outcome is in statusCode and the RPC itself succeeds.
+message UploadRecordsResponse {
+  string status = 1;
+  int32 statusCode = 2;
+  string message = 3;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Records: decoded by the Subscriber only.
+//
+// A decoded record must equal what the Subscriber's tab-separated parser produces from the same
+// log line, so the two upload paths land identical rows:
+// - Field names are the Zeek column names with any `id.` prefix dropped.
+// - A field marked `optional` is one Zeek can leave unset (`-`). Zeek's `(empty)` is the empty
+//   string. An unset optional field decodes as absent, not null, so the decoder must set it to
+//   null to match the tab-separated path.
+// - Zeek sets and vectors are `optional string` holding Zeek's text exactly as written,
+//   comma-separated (for example TTLs "300.000000,60.000000"). The tab-separated parser keeps
+//   them as that string too, and a repeated field could not tell unset from empty or keep the
+//   number formatting. Typed arrays can be added later as new fields.
+// - Fields with no `optional` are ones Zeek always writes.
+//
+// Decoder settings (protobufjs toObject or @grpc/proto-loader). Get any of these wrong and the
+// rows no longer match the tab-separated path:
+// - keepCase: true, so field names stay the Zeek names.
+// - longs: Number. The default renders the uint64 byte and packet counts as strings.
+// - defaults: true, so a field Zeek always writes still appears when its value is 0 or "".
+// - oneofs: false. With true, every optional field adds a `_<name>` key (for example
+//   `_service: "service"`) that would end up in the rows.
+// The Publisher's own loader uses longs: String and oneofs: true. That is fine there, because it
+// never decodes records, but do not copy its settings into a decoder.
+// ---------------------------------------------------------------------------------------------
+
+message RecordBatch {
+  repeated ConnRecord conn = 1;
+  repeated DnsRecord dns = 2;
+  repeated DhcpRecord dhcp = 3;
+  repeated Ja3Ja4Record ja3Ja4 = 4;
+  repeated Ja4sRecord ja4s = 5;
+}
+
+message ConnRecord {
+  double ts = 1;
+  string uid = 2;
+  string orig_h = 3;
+  uint32 orig_p = 4;
+  string resp_h = 5;
+  uint32 resp_p = 6;
+  string proto = 7;
+  optional string service = 8;
+  optional double duration = 9;
+  optional uint64 orig_bytes = 10;
+  optional uint64 resp_bytes = 11;
+  optional string conn_state = 12;
+  optional bool local_orig = 13;
+  optional bool local_resp = 14;
+  optional uint64 missed_bytes = 15;
+  optional string history = 16;
+  optional uint64 orig_pkts = 17;
+  optional uint64 orig_ip_bytes = 18;
+  optional uint64 resp_pkts = 19;
+  optional uint64 resp_ip_bytes = 20;
+  optional string tunnel_parents = 21;
+  // IP protocol number, added to conn.log in Zeek 7. Kept separate on purpose: the Subscriber's
+  // tab-separated parser renames ip_proto to proto, so on that path it overwrites the transport
+  // name ("tcp") with the number (6). The typed decoder has to choose which behaviour to match.
+  optional uint32 ip_proto = 22;
+}
+
+message DnsRecord {
+  double ts = 1;
+  string uid = 2;
+  string orig_h = 3;
+  uint32 orig_p = 4;
+  string resp_h = 5;
+  uint32 resp_p = 6;
+  string proto = 7;
+  optional uint32 trans_id = 8;
+  optional double rtt = 9;
+  optional string query = 10;
+  optional uint32 qclass = 11;
+  optional string qclass_name = 12;
+  optional uint32 qtype = 13;
+  optional string qtype_name = 14;
+  optional uint32 rcode = 15;
+  optional string rcode_name = 16;
+  optional bool AA = 17;
+  optional bool TC = 18;
+  optional bool RD = 19;
+  optional bool RA = 20;
+  optional uint32 Z = 21;
+  optional string answers = 22;
+  optional string TTLs = 23;
+  optional bool rejected = 24;
+  // Added to dns.log in Zeek 8.1 (B1CF-1902).
+  optional uint32 opcode = 25;
+  optional string opcode_name = 26;
+}
+
+// Zeek 8 dhcp.log. Unlike the other logs it has no uid or id.* columns: one DHCP exchange can
+// span several connections (uids), and the addresses are the DHCP client and server.
+message DhcpRecord {
+  double ts = 1;
+  optional string uids = 2;
+  optional string client_addr = 3;
+  optional string server_addr = 4;
+  optional uint32 client_port = 5;
+  optional uint32 server_port = 6;
+  optional string mac = 7;
+  optional string host_name = 8;
+  optional string client_fqdn = 9;
+  optional string domain = 10;
+  optional string requested_addr = 11;
+  optional string assigned_addr = 12;
+  optional double lease_time = 13;
+  optional string client_message = 14;
+  optional string server_message = 15;
+  optional string msg_types = 16;
+  optional double duration = 17;
+  // From Zeek's DHCP software and sub-option policy scripts, when loaded.
+  optional string client_software = 18;
+  optional string server_software = 19;
+  optional string circuit_id = 20;
+  optional string agent_remote_id = 21;
+  optional string subscriber_id = 22;
+  // DHCP option 55 as comma-separated decimal bytes, filled in by the sensor from the PCAP.
+  optional string param_req_list = 23;
+}
+
+message Ja3Ja4Record {
+  double ts = 1;
+  string uid = 2;
+  string orig_h = 3;
+  uint32 orig_p = 4;
+  string resp_h = 5;
+  uint32 resp_p = 6;
+  optional string ja3 = 7;
+  optional string ja3_hash = 8;
+  optional string ja4 = 9;
+  optional string ja4_hash = 10;
+  optional string client_version = 11;
+  optional string cipher_suites = 12;
+  optional string extensions = 13;
+  optional string server_name = 14;
+  optional string user_agent = 15;
+}
+
+// The sensor's ja3-ja4-fingerprinting.zeek sets every JA4S field on every record: server_name
+// falls back to "Unknown", and an empty server_extensions vector is written as `(empty)`, the
+// empty string here. So no field is optional.
+message Ja4sRecord {
+  double ts = 1;
+  string uid = 2;
+  string orig_h = 3;
+  uint32 orig_p = 4;
+  string resp_h = 5;
+  uint32 resp_p = 6;
+  string ja4s = 7;
+  string ja4s_hash = 8;
+  string server_version = 9;
+  string server_cipher = 10;
+  string server_extensions = 11;
+  string server_name = 12;
+}

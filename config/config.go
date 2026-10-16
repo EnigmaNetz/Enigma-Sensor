@@ -5,9 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
+
+	"EnigmaNetz/Enigma-Go-Sensor/internal/flowlogs/lbrules"
 )
 
 // Config represents the application configuration
@@ -29,6 +33,9 @@ type Config struct {
 
 	// Capture configuration
 	Capture struct {
+		// Enabled turns live packet capture on or off (default: true). A sensor that only reads
+		// Azure flow logs or ingests PCAP files sets it to false and needs no capture interface.
+		Enabled *bool `json:"enabled,omitempty"`
 		// OutputDir is where capture files are stored
 		OutputDir string `json:"output_dir"`
 		// WindowSeconds is how long each capture runs
@@ -92,6 +99,118 @@ type Config struct {
 		// FileStableSeconds is how long a file's size must be unchanged before processing (default: 5, min: 1, max: 60)
 		FileStableSeconds int `json:"file_stable_seconds"`
 	} `json:"pcap_ingest"`
+
+	// AzureFlowLogs reads Azure VNet flow logs from a storage account and uploads them as conn
+	// records, for VMs a packet capture cannot see (B1CF-2140)
+	AzureFlowLogs struct {
+		// Enabled turns the flow log poller on
+		Enabled bool `json:"enabled"`
+		// StorageAccount is the storage account the flow logs are written to
+		StorageAccount string `json:"storage_account"`
+		// Container holds the flow logs (default: insights-logs-flowlogflowevent)
+		Container string `json:"container"`
+		// BlobEndpoint overrides https://<storage_account>.blob.core.windows.net, for a
+		// sovereign cloud. Must be https
+		BlobEndpoint string `json:"blob_endpoint"`
+		// ManagedIdentityClientID selects a user-assigned managed identity; empty uses the VM's
+		// system-assigned identity
+		ManagedIdentityClientID string `json:"managed_identity_client_id"`
+		// VNetCIDRs is a comma-separated list of the virtual network's address spaces, for
+		// local_orig and local_resp. Empty means the private address ranges
+		VNetCIDRs string `json:"vnet_cidrs"`
+		// LBRules is a comma-separated list of <backend IP or CIDR>:<port>[/tcp|/udp]=<service>
+		// entries that set service for flows to load balancer backends
+		LBRules string `json:"lb_rules"`
+		// PollIntervalSeconds is how often new flow log records are read (default: 60, min: 10, max: 3600)
+		PollIntervalSeconds int `json:"poll_interval_seconds"`
+		// MaxFlowAgeMinutes is how long a connection stays open before its counters so far are
+		// uploaded (default: 60, min: 5, max: 1440)
+		MaxFlowAgeMinutes int `json:"max_flow_age_minutes"`
+		// StateFile records how far each flow log has been read (default: logs/flowlogs-state.json)
+		StateFile string `json:"state_file"`
+	} `json:"azure_flow_logs"`
+}
+
+// CaptureEnabled reports whether live packet capture runs. Unset means it does.
+func (c *Config) CaptureEnabled() bool {
+	return c.Capture.Enabled == nil || *c.Capture.Enabled
+}
+
+// FlowLogVNetCIDRs returns the configured virtual network address spaces as a trimmed,
+// non-empty slice. Entries are validated by ValidateAndSetDefaults at load time.
+func (c *Config) FlowLogVNetCIDRs() []string {
+	return splitCSV(c.AzureFlowLogs.VNetCIDRs)
+}
+
+// FlowLogEndpoint returns the blob service endpoint the flow log poller reads from.
+func (c *Config) FlowLogEndpoint() string {
+	if c.AzureFlowLogs.BlobEndpoint != "" {
+		return c.AzureFlowLogs.BlobEndpoint
+	}
+	return "https://" + c.AzureFlowLogs.StorageAccount + ".blob.core.windows.net"
+}
+
+// DefaultFlowLogContainer is where Network Watcher writes VNet flow logs.
+const DefaultFlowLogContainer = "insights-logs-flowlogflowevent"
+
+var (
+	storageAccountName = regexp.MustCompile(`^[a-z0-9]{3,24}$`)
+	// containerName follows Azure's rules: 3 to 63 lowercase letters, digits and single hyphens
+	containerName = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9]|-[a-z0-9]){2,62}$`)
+	guidPattern   = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+)
+
+// validateAzureFlowLogs sets the flow log defaults and checks the section when it is enabled.
+func (config *Config) validateAzureFlowLogs() error {
+	a := &config.AzureFlowLogs
+	if !a.Enabled {
+		return nil
+	}
+	if config.Capture.OutputDir == "" {
+		return fmt.Errorf("capture.output_dir is required when azure_flow_logs is enabled: the converted logs are written there")
+	}
+	if a.BlobEndpoint == "" {
+		if !storageAccountName.MatchString(a.StorageAccount) {
+			return fmt.Errorf("azure_flow_logs.storage_account must be 3 to 24 lowercase letters and digits, got %q", a.StorageAccount)
+		}
+	} else {
+		u, err := url.Parse(a.BlobEndpoint)
+		if err != nil || u.Scheme != "https" || u.Host == "" || (u.Path != "" && u.Path != "/") {
+			return fmt.Errorf("azure_flow_logs.blob_endpoint must be an https URL with no path, got %q", a.BlobEndpoint)
+		}
+	}
+	if a.Container == "" {
+		a.Container = DefaultFlowLogContainer
+	} else if !containerName.MatchString(a.Container) {
+		return fmt.Errorf("azure_flow_logs.container %q is not a valid container name", a.Container)
+	}
+	if a.ManagedIdentityClientID != "" && !guidPattern.MatchString(a.ManagedIdentityClientID) {
+		return fmt.Errorf("azure_flow_logs.managed_identity_client_id must be a client ID (a GUID), got %q", a.ManagedIdentityClientID)
+	}
+	// The poller parses these with netip too, so a value that passes here cannot fail there.
+	// netip keeps an IPv4-mapped IPv6 prefix as IPv6, which never matches a tuple, so it is refused.
+	for _, entry := range splitCSV(a.VNetCIDRs) {
+		if p, err := netip.ParsePrefix(entry); err != nil || !p.Addr().Is4() {
+			return fmt.Errorf("azure_flow_logs.vnet_cidrs: invalid IPv4 CIDR %q (expected e.g. 10.0.0.0/16)", entry)
+		}
+	}
+	if _, err := lbrules.Parse(a.LBRules); err != nil {
+		return fmt.Errorf("azure_flow_logs.lb_rules: %w", err)
+	}
+	if a.PollIntervalSeconds == 0 {
+		a.PollIntervalSeconds = 60
+	} else if a.PollIntervalSeconds < 10 || a.PollIntervalSeconds > 3600 {
+		return fmt.Errorf("azure_flow_logs.poll_interval_seconds must be between 10 and 3600, got %d", a.PollIntervalSeconds)
+	}
+	if a.MaxFlowAgeMinutes == 0 {
+		a.MaxFlowAgeMinutes = 60
+	} else if a.MaxFlowAgeMinutes < 5 || a.MaxFlowAgeMinutes > 1440 {
+		return fmt.Errorf("azure_flow_logs.max_flow_age_minutes must be between 5 and 1440, got %d", a.MaxFlowAgeMinutes)
+	}
+	if a.StateFile == "" {
+		a.StateFile = "logs/flowlogs-state.json"
+	}
+	return nil
 }
 
 // splitCSV splits a comma-delimited string into trimmed, non-empty entries.
@@ -234,6 +353,12 @@ func (config *Config) ValidateAndSetDefaults() error {
 		config.PcapIngest.FileStableSeconds = 1
 	} else if config.PcapIngest.FileStableSeconds > 60 {
 		config.PcapIngest.FileStableSeconds = 60
+	}
+	if err := config.validateAzureFlowLogs(); err != nil {
+		return err
+	}
+	if !config.CaptureEnabled() && !config.PcapIngest.Enabled && !config.AzureFlowLogs.Enabled {
+		return fmt.Errorf("capture.enabled is false, so pcap_ingest or azure_flow_logs must be enabled")
 	}
 	return nil
 }

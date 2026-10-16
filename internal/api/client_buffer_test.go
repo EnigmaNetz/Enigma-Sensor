@@ -10,6 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	"EnigmaNetz/Enigma-Go-Sensor/internal/api/ingest"
@@ -195,4 +197,69 @@ func TestFlushBuffer_DropsRefusedRequest(t *testing.T) {
 	entries, err := os.ReadDir(bufDir)
 	require.NoError(t, err)
 	assert.Empty(t, entries)
+}
+
+// ErrNotBuffered tells a caller that can reread its input (the flow log poller) whether every
+// record is safe: uploaded, buffered, or refused for good.
+func TestUploadLogs_ErrNotBuffered(t *testing.T) {
+	unavailable := uploadResponse{err: status.Error(codes.Unavailable, "down")}
+	newUploader := func(mock *mockPublishClient, bufDir string) *LogUploader {
+		return &LogUploader{client: mock, apiKey: "k", networkID: "Test-Network-01", retryCount: 1,
+			retryDelay: time.Millisecond, maxPayloadSizeMB: 1, bufferDir: bufDir}
+	}
+	// A path under a regular file cannot be created, so buffering fails
+	blocked := filepath.Join(t.TempDir(), "file")
+	require.NoError(t, os.WriteFile(blocked, nil, 0o600))
+
+	t.Run("uploaded", func(t *testing.T) {
+		mock := &mockPublishClient{uploadResponses: []uploadResponse{{status: "success", statusCode: 200}}}
+		require.NoError(t, newUploader(mock, t.TempDir()).UploadLogs(context.Background(), writeJSONLogs(t)))
+	})
+	t.Run("buffered after the retries fail", func(t *testing.T) {
+		mock := &mockPublishClient{uploadResponses: []uploadResponse{unavailable}}
+		err := newUploader(mock, t.TempDir()).UploadLogs(context.Background(), writeJSONLogs(t))
+		require.ErrorIs(t, err, errRetriesExhausted)
+		require.NotErrorIs(t, err, ErrNotBuffered)
+	})
+	t.Run("refused with a 400", func(t *testing.T) {
+		mock := &mockPublishClient{uploadResponses: []uploadResponse{{status: "error", statusCode: 400, message: "bad"}}}
+		err := newUploader(mock, t.TempDir()).UploadLogs(context.Background(), writeJSONLogs(t))
+		require.ErrorIs(t, err, errUploadRefused)
+		require.NotErrorIs(t, err, ErrNotBuffered, "retrying a refused request cannot help")
+	})
+	t.Run("buffering fails", func(t *testing.T) {
+		mock := &mockPublishClient{uploadResponses: []uploadResponse{unavailable}}
+		err := newUploader(mock, filepath.Join(blocked, "buffer")).UploadLogs(context.Background(), writeJSONLogs(t))
+		require.ErrorIs(t, err, ErrNotBuffered)
+	})
+	t.Run("buffering fails for the batches after an outage", func(t *testing.T) {
+		mock := &mockPublishClient{uploadResponses: []uploadResponse{unavailable}}
+		err := newUploader(mock, filepath.Join(blocked, "buffer")).UploadLogs(context.Background(), LogFiles{ConnPath: writeBatchedLog(t, 40)})
+		require.ErrorIs(t, err, ErrNotBuffered)
+		require.ErrorContains(t, err, "batch 3")
+	})
+	t.Run("no buffer directory", func(t *testing.T) {
+		mock := &mockPublishClient{uploadResponses: []uploadResponse{unavailable}}
+		err := newUploader(mock, "").UploadLogs(context.Background(), writeJSONLogs(t))
+		require.ErrorIs(t, err, ErrNotBuffered)
+	})
+	t.Run("cancelled before it starts", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		err := newUploader(&mockPublishClient{}, t.TempDir()).UploadLogs(ctx, writeJSONLogs(t))
+		require.ErrorIs(t, err, ErrNotBuffered)
+		require.ErrorIs(t, err, context.Canceled)
+	})
+	t.Run("the log cannot be read", func(t *testing.T) {
+		bad := filepath.Join(t.TempDir(), "conn.xlsx")
+		require.NoError(t, os.WriteFile(bad, []byte("not json\n"), 0o600))
+		err := newUploader(&mockPublishClient{}, t.TempDir()).UploadLogs(context.Background(), LogFiles{ConnPath: bad})
+		require.ErrorIs(t, err, ErrNotBuffered)
+	})
+	t.Run("410 is not ErrNotBuffered", func(t *testing.T) {
+		mock := &mockPublishClient{uploadResponses: []uploadResponse{{status: "gone", statusCode: 410}}}
+		err := newUploader(mock, t.TempDir()).UploadLogs(context.Background(), writeJSONLogs(t))
+		require.ErrorIs(t, err, ErrAPIGone)
+		require.NotErrorIs(t, err, ErrNotBuffered)
+	})
 }

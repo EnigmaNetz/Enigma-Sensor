@@ -46,6 +46,8 @@ export SENSOR_NETWORK_ID="${SENSOR_NETWORK_ID:-enigma-sensor-docker}"
 export SENSOR_LOGGING_FILE="${SENSOR_LOGGING_FILE:-/var/log/enigma-sensor/enigma-sensor.log}"
 export SENSOR_CAPTURE_OUTPUT_DIR="${SENSOR_CAPTURE_OUTPUT_DIR:-/var/lib/enigma-sensor/captures}"
 export SENSOR_BUFFERING_DIR="${SENSOR_BUFFERING_DIR:-/var/log/enigma-sensor/buffer}"
+# Beside the buffer, so a recreated container does not read (and upload) recent flow logs again
+export SENSOR_AZURE_FLOW_LOGS_STATE_FILE="${SENSOR_AZURE_FLOW_LOGS_STATE_FILE:-/var/log/enigma-sensor/flowlogs-state.json}"
 
 # --- Startup info ---
 echo "Starting Enigma Sensor"

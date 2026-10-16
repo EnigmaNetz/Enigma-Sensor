@@ -252,6 +252,7 @@ Invalid values stop the sensor at startup with a message naming the field. The p
 | `enigma_api.upload` | `false` | Upload logs. The installers set `true` |
 | `enigma_api.ca_cert_file` | none | PEM (Privacy-Enhanced Mail format) CA (certificate authority) certificate to trust instead of the system store; for on-prem |
 | `enigma_api.max_payload_size_mb` | `25` | Records larger than this (uncompressed) are split and uploaded in several requests. Capped at 96 |
+| `capture.enabled` | `true` | Run live capture. `false` suits a sensor that only reads Azure flow logs or ingests PCAP files, which then needs no capture interface; one of those must be enabled |
 | `capture.interface` | `any` | Interface to capture on, or a comma-separated list. On Linux and macOS, several named interfaces are captured separately and merged by timestamp. They must share a link type (for example, all Ethernet). If they do not, the sensor logs the error and exits, and the service manager restarts it into the same error, so nothing is uploaded until `capture.interface` is fixed |
 | `capture.window_seconds` | none | Length of each capture window. The installers and example config use `60` |
 | `capture.loop` | `false` | Keep capturing. `false` runs one window and exits. The installers set `true` |
@@ -267,6 +268,7 @@ Invalid values stop the sensor at startup with a message naming the field. The p
 | `logging.log_retention_days` | `7` | Days to keep rotated logs (1 to 30) |
 | `logging.max_backups` | `5` | Rotated logs to keep (1 to 10) |
 | `pcap_ingest.*` | disabled | Offline PCAP processing, see below |
+| `azure_flow_logs.*` | disabled | Azure VNet flow log reading, see below |
 
 ### Environment variable overrides
 
@@ -288,6 +290,70 @@ files and runs them through the same processing and upload. Live capture keeps r
 
 Drop files into `<watch_dir>/incoming/`. They move to `processing/`, then to `processed/` or
 `failed/`. Nothing cleans up `processed/`, so remove old files yourself.
+
+### Reading Azure VNet flow logs
+
+Some Azure VMs cannot be captured: a VM behind a Standard public load balancer loses traffic when
+it is added to a virtual network TAP (terminal access point). For those VMs the sensor can instead
+read the VNet (virtual network) flow logs that Azure Network Watcher writes to a storage account,
+turn them into Zeek `conn` records, and upload them the same way as a capture's. With
+`azure_flow_logs.enabled: true` this runs alongside live capture; set `capture.enabled: false` for
+a sensor that only reads flow logs.
+
+In Azure:
+
+1. Turn on VNet flow logs for the VMs' network interfaces, subnet or virtual network, written to a
+   storage account.
+2. Give the VM the sensor runs on a managed identity, and grant that identity the
+   **Storage Blob Data Reader** role on the storage account. The sensor signs in with it; no key
+   or secret goes in the config.
+3. Let the sensor VM reach the storage account's blob endpoint over HTTPS. If the storage account
+   has a firewall, allow the sensor's subnet.
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `azure_flow_logs.storage_account` | none (required when enabled) | Storage account the flow logs are written to |
+| `azure_flow_logs.container` | `insights-logs-flowlogflowevent` | Container that holds them, Network Watcher's default |
+| `azure_flow_logs.blob_endpoint` | `https://<storage_account>.blob.core.windows.net` | Blob endpoint, for a sovereign cloud. Must be `https` |
+| `azure_flow_logs.managed_identity_client_id` | empty | Client ID of a user-assigned managed identity. Empty uses the VM's system-assigned identity |
+| `azure_flow_logs.vnet_cidrs` | empty | Comma-separated IPv4 address spaces of the virtual network, for example `10.0.0.0/16`. They set `local_orig` and `local_resp`. Empty treats private addresses (RFC 1918) as local |
+| `azure_flow_logs.lb_rules` | empty | Comma-separated `<backend address or CIDR>:<port>[/tcp\|/udp]=<service>` entries that set `service` for traffic to a load balancer's backends, for example `10.0.2.0/24:443=ssl,10.0.2.0/24:80=http`. Flow logs carry no protocol detection, so without a rule `service` is unset |
+| `azure_flow_logs.poll_interval_seconds` | `60` | How often new flow log records are read (10 to 3600). Azure adds records about once a minute |
+| `azure_flow_logs.max_flow_age_minutes` | `60` | A connection open longer than this is uploaded with its counts so far and continues in a new record (5 to 1440) |
+| `azure_flow_logs.state_file` | `logs/flowlogs-state.json` (Docker: `/var/log/enigma-sensor/flowlogs-state.json`) | Records how far each flow log has been read and the connections still open. Keep it on persistent storage: without it the sensor reads the last two hours again |
+
+`capture.output_dir` is required with flow logs on: each poll writes its `conn.log` to a
+`zeek_out_flowlog_<time>` folder there, kept for `capture.retention_hours` like a capture's.
+`zeek.excluded_subnets` applies to these records too.
+
+Azure logs a connection as it begins, every five minutes while it is open, and when it ends. The
+sensor adds up those intervals and uploads one record per connection when it ends, as Zeek does,
+so it uploads a connection that is still open only once it reaches `max_flow_age_minutes`. When
+two monitored VMs talk to each other, both network interfaces log the connection; it is uploaded
+once, from the side that started it.
+
+Delivery is at least once. The state file is saved only after a poll's records are uploaded or
+buffered, so a restart or a failed upload reads again from the same place rather than losing
+records; if the sensor stops between an upload and saving the state file, the next start uploads
+that poll's records again. On a first start the sensor reads every flow log file changed in the
+last two hours, from its beginning. After it has been stopped, or unable to read the storage
+account, it reads back to where it left off, up to 24 hours; older files are skipped and the log
+says how many. A failure that repeats every poll, such as a missing role assignment, is logged
+once with what to check, then hourly until it clears; it never causes flow logs to be skipped.
+The only files skipped on purpose are logged: one that holds a record that cannot be read
+(from that record on), one that was deleted from the storage account, and one that keeps
+failing to download for two hours with an error about that file alone.
+
+Flow logs record less than a capture, so these records are coarser:
+
+- only `conn` records: there are no `dns`, `dhcp`, `ja3_ja4` or `ja4s` logs for these VMs;
+- `orig_bytes` and `resp_bytes` are estimates, because Azure counts IP bytes, headers included;
+- `conn_state` is only `SF` (ended, with a reply), `S1` (still open or its end was not logged,
+  with a reply) or `S0` (no reply, or denied), and `history` only marks a logged begin (`S`) and
+  end (`F`). Azure does not say whether a connection was reset or closed normally;
+- `service` comes only from `lb_rules`;
+- `missed_bytes` and `tunnel_parents` are not set: Azure does not measure them;
+- IPv6 flows and load balancer health probes from `168.63.129.16` are dropped.
 
 ---
 

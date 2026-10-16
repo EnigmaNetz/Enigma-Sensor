@@ -569,16 +569,14 @@ func TestRunSensor_FlowLogsAlongsideCapture(t *testing.T) {
 // A flow log state file that cannot be read stops the sensor at startup, through the real
 // poller factory, rather than leaving a flow-log-only sensor running with no poller.
 func TestRunSensor_UnreadableFlowLogStateStopsStartup(t *testing.T) {
-	blocked := filepath.Join(t.TempDir(), "file")
-	if err := os.WriteFile(blocked, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
 	cfg := flowLogOnlyConfig()
 	cfg.AzureFlowLogs.StorageAccount = "flowlogs01"
 	cfg.AzureFlowLogs.Container = "insights-logs-flowlogflowevent"
 	cfg.AzureFlowLogs.PollIntervalSeconds = 60
 	cfg.AzureFlowLogs.MaxFlowAgeMinutes = 60
-	cfg.AzureFlowLogs.StateFile = filepath.Join(blocked, "state.json") // under a regular file
+	// A directory cannot be read as a file on any platform. A path under a regular file is not
+	// portable: Windows reports it as missing, so the sensor would start fresh.
+	cfg.AzureFlowLogs.StateFile = t.TempDir()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

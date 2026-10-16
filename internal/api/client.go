@@ -107,6 +107,12 @@ type LogFiles struct {
 // ErrAPIGone is returned when the API responds with HTTP 410 (Gone), indicating the sensor should stop.
 var ErrAPIGone = errors.New("API returned 410 Gone: sensor should stop sending data and terminate")
 
+// ErrNotBuffered marks an UploadLogs error after which some records were neither uploaded nor
+// written to the buffer, so a caller that can read its input again (the flow log poller) must
+// not move past it. Any other error from UploadLogs means every record was uploaded, buffered
+// for retry, or refused by the Publisher (a 400, which no retry can fix).
+var ErrNotBuffered = errors.New("records were neither uploaded nor buffered")
+
 // grpcClientImpl implements the grpcClient interface
 type grpcClientImpl struct {
 	client pb.PublishServiceClient
@@ -201,7 +207,7 @@ func (c *grpcClientImpl) uploadRecords(ctx context.Context, req *ingest.UploadRe
 // logged and returned. Logs with no records are not uploaded.
 func (u *LogUploader) UploadLogs(ctx context.Context, files LogFiles) error {
 	if ctx.Err() != nil {
-		return ctx.Err()
+		return fmt.Errorf("%w: %w", ErrNotBuffered, ctx.Err())
 	}
 
 	// Best-effort flush of any buffered payloads first. A 410 during the flush
@@ -228,6 +234,8 @@ func (u *LogUploader) UploadLogs(ctx context.Context, files LogFiles) error {
 		if publisherDown {
 			if err = u.bufferRecords(u.newRecordsRequest(b)); err == nil {
 				err = errors.New("buffered without trying: an earlier batch failed every retry")
+			} else {
+				err = fmt.Errorf("%w: %w", ErrNotBuffered, err)
 			}
 		} else {
 			err = u.uploadBatch(ctx, b)
@@ -248,6 +256,11 @@ func (u *LogUploader) UploadLogs(ctx context.Context, files LogFiles) error {
 		return nil
 	})
 	if err != nil {
+		// A 410 ends the upload on purpose; any other error stopped reading part way, and the
+		// records after it were never sent
+		if !errors.Is(err, ErrAPIGone) {
+			err = fmt.Errorf("%w: %w", ErrNotBuffered, err)
+		}
 		return fmt.Errorf("failed to upload records: %w", err)
 	}
 	if batches == 0 {
@@ -318,7 +331,7 @@ func (u *LogUploader) uploadBatch(ctx context.Context, b records.Batch) error {
 	// If we reach here, upload failed after retries. Buffer the payload for later. Either way
 	// the batch counts as exhausted, so the rest of the window is not retried batch by batch.
 	if err := u.bufferRecords(req); err != nil {
-		return fmt.Errorf("%w and buffering failed too: %v; upload error: %w", errRetriesExhausted, err, lastErr)
+		return fmt.Errorf("%w and buffering failed too: %w: %v; upload error: %w", errRetriesExhausted, ErrNotBuffered, err, lastErr)
 	}
 	return fmt.Errorf("%w (payload buffered for retry): %w", errRetriesExhausted, lastErr)
 }
@@ -327,7 +340,7 @@ func (u *LogUploader) uploadBatch(ctx context.Context, b records.Batch) error {
 // so shutting down does not lose it. Writing to local disk needs no context.
 func (u *LogUploader) bufferCancelled(req *ingest.UploadRecordsRequest, ctxErr error) error {
 	if err := u.bufferRecords(req); err != nil {
-		return fmt.Errorf("upload cancelled and failed to buffer payload: %v: %w", err, ctxErr)
+		return fmt.Errorf("upload cancelled and failed to buffer payload: %w: %v: %w", ErrNotBuffered, err, ctxErr)
 	}
 	return fmt.Errorf("upload cancelled; payload buffered for retry: %w", ctxErr)
 }
@@ -413,8 +426,12 @@ func (u *LogUploader) uploadLegacy(ctx context.Context, data []byte) error {
 	return statusError(statusCode, message)
 }
 
-// bufferRecords writes a request, without its API key, to disk for later retry.
+// bufferRecords writes a request, without its API key, to disk for later retry. With no buffer
+// directory the request is dropped, and that is reported as an error.
 func (u *LogUploader) bufferRecords(req *ingest.UploadRecordsRequest) error {
+	if u.bufferDir == "" {
+		return errors.New("no buffer directory is configured")
+	}
 	req.ApiKey = ""
 	data, err := proto.Marshal(req)
 	if err != nil {

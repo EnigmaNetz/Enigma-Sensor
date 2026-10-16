@@ -706,3 +706,108 @@ func TestFindPath(t *testing.T) {
 		t.Errorf("FindPath with no existing path: err = %v, want os.ErrNotExist", err)
 	}
 }
+
+func TestConfig_CaptureEnabled(t *testing.T) {
+	cfg := &Config{NetworkID: "Test-Network-01"}
+	if err := cfg.ValidateAndSetDefaults(); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if !cfg.CaptureEnabled() {
+		t.Error("Expected capture to be enabled when capture.enabled is unset")
+	}
+
+	off := false
+	cfg = &Config{NetworkID: "Test-Network-01"}
+	cfg.Capture.Enabled = &off
+	err := cfg.ValidateAndSetDefaults()
+	if err == nil || !strings.Contains(err.Error(), "capture.enabled is false") {
+		t.Errorf("Expected an error when nothing else is enabled, got: %v", err)
+	}
+
+	cfg = &Config{NetworkID: "Test-Network-01"}
+	cfg.Capture.Enabled = &off
+	cfg.Capture.OutputDir = "./captures"
+	cfg.AzureFlowLogs.Enabled = true
+	cfg.AzureFlowLogs.StorageAccount = "flowlogs01"
+	if err := cfg.ValidateAndSetDefaults(); err != nil {
+		t.Errorf("Unexpected error for a flow-log-only sensor: %v", err)
+	}
+	if cfg.CaptureEnabled() {
+		t.Error("Expected capture to be disabled")
+	}
+}
+
+func TestConfig_AzureFlowLogs_Defaults(t *testing.T) {
+	cfg := &Config{NetworkID: "Test-Network-01"}
+	cfg.Capture.OutputDir = "./captures"
+	cfg.AzureFlowLogs.Enabled = true
+	cfg.AzureFlowLogs.StorageAccount = "flowlogs01"
+	if err := cfg.ValidateAndSetDefaults(); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	a := cfg.AzureFlowLogs
+	if a.Container != "insights-logs-flowlogflowevent" || a.PollIntervalSeconds != 60 || a.MaxFlowAgeMinutes != 60 ||
+		a.StateFile != "logs/flowlogs-state.json" {
+		t.Errorf("Unexpected defaults: %+v", a)
+	}
+	if got := cfg.FlowLogEndpoint(); got != "https://flowlogs01.blob.core.windows.net" {
+		t.Errorf("Unexpected endpoint %q", got)
+	}
+
+	// Disabled, nothing is checked or defaulted
+	cfg = &Config{NetworkID: "Test-Network-01"}
+	cfg.AzureFlowLogs.LBRules = "not a rule"
+	if err := cfg.ValidateAndSetDefaults(); err != nil {
+		t.Errorf("Unexpected error with flow logs disabled: %v", err)
+	}
+}
+
+func TestConfig_AzureFlowLogs_Validation(t *testing.T) {
+	tests := []struct {
+		name    string
+		set     func(*Config)
+		wantErr string
+	}{
+		{"missing account", func(c *Config) { c.AzureFlowLogs.StorageAccount = "" }, "storage_account"},
+		{"bad account", func(c *Config) { c.AzureFlowLogs.StorageAccount = "Flow_Logs" }, "storage_account"},
+		{"endpoint instead of account", func(c *Config) {
+			c.AzureFlowLogs.StorageAccount = ""
+			c.AzureFlowLogs.BlobEndpoint = "https://flowlogs01.blob.core.usgovcloudapi.net"
+		}, ""},
+		{"http endpoint", func(c *Config) { c.AzureFlowLogs.BlobEndpoint = "http://flowlogs01.blob.core.windows.net" }, "blob_endpoint"},
+		{"endpoint with a path", func(c *Config) { c.AzureFlowLogs.BlobEndpoint = "https://flowlogs01.blob.core.windows.net/c" }, "blob_endpoint"},
+		{"bad container", func(c *Config) { c.AzureFlowLogs.Container = "Flow--Logs" }, "container"},
+		{"bad client id", func(c *Config) { c.AzureFlowLogs.ManagedIdentityClientID = "sensor-identity" }, "managed_identity_client_id"},
+		{"good client id", func(c *Config) { c.AzureFlowLogs.ManagedIdentityClientID = "00000000-0000-0000-0000-000000000000" }, ""},
+		{"bad cidr", func(c *Config) { c.AzureFlowLogs.VNetCIDRs = "10.0.0.0/16,10.1.0.0" }, "vnet_cidrs"},
+		{"ipv6 cidr", func(c *Config) { c.AzureFlowLogs.VNetCIDRs = "2001:db8::/32" }, "vnet_cidrs"},
+		{"ipv4-mapped ipv6 cidr", func(c *Config) { c.AzureFlowLogs.VNetCIDRs = "::ffff:10.0.0.0/104" }, "vnet_cidrs"},
+		{"good cidrs and rules", func(c *Config) {
+			c.AzureFlowLogs.VNetCIDRs = "10.0.0.0/16, 10.1.0.0/16"
+			c.AzureFlowLogs.LBRules = "10.0.2.0/24:443=ssl,10.0.2.0/24:80=http"
+		}, ""},
+		{"bad rule", func(c *Config) { c.AzureFlowLogs.LBRules = "10.0.2.0/24:443" }, "lb_rules"},
+		{"poll interval too short", func(c *Config) { c.AzureFlowLogs.PollIntervalSeconds = 5 }, "poll_interval_seconds"},
+		{"max age too long", func(c *Config) { c.AzureFlowLogs.MaxFlowAgeMinutes = 2000 }, "max_flow_age_minutes"},
+		{"no output dir", func(c *Config) { c.Capture.OutputDir = "" }, "capture.output_dir"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{NetworkID: "Test-Network-01"}
+			cfg.Capture.OutputDir = "./captures"
+			cfg.AzureFlowLogs.Enabled = true
+			cfg.AzureFlowLogs.StorageAccount = "flowlogs01"
+			tt.set(cfg)
+			err := cfg.ValidateAndSetDefaults()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("Unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("Expected an error about %s, got: %v", tt.wantErr, err)
+			}
+		})
+	}
+}

@@ -425,6 +425,9 @@ func TestApplyEnvOverrides_AllFieldEnvVarNames(t *testing.T) {
 				switch elemKind {
 				case reflect.Int:
 					sentinel = "99999"
+				case reflect.Bool:
+					// The base config leaves it nil, so any value is a change
+					sentinel = "false"
 				default:
 					t.Fatalf("unsupported pointer element type %v for %s", elemKind, spec.description)
 				}

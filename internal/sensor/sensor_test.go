@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -96,47 +97,19 @@ func (m *goneUploader) UploadLogs(ctx context.Context, files api.LogFiles) error
 }
 
 func minimalConfig(loop bool) *config.Config {
-	return &config.Config{
-		Capture: struct {
-			OutputDir            string `json:"output_dir"`
-			WindowSeconds        int    `json:"window_seconds"`
-			Loop                 bool   `json:"loop"`
-			Interface            string `json:"interface"`
-			MaxProcessingWorkers int    `json:"max_processing_workers"`
-			RetentionHours       *int   `json:"retention_hours,omitempty"`
-		}{
-			OutputDir:            "/tmp",
-			WindowSeconds:        0,
-			Loop:                 loop,
-			Interface:            "any",
-			MaxProcessingWorkers: 10,
-			RetentionHours:       intPtr(24),
-		},
-		Logging: struct {
-			File             string `json:"file"`
-			MaxSizeMB        int64  `json:"max_size_mb"`
-			LogRetentionDays int    `json:"log_retention_days"`
-			MaxBackups       int    `json:"max_backups"`
-		}{
-			File:             "",
-			MaxSizeMB:        100,
-			LogRetentionDays: 1,
-			MaxBackups:       5,
-		},
-		EnigmaAPI: struct {
-			Server           string `json:"server"`
-			APIKey           string `json:"api_key"`
-			CACertFile       string `json:"ca_cert_file"`
-			Upload           bool   `json:"upload"`
-			MaxPayloadSizeMB int64  `json:"max_payload_size_mb"`
-		}{},
-		PcapIngest: struct {
-			Enabled             bool   `json:"enabled"`
-			WatchDir            string `json:"watch_dir"`
-			PollIntervalSeconds int    `json:"poll_interval_seconds"`
-			FileStableSeconds   int    `json:"file_stable_seconds"`
-		}{},
-	}
+	// Fields are set one by one rather than as struct literals, so a new config field does
+	// not break this helper
+	cfg := &config.Config{}
+	cfg.Capture.OutputDir = "/tmp"
+	cfg.Capture.WindowSeconds = 0
+	cfg.Capture.Loop = loop
+	cfg.Capture.Interface = "any"
+	cfg.Capture.MaxProcessingWorkers = 10
+	cfg.Capture.RetentionHours = intPtr(24)
+	cfg.Logging.MaxSizeMB = 100
+	cfg.Logging.LogRetentionDays = 1
+	cfg.Logging.MaxBackups = 5
+	return cfg
 }
 
 func TestRunSensor_SingleIteration_Success(t *testing.T) {
@@ -490,4 +463,134 @@ func TestPruneRotatedServiceLogs(t *testing.T) {
 func TestPruneRotatedServiceLogs_MissingDir(t *testing.T) {
 	// Must not panic or create anything when the directory does not exist
 	pruneRotatedServiceLogs(filepath.Join(t.TempDir(), "absent"), time.Hour)
+}
+
+// fakeFlowLogPoller records that it ran, then waits for cancellation or returns err.
+type fakeFlowLogPoller struct {
+	started chan struct{}
+	err     error
+}
+
+func (p *fakeFlowLogPoller) Run(ctx context.Context) error {
+	close(p.started)
+	if p.err != nil {
+		return p.err
+	}
+	<-ctx.Done()
+	return nil
+}
+
+func flowLogOnlyConfig() *config.Config {
+	cfg := minimalConfig(true)
+	off := false
+	cfg.Capture.Enabled = &off
+	cfg.AzureFlowLogs.Enabled = true
+	return cfg
+}
+
+func stubFlowLogPoller(t *testing.T, p *fakeFlowLogPoller, gotUploader *Uploader) {
+	orig := newFlowLogPoller
+	t.Cleanup(func() { newFlowLogPoller = orig })
+	newFlowLogPoller = func(_ *config.Config, u Uploader) (flowLogRunner, error) {
+		*gotUploader = u
+		return p, nil
+	}
+}
+
+func TestRunSensor_FlowLogsOnlyNeverCaptures(t *testing.T) {
+	var capCalls, upCalls int32
+	poller := &fakeFlowLogPoller{started: make(chan struct{})}
+	var got Uploader
+	stubFlowLogPoller(t, poller, &got)
+	uploader := &mockUploader{calls: &upCalls}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error)
+	go func() {
+		done <- RunSensor(ctx, flowLogOnlyConfig(), &mockCapturer{calls: &capCalls}, &mockProcessor{calls: new(int32)}, uploader, true, true)
+	}()
+	select {
+	case <-poller.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the flow log poller was not started")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("RunSensor failed: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("RunSensor did not stop on cancel")
+	}
+	if atomic.LoadInt32(&capCalls) != 0 {
+		t.Errorf("capture ran %d times with capture.enabled false", capCalls)
+	}
+	if got != uploader {
+		t.Error("the poller must share the sensor's uploader")
+	}
+}
+
+func TestRunSensor_FlowLogPollerAPIGoneStopsTheSensor(t *testing.T) {
+	poller := &fakeFlowLogPoller{started: make(chan struct{}), err: fmt.Errorf("upload: %w", api.ErrAPIGone)}
+	var got Uploader
+	stubFlowLogPoller(t, poller, &got)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := RunSensor(ctx, flowLogOnlyConfig(), &mockCapturer{calls: new(int32)}, &mockProcessor{calls: new(int32)}, &mockUploader{calls: new(int32)}, true, true)
+	if !errors.Is(err, ErrAPIGone) {
+		t.Fatalf("expected ErrAPIGone, got %v", err)
+	}
+	if ctx.Err() != nil {
+		t.Fatal("RunSensor waited for the timeout instead of stopping on the 410")
+	}
+}
+
+func TestRunSensor_FlowLogsAlongsideCapture(t *testing.T) {
+	var capCalls int32
+	poller := &fakeFlowLogPoller{started: make(chan struct{})}
+	var got Uploader
+	stubFlowLogPoller(t, poller, &got)
+	cfg := minimalConfig(false)
+	cfg.AzureFlowLogs.Enabled = true
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := RunSensor(ctx, cfg, &mockCapturer{calls: &capCalls}, &mockProcessor{calls: new(int32)}, &mockUploader{calls: new(int32)}, true, true); err != nil {
+		t.Fatalf("RunSensor failed: %v", err)
+	}
+	<-poller.started
+	if atomic.LoadInt32(&capCalls) != 1 {
+		t.Errorf("expected one capture, got %d", capCalls)
+	}
+}
+
+// A flow log state file that cannot be read stops the sensor at startup, through the real
+// poller factory, rather than leaving a flow-log-only sensor running with no poller.
+func TestRunSensor_UnreadableFlowLogStateStopsStartup(t *testing.T) {
+	blocked := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(blocked, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := flowLogOnlyConfig()
+	cfg.AzureFlowLogs.StorageAccount = "flowlogs01"
+	cfg.AzureFlowLogs.Container = "insights-logs-flowlogflowevent"
+	cfg.AzureFlowLogs.PollIntervalSeconds = 60
+	cfg.AzureFlowLogs.MaxFlowAgeMinutes = 60
+	cfg.AzureFlowLogs.StateFile = filepath.Join(blocked, "state.json") // under a regular file
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	before := runtime.NumGoroutine()
+	err := RunSensor(ctx, cfg, &mockCapturer{calls: new(int32)}, &mockProcessor{calls: new(int32)}, &mockUploader{calls: new(int32)}, true, true)
+	if err == nil || !strings.Contains(err.Error(), "flow log state") {
+		t.Fatalf("expected a flow log state error, got %v", err)
+	}
+	if ctx.Err() != nil {
+		t.Fatal("RunSensor ran until the timeout instead of failing at startup")
+	}
+	if after := runtime.NumGoroutine(); after > before {
+		t.Errorf("RunSensor left %d goroutine(s) running after failing at startup", after-before)
+	}
 }

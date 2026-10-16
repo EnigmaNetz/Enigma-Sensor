@@ -17,10 +17,13 @@ import (
 	"EnigmaNetz/Enigma-Go-Sensor/config"
 	"EnigmaNetz/Enigma-Go-Sensor/internal/api"
 	"EnigmaNetz/Enigma-Go-Sensor/internal/capture/common"
+	"EnigmaNetz/Enigma-Go-Sensor/internal/flowlogs"
+	"EnigmaNetz/Enigma-Go-Sensor/internal/flowlogs/lbrules"
 	"EnigmaNetz/Enigma-Go-Sensor/internal/pcapingest"
 	types "EnigmaNetz/Enigma-Go-Sensor/internal/processor/common"
 	"EnigmaNetz/Enigma-Go-Sensor/internal/processor/common/zeekscripts"
 	"archive/zip"
+	"net/netip"
 	"runtime"
 )
 
@@ -40,6 +43,56 @@ type Processor interface {
 
 type Uploader interface {
 	UploadLogs(ctx context.Context, files api.LogFiles) error
+}
+
+// flowLogRunner runs the Azure flow log poller until its context ends.
+type flowLogRunner interface {
+	Run(ctx context.Context) error
+}
+
+// idleInterval is how often a sensor with capture off wakes to clean up old output.
+const idleInterval = time.Minute
+
+// newFlowLogPoller builds the Azure flow log poller; tests replace it. It shares the sensor's
+// single uploader, so the buffer has one flusher.
+var newFlowLogPoller = func(cfg *config.Config, uploader Uploader) (flowLogRunner, error) {
+	a := cfg.AzureFlowLogs
+	store, err := flowlogs.NewManagedIdentityStore(cfg.FlowLogEndpoint(), a.Container, a.ManagedIdentityClientID)
+	if err != nil {
+		return nil, err
+	}
+	var cidrs []netip.Prefix
+	for _, c := range cfg.FlowLogVNetCIDRs() {
+		p, err := netip.ParsePrefix(c)
+		if err != nil {
+			return nil, fmt.Errorf("azure_flow_logs.vnet_cidrs: %w", err)
+		}
+		cidrs = append(cidrs, p.Masked())
+	}
+	rules, err := lbrules.Parse(a.LBRules)
+	if err != nil {
+		return nil, fmt.Errorf("azure_flow_logs.lb_rules: %w", err)
+	}
+	poller := flowlogs.NewPoller(flowlogs.PollerConfig{
+		Store:    store,
+		Uploader: uploader,
+		Converter: flowlogs.Options{
+			VNetCIDRs: cidrs,
+			Rules:     rules,
+			MaxAge:    time.Duration(a.MaxFlowAgeMinutes) * time.Minute,
+		},
+		OutputDir:         cfg.Capture.OutputDir,
+		StatePath:         a.StateFile,
+		Interval:          time.Duration(a.PollIntervalSeconds) * time.Second,
+		ExcludedSubnets:   cfg.ExcludedSubnetList(),
+		DeleteAfterUpload: cfg.Capture.RetentionHours != nil && *cfg.Capture.RetentionHours == 0,
+	})
+	// Load the state now, so a state file that cannot be read stops the sensor at startup
+	// instead of leaving a flow-log-only sensor running and uploading nothing
+	if err := poller.Open(); err != nil {
+		return nil, err
+	}
+	return poller, nil
 }
 
 // validateZipPath checks if a zip entry path is safe from directory traversal attacks
@@ -290,10 +343,23 @@ func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, proce
 	if len(disableSignalsAndSkipZeek) > 1 {
 		skipEnsureZeek = disableSignalsAndSkipZeek[1]
 	}
-	// Ensure Zeek for Windows is available
-	if !skipEnsureZeek && runtime.GOOS == "windows" {
+	// Ensure Zeek for Windows is available, unless nothing will run it
+	captureEnabled := cfg.CaptureEnabled()
+	if !captureEnabled {
+		log.Printf("Live capture is off (capture.enabled is false)")
+	}
+	if !skipEnsureZeek && runtime.GOOS == "windows" && (captureEnabled || cfg.PcapIngest.Enabled) {
 		if err := ensureZeekWindows(); err != nil {
 			return err
+		}
+	}
+
+	// Build the flow log poller before anything starts, so a failure here leaves nothing running
+	var poller flowLogRunner
+	if cfg.AzureFlowLogs.Enabled {
+		var err error
+		if poller, err = newFlowLogPoller(cfg, uploader); err != nil {
+			return fmt.Errorf("azure flow logs: %w", err)
 		}
 	}
 
@@ -410,6 +476,24 @@ func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, proce
 		}()
 	}
 
+	// Start the Azure flow log poller if enabled
+	if poller != nil {
+		if uploader == nil {
+			log.Printf("[flowlogs] Upload is off: converted flow logs are kept in %s and not uploaded", cfg.Capture.OutputDir)
+		}
+		log.Printf("[flowlogs] Reading %s/%s every %d seconds", cfg.FlowLogEndpoint(), cfg.AzureFlowLogs.Container, cfg.AzureFlowLogs.PollIntervalSeconds)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := poller.Run(watchCtx); err != nil {
+				if errors.Is(err, api.ErrAPIGone) {
+					triggerShutdown()
+				}
+				log.Printf("[flowlogs] Poller exited: %v", err)
+			}
+		}()
+	}
+
 	// Optionally handle Ctrl+C for graceful shutdown
 	doSignals := true
 	if disableSignals {
@@ -468,8 +552,9 @@ func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, proce
 		}
 	}
 
-	for {
-		// Clean up old zeek_out_* folders every iteration (skip when 0; worker handles immediate cleanup)
+	// cleanup deletes old output, as each capture iteration starts
+	cleanup := func() {
+		// Clean up old zeek_out_* folders (skip when 0; worker handles immediate cleanup)
 		if cfg.Capture.RetentionHours != nil && *cfg.Capture.RetentionHours > 0 {
 			cleanOldZeekOutFolders(cfg.Capture.OutputDir, *cfg.Capture.RetentionHours)
 		} else if cfg.Capture.RetentionHours == nil {
@@ -478,6 +563,33 @@ func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, proce
 		if runtime.GOOS == "windows" {
 			pruneRotatedServiceLogs(config.WindowsServiceLogDir, time.Duration(cfg.Logging.LogRetentionDays)*24*time.Hour)
 		}
+	}
+
+	if !captureEnabled {
+		// Nothing to capture: the poller and watcher do the work, and this cleans up after them
+		// until told to stop. sigCh is nil without signal handling, and a nil channel never
+		// delivers.
+		tick := time.NewTicker(idleInterval)
+		defer tick.Stop()
+		for {
+			cleanup()
+			select {
+			case <-ctx.Done():
+				closeQueue()
+				return nil
+			case <-shutdownCh:
+				return ErrAPIGone
+			case sig := <-sigCh:
+				log.Printf("Received signal %v, shutting down...", sig)
+				closeQueue()
+				return nil
+			case <-tick.C:
+			}
+		}
+	}
+
+	for {
+		cleanup()
 		select {
 		case <-ctx.Done():
 			log.Printf("Context canceled, shutting down after current capture...")

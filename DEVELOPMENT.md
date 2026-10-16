@@ -73,6 +73,24 @@ GOOS=darwin GOARCH=amd64 go vet ./...
 
 CI runs the tests natively on each platform.
 
+### Azure flow log integration test
+
+`internal/flowlogs` is tested against a fake blob store. `TestAzurite` also runs the poller
+through the real Azure SDK against Azurite, the Azure Storage emulator, writing blobs block by
+block the way Network Watcher does. It is skipped unless the emulator's endpoint and account are
+set; the emulator's well-known development account key is in Microsoft's Azurite documentation and
+is never committed here:
+
+```sh
+docker run -d --rm --name azurite -p 127.0.0.1:10000:10000 \
+  mcr.microsoft.com/azure-storage/azurite:3.34.0 azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck --loose
+AZURITE_BLOB_ENDPOINT=http://127.0.0.1:10000/devstoreaccount1 AZURITE_ACCOUNT=devstoreaccount1 \
+  AZURITE_ACCOUNT_KEY='<the emulator key>' go test -run TestAzurite -v ./internal/flowlogs
+docker stop azurite
+```
+
+The sensor itself only signs in to Azure with a managed identity, so a live run needs an Azure VM.
+
 ### Linux install test
 
 ```sh

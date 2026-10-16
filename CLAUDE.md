@@ -214,6 +214,9 @@ config in the repo.
 - `internal/records/`: maps Zeek JSON logs into the typed records of `sensor_records.proto`
 - `internal/metadata/`: metadata sent with every upload
 - `internal/pcapingest/`: offline PCAP directory watcher
+- `internal/flowlogs/`: Azure VNet flow log poller (B1CF-2140): reads new blob records, converts
+  flow tuples into Zeek-shaped `conn` records (`convert.go`), uploads them through the shared
+  `LogUploader`, and commits its state file only when the upload did not return `api.ErrNotBuffered`
 - `internal/collect_logs/`: support bundle (tar.gz on Unix, zip on Windows)
 - `installer/`: Linux installer script, Debian package, bundled Zeek debs, Windows Inno Setup script
   and Zeek runtime zip

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -178,7 +179,9 @@ func TestPollerReadsOnlyNewRecords(t *testing.T) {
 	require.FileExists(t, h.cfg.StatePath)
 	info, err := os.Stat(h.cfg.StatePath)
 	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	if runtime.GOOS != "windows" { // Windows has no Unix permission bits
+		require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	}
 }
 
 func TestPollerRetriesWhenNotBuffered(t *testing.T) {

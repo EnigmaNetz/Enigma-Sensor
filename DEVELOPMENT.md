@@ -162,7 +162,7 @@ cd installer/debian
 
 Always rebuilds `bin/enigma-sensor-linux`, then writes `bin/enigma-sensor_<version>_amd64.deb`. The
 package installs `/usr/local/bin/enigma-sensor` and a systemd unit, depends on `zeek-lts-core`
-(or the `zeek-core` earlier releases installed) and `tcpdump`, and enables and starts the service on install. It does not write a config; the installer
+(or the `zeek-core` earlier releases installed) and `tcpdump`, and enables the service on install and starts it only when `/etc/enigma-sensor/config.json` exists. It does not write a config; the installer
 does.
 
 ### Linux release zip

@@ -672,6 +672,243 @@ else
     "exit '$(mark_value "$out" installer_exit)', config '$(mark_value "$out" config)'"
 fi
 
+# --- Phase 9: service start under a faked systemd (24.04 only) ----------------
+# Containers do not run systemd, so every phase above skips the service step.
+# Here /run/systemd/system makes the host look booted with systemd, and stubs in
+# /usr/local/sbin (ahead of /usr/bin on PATH) stand in for systemctl and
+# journalctl. The systemctl stub logs every call, one per line, and answers
+# is-active from a state file, so the runs below assert what postinst and the
+# installer asked systemd to do, not how real systemd reacts.
+FAKE_SYSTEMD_SETUP=$(cat <<'CONTAINER'
+set -e
+mkdir -p /run/systemd/system
+cat > /usr/local/sbin/systemctl <<'STUB'
+#!/bin/sh
+echo "$*" >> /tmp/systemctl.log
+for arg in "$@"; do
+  if [ "$arg" = "is-active" ]; then
+    state=$(cat /tmp/systemctl.state 2>/dev/null || echo inactive)
+    case " $* " in
+      *" --quiet "*|*" -q "*) ;;
+      *) echo "$state" ;;
+    esac
+    [ "$state" = "active" ]
+    exit
+  fi
+done
+exit 0
+STUB
+cat > /usr/local/sbin/journalctl <<'STUB'
+#!/bin/sh
+echo "ci-journal-stub: enigma-sensor service log line"
+STUB
+chmod 755 /usr/local/sbin/systemctl /usr/local/sbin/journalctl
+# apt runs maintainer scripts with its own PATH, which leaves out /usr/local/sbin.
+echo 'DPkg::Path "/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin";' > /etc/apt/apt.conf.d/99ci-stub-path
+: > /tmp/systemctl.log
+apt-get update >/dev/null
+set +e
+CONTAINER
+)
+
+# Reads the systemctl calls a run logged under one prefix out of captured output.
+systemctl_calls() {
+  printf '%s\n' "$1" | sed -n "s/^$2 //p"
+}
+
+# postinst passes enigma-sensor.service and the installer passes enigma-sensor,
+# so these match either. "(^| )start" keeps "restart" from counting as "start".
+UNIT_RE='enigma-sensor(\.service)?( |$)'
+ENABLE_RE="(^| )enable $UNIT_RE"
+START_RE="(^| )start $UNIT_RE"
+RESTART_RE="(^| )restart $UNIT_RE"
+RESET_RE="(^| )reset-failed $UNIT_RE"
+
+# Case 1: dpkg -i alone, no config. Zeek comes from the bundle first so the
+# sensor package's dependencies are already met.
+echo "=== Phase 9: dpkg -i with no config on ubuntu:24.04 (faked systemd) ==="
+DPKG_ONLY_SCRIPT="$FAKE_SYSTEMD_SETUP"$(cat <<'CONTAINER'
+
+apt-get install -y --no-install-recommends /release/zeek/ubuntu-24.04/*.deb tcpdump >/dev/null
+if [ -e /etc/enigma-sensor/config.json ]; then echo "MARK config=present"; else echo "MARK config=absent"; fi
+dpkg -i /release/*.deb
+echo "MARK dpkg_exit=$?"
+sed 's/^/SYSTEMCTL /' /tmp/systemctl.log
+CONTAINER
+)
+out=""
+status=0
+out=$(run_install_container ubuntu:24.04 <<<"$DPKG_ONLY_SCRIPT" 2>&1) || status=$?
+printf '%s\n' "$out"
+if [ "$status" -ne 0 ]; then
+  fail "dpkg only: container run completed" "docker run exited $status"
+fi
+calls=$(systemctl_calls "$out" SYSTEMCTL)
+if [ "$(mark_value "$out" config)" = "absent" ] && [ "$(mark_value "$out" dpkg_exit)" = "0" ]; then
+  pass "dpkg only: the sensor package installs with no config present"
+else
+  fail "dpkg only: the sensor package installs with no config present" \
+    "config '$(mark_value "$out" config)', dpkg exit '$(mark_value "$out" dpkg_exit)'"
+fi
+if printf '%s\n' "$calls" | grep -Eq "$ENABLE_RE"; then
+  pass "dpkg only: postinst enables the service"
+else
+  fail "dpkg only: postinst enables the service" "no 'enable enigma-sensor' call logged"
+fi
+if printf '%s\n' "$calls" | grep -Eq "$START_RE"; then
+  fail "dpkg only: postinst does not start the service without a config" \
+    "a 'start enigma-sensor' call was logged"
+else
+  pass "dpkg only: postinst does not start the service without a config"
+fi
+
+# Cases 2 and 4: a fresh install with a healthy service, then a re-run on the
+# same host. A same-version re-run leaves the package alone and never runs
+# postinst, so the re-run installs a copy of the deb with a bumped version:
+# that is the upgrade path, where prerm stops the service and postinst, with
+# the config now present, starts it again.
+echo "=== Phase 9: fresh install and upgrade on ubuntu:24.04 (faked systemd) ==="
+HEALTHY_SCRIPT="$FAKE_SYSTEMD_SETUP"$(cat <<'CONTAINER'
+
+echo active > /tmp/systemctl.state
+cd /release
+bash install-enigma-sensor.sh </dev/null
+echo "MARK installer_exit=$?"
+sed 's/^/SYSTEMCTL_FRESH /' /tmp/systemctl.log
+echo "MARK config_sum_before=$(sha256sum /etc/enigma-sensor/config.json 2>&1 | cut -d' ' -f1)"
+
+cp -a /release /tmp/release
+rm -f /tmp/release/*.deb
+dpkg-deb -R /release/*.deb /tmp/sensor-pkg
+sed -i 's/^Version: .*/&+citest1/' /tmp/sensor-pkg/DEBIAN/control
+dpkg-deb --build /tmp/sensor-pkg /tmp/release/enigma-sensor-upgrade_amd64.deb >/dev/null
+: > /tmp/systemctl.log
+cd /tmp/release
+bash install-enigma-sensor.sh </dev/null
+echo "MARK rerun_exit=$?"
+sed 's/^/SYSTEMCTL_RERUN /' /tmp/systemctl.log
+echo "MARK config_sum_after=$(sha256sum /etc/enigma-sensor/config.json 2>&1 | cut -d' ' -f1)"
+echo "MARK sensor_version=$(dpkg -s enigma-sensor 2>&1 | sed -n 's/^Version: //p')"
+CONTAINER
+)
+out=""
+status=0
+out=$(run_install_container ubuntu:24.04 <<<"$HEALTHY_SCRIPT" 2>&1) || status=$?
+printf '%s\n' "$out"
+if [ "$status" -ne 0 ]; then
+  fail "service healthy: container run completed" "docker run exited $status"
+fi
+
+installer_exit=$(mark_value "$out" installer_exit)
+if [ "$installer_exit" = "0" ]; then
+  pass "service healthy: installer exit status is 0"
+else
+  fail "service healthy: installer exit status is 0" "got '${installer_exit:-<no marker>}'"
+fi
+
+# The success line must come from the first run, before any re-run output.
+fresh_out=$(printf '%s\n' "$out" | sed '/^MARK installer_exit=/q')
+if printf '%s\n' "$fresh_out" | grep -qF 'Enigma Sensor installed and configured.'; then
+  pass "service healthy: installer prints the success line"
+else
+  fail "service healthy: installer prints the success line" \
+    "no 'Enigma Sensor installed and configured.' before the first exit marker"
+fi
+
+calls=$(systemctl_calls "$out" SYSTEMCTL_FRESH)
+reset_line=$(printf '%s\n' "$calls" | grep -nE "$RESET_RE" | head -n 1 | cut -d: -f1)
+restart_line=$(printf '%s\n' "$calls" | grep -nE "$RESTART_RE" | tail -n 1 | cut -d: -f1)
+if [ -n "$reset_line" ] && [ -n "$restart_line" ] && [ "$reset_line" -lt "$restart_line" ]; then
+  pass "service healthy: installer runs reset-failed before restart"
+else
+  fail "service healthy: installer runs reset-failed before restart" \
+    "reset-failed at call '${reset_line:-<none>}', restart at call '${restart_line:-<none>}'"
+fi
+
+# On a fresh host the package installs before the installer writes the config,
+# so postinst must not start the service (that start is what crash-looped).
+# The enable check proves postinst reached the stub, so the start check is not vacuous.
+if ! printf '%s\n' "$calls" | grep -Eq "$ENABLE_RE"; then
+  fail "service healthy: postinst does not start the service on a fresh host" \
+    "no 'enable enigma-sensor' call logged, so postinst never reached the stub"
+elif printf '%s\n' "$calls" | grep -Eq "$START_RE"; then
+  fail "service healthy: postinst does not start the service on a fresh host" \
+    "a 'start enigma-sensor' call was logged"
+else
+  pass "service healthy: postinst does not start the service on a fresh host"
+fi
+
+rerun_exit=$(mark_value "$out" rerun_exit)
+if [ "$rerun_exit" = "0" ]; then
+  pass "re-run: installer exit status is 0"
+else
+  fail "re-run: installer exit status is 0" "got '${rerun_exit:-<no marker>}'"
+fi
+
+sensor_version=$(mark_value "$out" sensor_version)
+if [ "$sensor_version" = "${SENSOR_VERSION}+citest1" ]; then
+  pass "re-run: the sensor package was upgraded"
+else
+  fail "re-run: the sensor package was upgraded" "got version '${sensor_version:-<none>}'"
+fi
+
+calls=$(systemctl_calls "$out" SYSTEMCTL_RERUN)
+if printf '%s\n' "$calls" | grep -Eq "$START_RE"; then
+  pass "re-run: postinst starts the service when the config exists"
+else
+  fail "re-run: postinst starts the service when the config exists" \
+    "no 'start enigma-sensor' call logged during the upgrade"
+fi
+
+config_sum_before=$(mark_value "$out" config_sum_before)
+config_sum_after=$(mark_value "$out" config_sum_after)
+if [ "${#config_sum_before}" = "64" ] && [ "$config_sum_before" = "$config_sum_after" ]; then
+  pass "re-run: /etc/enigma-sensor/config.json is unchanged"
+else
+  fail "re-run: /etc/enigma-sensor/config.json is unchanged" \
+    "sha256 before '${config_sum_before:-<none>}', after '${config_sum_after:-<none>}'"
+fi
+
+# Case 3: the service does not stay up. The installer must fail, show the
+# journal, and not claim success.
+echo "=== Phase 9: service fails to start on ubuntu:24.04 (faked systemd) ==="
+FAILING_SCRIPT="$FAKE_SYSTEMD_SETUP"$(cat <<'CONTAINER'
+
+echo failed > /tmp/systemctl.state
+cd /release
+bash install-enigma-sensor.sh </dev/null
+echo "MARK installer_exit=$?"
+CONTAINER
+)
+out=""
+status=0
+out=$(run_install_container ubuntu:24.04 <<<"$FAILING_SCRIPT" 2>&1) || status=$?
+printf '%s\n' "$out"
+if [ "$status" -ne 0 ]; then
+  fail "service failing: container run completed" "docker run exited $status"
+fi
+
+installer_exit=$(mark_value "$out" installer_exit)
+if [ -n "$installer_exit" ] && [ "$installer_exit" != "0" ]; then
+  pass "service failing: installer exits nonzero"
+else
+  fail "service failing: installer exits nonzero" "got '${installer_exit:-<no marker>}'"
+fi
+
+if printf '%s\n' "$out" | grep -qF 'ci-journal-stub: enigma-sensor service log line'; then
+  pass "service failing: installer prints the service journal"
+else
+  fail "service failing: installer prints the service journal" \
+    "the journalctl stub's line is not in the output"
+fi
+
+if printf '%s\n' "$out" | grep -qF 'Enigma Sensor installed and configured.'; then
+  fail "service failing: installer does not print the success line" \
+    "'Enigma Sensor installed and configured.' is in the output"
+else
+  pass "service failing: installer does not print the success line"
+fi
+
 # --- Summary -----------------------------------------------------------------
 echo "=== Summary ==="
 if [ "$FAILURES" -ne 0 ]; then

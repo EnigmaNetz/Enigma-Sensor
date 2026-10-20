@@ -4,7 +4,9 @@ set -e
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload
   systemctl enable enigma-sensor.service
-  systemctl start enigma-sensor.service
+  if [ -f /etc/enigma-sensor/config.json ]; then
+    systemctl start enigma-sensor.service
+  fi
 fi
 
 exit 0

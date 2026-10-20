@@ -238,14 +238,37 @@ func TestSameTimestampEndThenBegin(t *testing.T) {
 	require.NotEqual(t, h.recs[0].UID, h.recs[1].UID)
 }
 
-func TestDeniedFlow(t *testing.T) {
+func TestDeniedFlowFromOutsideIsDropped(t *testing.T) {
 	h := newHarness(t, Options{})
 	h.add(macA, at(0, client+","+vmA+",55188,22,6,I,D,NX,0,0,0,0"))
-	require.Len(t, h.recs, 1)
-	r := h.recs[0]
-	require.Equal(t, "S0", r.ConnState)
-	require.Nil(t, r.History)
+	require.Empty(t, h.recs)
+	require.Equal(t, 1, h.conv.Stats.Denied)
 	require.Empty(t, h.conv.state.Sessions)
+}
+
+func TestDeniedFlowFromInsideIsS0(t *testing.T) {
+	h := newHarness(t, Options{})
+	h.add(macA, at(0, "10.0.3.7,"+vmA+",55188,22,6,I,D,NX,0,0,0,0"))          // inbound attempt
+	h.add(macA, at(time.Second, vmA+","+client+",55189,25,6,O,D,NX,0,0,0,0")) // outbound attempt
+	require.Len(t, h.recs, 2)
+	for _, r := range h.recs {
+		require.Equal(t, "S0", r.ConnState)
+		require.Nil(t, r.History)
+	}
+	require.Equal(t, "10.0.3.7", h.recs[0].OrigH)
+	require.Equal(t, vmA, h.recs[1].OrigH)
+	require.Equal(t, 0, h.conv.Stats.Denied)
+	require.Empty(t, h.conv.state.Sessions)
+}
+
+func TestDeniedFlowUsesVNetCIDRs(t *testing.T) {
+	// With vnet_cidrs set, a private address outside them is not inside the network
+	h := newHarness(t, Options{VNetCIDRs: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/16")}})
+	h.add(macA, at(0, "172.16.0.9,"+vmA+",55188,22,6,I,D,NX,0,0,0,0"))
+	h.add(macA, at(time.Second, "10.0.3.7,"+vmA+",55189,22,6,I,D,NX,0,0,0,0"))
+	require.Len(t, h.recs, 1)
+	require.Equal(t, "10.0.3.7", h.recs[0].OrigH)
+	require.Equal(t, 1, h.conv.Stats.Denied)
 }
 
 func TestLoadBalancerRules(t *testing.T) {
@@ -347,6 +370,7 @@ func stream() []struct{ mac, csv string } {
 		add(macB, at(time.Duration(i)*300*time.Second-time.Minute, k+"I,C,NX,9,900,4,400"))
 		add(macB, at(time.Duration(i)*300*time.Second, fmt.Sprintf("%s,%s,%d,443,6,I,E,NX,4,400,4,4000", client, vmB, 40000+i)))
 		add(macA, at(time.Duration(i)*300*time.Second, fmt.Sprintf("%s,%s,50000,%d,6,I,D,NX,0,0,0,0", client, vmA, i)))
+		add(macA, at(time.Duration(i)*300*time.Second, fmt.Sprintf("10.0.3.7,%s,50000,%d,6,I,D,NX,0,0,0,0", vmA, i)))
 	}
 	add(macA, at(4600*time.Second, k+"O,E,NX,1,100,1,100"))
 	add(macA, at(4600*time.Second, vmA+","+client+",50001,443,6,O,B,NX,,,,"))

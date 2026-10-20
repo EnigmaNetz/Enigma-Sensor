@@ -297,13 +297,16 @@ Some Azure VMs cannot be captured: a VM behind a Standard public load balancer l
 it is added to a virtual network TAP (terminal access point). For those VMs the sensor can instead
 read the VNet (virtual network) flow logs that Azure Network Watcher writes to a storage account,
 turn them into Zeek `conn` records, and upload them the same way as a capture's. With
-`azure_flow_logs.enabled: true` this runs alongside live capture; set `capture.enabled: false` for
-a sensor that only reads flow logs.
+`azure_flow_logs.enabled: true` this runs alongside live capture, so one sensor can cover VMs
+reached through a virtual network TAP and VMs that need flow logs; set `capture.enabled: false`
+for a sensor that only reads flow logs.
 
 In Azure:
 
-1. Turn on VNet flow logs for the VMs' network interfaces, subnet or virtual network, written to a
-   storage account.
+1. Turn on VNet flow logs, written to a storage account. Next to a virtual network TAP, turn them
+   on only for the network interfaces of the VMs the TAP cannot cover: see
+   [Flow logs next to a virtual network TAP](#flow-logs-next-to-a-virtual-network-tap). Subnet or
+   virtual network scope suits a network where no VM is covered by a TAP.
 2. Give the VM the sensor runs on a managed identity, and grant that identity the
    **Storage Blob Data Reader** role on the storage account. The sensor signs in with it; no key
    or secret goes in the config.
@@ -316,7 +319,7 @@ In Azure:
 | `azure_flow_logs.container` | `insights-logs-flowlogflowevent` | Container that holds them, Network Watcher's default |
 | `azure_flow_logs.blob_endpoint` | `https://<storage_account>.blob.core.windows.net` | Blob endpoint, for a sovereign cloud. Must be `https` |
 | `azure_flow_logs.managed_identity_client_id` | empty | Client ID of a user-assigned managed identity. Empty uses the VM's system-assigned identity |
-| `azure_flow_logs.vnet_cidrs` | empty | Comma-separated IPv4 address spaces of the virtual network, for example `10.0.0.0/16`. They set `local_orig` and `local_resp`. Empty treats private addresses (RFC 1918) as local |
+| `azure_flow_logs.vnet_cidrs` | empty | Comma-separated IPv4 address spaces of the virtual network, for example `10.0.0.0/16`. They set `local_orig` and `local_resp`, and decide which denied flows come from outside the network. Empty treats private addresses (RFC 1918) as local; set it if the network uses public address space internally |
 | `azure_flow_logs.lb_rules` | empty | Comma-separated `<backend address or CIDR>:<port>[/tcp\|/udp]=<service>` entries that set `service` for traffic to a load balancer's backends, for example `10.0.2.0/24:443=ssl,10.0.2.0/24:80=http`. Flow logs carry no protocol detection, so without a rule `service` is unset |
 | `azure_flow_logs.poll_interval_seconds` | `60` | How often new flow log records are read (10 to 3600). Azure adds records about once a minute |
 | `azure_flow_logs.max_flow_age_minutes` | `60` | A connection open longer than this is uploaded with its counts so far and continues in a new record (5 to 1440) |
@@ -329,7 +332,7 @@ In Azure:
 Azure logs a connection as it begins, every five minutes while it is open, and when it ends. The
 sensor adds up those intervals and uploads one record per connection when it ends, as Zeek does,
 so it uploads a connection that is still open only once it reaches `max_flow_age_minutes`. When
-two monitored VMs talk to each other, both network interfaces log the connection; it is uploaded
+two flow-logged VMs talk to each other, both network interfaces log the connection; it is uploaded
 once, from the side that started it.
 
 Delivery is at least once. The state file is saved only after a poll's records are uploaded or
@@ -344,6 +347,19 @@ The only files skipped on purpose are logged: one that holds a record that canno
 (from that record on), one that was deleted from the storage account, and one that keeps
 failing to download for two hours with an error about that file alone.
 
+#### Flow logs next to a virtual network TAP
+
+The sensor removes duplicates only between flow-logged network interfaces. A connection between a
+VM covered by the TAP and a flow-logged VM is seen twice: Zeek captures it from the TAP, and the
+flow-logged interface logs it. Both are uploaded, with different `uid`s, so the connection is
+counted twice. `zeek.excluded_subnets` cannot drop only one copy, since it applies to both.
+
+To keep this overlap small, flow log only the VMs the TAP cannot cover, by network interface.
+Flow logging a whole subnet or virtual network that the TAP also covers would duplicate most of
+the traffic.
+
+#### How flow log records differ from a capture's
+
 Flow logs record less than a capture, so these records are coarser:
 
 - only `conn` records: there are no `dns`, `dhcp`, `ja3_ja4` or `ja4s` logs for these VMs;
@@ -351,6 +367,11 @@ Flow logs record less than a capture, so these records are coarser:
 - `conn_state` is only `SF` (ended, with a reply), `S1` (still open or its end was not logged,
   with a reply) or `S0` (no reply, or denied), and `history` only marks a logged begin (`S`) and
   end (`F`). Azure does not say whether a connection was reset or closed normally;
+- a flow Azure denied from outside the network (see `vnet_cidrs`) is dropped and counted in the
+  log: it was blocked before it reached the VM, so a capture would never see it, and on an
+  internet-facing VM it is mostly scanning. A denied flow from inside the network is uploaded as
+  `S0`, as a capture of the sender would record its unanswered attempt. Nothing in a record
+  marks it as denied;
 - `service` comes only from `lb_rules`;
 - `missed_bytes` and `tunnel_parents` are not set: Azure does not measure them;
 - IPv6 flows and load balancer health probes from `168.63.129.16` are dropped.

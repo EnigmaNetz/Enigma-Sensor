@@ -143,9 +143,9 @@ func (s *ConverterState) init() {
 
 // Options configure a Converter.
 type Options struct {
-	// VNetCIDRs are the virtual network's address spaces, used for local_orig, local_resp and
-	// to tell a NIC's private address from its public one. Empty means the private ranges
-	// (RFC 1918 for IPv4).
+	// VNetCIDRs are the virtual network's address spaces, used for local_orig, local_resp, to
+	// tell a NIC's private address from its public one, and to tell a denied flow from outside
+	// the network from one inside it. Empty means the private ranges (RFC 1918 for IPv4).
 	VNetCIDRs []netip.Prefix
 	// Rules set service for flows to a load balancer's backends.
 	Rules []lbrules.Rule
@@ -155,7 +155,7 @@ type Options struct {
 
 // Stats counts what the converter dropped, for the poll log.
 type Stats struct {
-	Records, Duplicates, HealthProbes, IPv6, OtherProtocols int
+	Records, Duplicates, HealthProbes, IPv6, OtherProtocols, Denied int
 }
 
 // Converter folds tuples into connections and emits a ConnRecord when one ends. It owns a
@@ -249,6 +249,14 @@ func (c *Converter) Add(t Tuple) {
 	}
 
 	if t.State == 'D' {
+		if !c.local(t.Src) {
+			// Blocked before it reached the VM, so a capture would never see it: on an
+			// internet-facing VM this is scanner noise, not connections
+			c.Stats.Denied++
+			return
+		}
+		// A blocked attempt from inside the network: a capture of the sender sees its SYN
+		// go unanswered, so it is an S0 as Zeek would log it
 		s := c.newSession(t)
 		s.add(t)
 		c.emitRecord(s, "S0", false)

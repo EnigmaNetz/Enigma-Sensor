@@ -6,7 +6,8 @@
 // A flow log tuple is not a connection: Azure logs a connection as B (begin), then C
 // (continuing) every five minutes with that interval's counters, then E (end), or D for a
 // denied flow. The Converter keeps a running total per connection and emits one record when
-// the connection ends, like Zeek does. See convert.go for the state machine.
+// the connection ends, like Zeek does. A denied flow from outside the network is dropped, as
+// a capture would never see it. See convert.go for the state machine.
 package flowlogs
 
 import (

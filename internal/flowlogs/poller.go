@@ -252,8 +252,8 @@ func (p *Poller) Poll(ctx context.Context) (res PollResult, err error) {
 
 	s := conv.Stats
 	if len(recs) > 0 || s.Records > 0 {
-		log.Printf("[flowlogs] Read %d record(s) from %d blob(s): %d conn record(s), %d duplicate, %d health probe, %d IPv6, %d other-protocol tuple(s) dropped, %d open connection(s)",
-			len(recs), read, s.Records, s.Duplicates, s.HealthProbes, s.IPv6, s.OtherProtocols, len(st.Converter.Sessions))
+		log.Printf("[flowlogs] Read %d record(s) from %d blob(s): %d conn record(s), %d duplicate, %d health probe, %d IPv6, %d other-protocol, %d denied-from-outside tuple(s) dropped, %d open connection(s)",
+			len(recs), read, s.Records, s.Duplicates, s.HealthProbes, s.IPv6, s.OtherProtocols, s.Denied, len(st.Converter.Sessions))
 	}
 	if badRecords > 0 || otherVersions > 0 {
 		log.Printf("[flowlogs] Skipped %d unreadable record(s) and %d record(s) of a flowLogVersion other than %d", badRecords, otherVersions, SupportedVersion)

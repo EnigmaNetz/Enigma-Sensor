@@ -24,8 +24,9 @@ func readSample(t *testing.T) []byte {
 	return data
 }
 
-// convertBlob scans a whole blob and converts it, returning the conn.log lines.
-func convertBlob(t *testing.T, data []byte) []ConnRecord {
+// convertBlob scans a whole blob and converts it, returning the conn.log lines and what the
+// converter dropped.
+func convertBlob(t *testing.T, data []byte) ([]ConnRecord, Stats) {
 	t.Helper()
 	recs, next, err := scanRecords("sample", data, 0)
 	require.NoError(t, err)
@@ -39,17 +40,19 @@ func convertBlob(t *testing.T, data []byte) []ConnRecord {
 		require.True(t, ok)
 	}
 	conv.Flush()
-	return out
+	return out, conv.Stats
 }
 
 func TestMicrosoftSample(t *testing.T) {
-	out := convertBlob(t, readSample(t))
+	out, stats := convertBlob(t, readSample(t))
 	states := map[string]int{}
 	for _, r := range out {
 		states[r.ConnState]++
 	}
-	// Five begin and end pairs, all answered, and nine denied inbound attempts
-	require.Equal(t, map[string]int{"SF": 5, "S0": 9}, states)
+	// Five begin and end pairs, all answered. The nine denied inbound attempts come from
+	// outside the network, so they are dropped and counted
+	require.Equal(t, map[string]int{"SF": 5}, states)
+	require.Equal(t, 9, stats.Denied)
 	var last ConnRecord
 	for _, r := range out {
 		if r.OrigP == 36776 {
@@ -66,7 +69,12 @@ func TestMicrosoftSample(t *testing.T) {
 // The converter's conn.log must go through the sensor's own record mapper, the one UploadLogs
 // uses, without a single record skipped.
 func TestOutputMapsToTypedRecords(t *testing.T) {
-	out := convertBlob(t, readSample(t))
+	out, _ := convertBlob(t, readSample(t))
+	// An S0 too, which has no history; the sample's denied attempts come from outside and are dropped
+	h := newHarness(t, Options{})
+	h.add(macA, at(0, "10.0.3.7,"+vmA+",55188,22,6,I,D,NX,0,0,0,0"))
+	require.Len(t, h.recs, 1)
+	out = append(out, h.recs...)
 	path := filepath.Join(t.TempDir(), "conn.log")
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)

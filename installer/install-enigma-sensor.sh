@@ -364,9 +364,33 @@ chown -R root:root /var/log/enigma-sensor /var/lib/enigma-sensor
 chmod 755 /var/log/enigma-sensor /var/lib/enigma-sensor
 chmod 644 /var/lib/enigma-sensor/captures
 
-# --- Restart service if systemd is present ---
-if command -v systemctl >/dev/null 2>&1; then
-  systemctl restart enigma-sensor || true
+# --- Restart the service and check it stays up, if systemd is running ---
+# A fresh package install can leave the unit at its start limit, so clear that first.
+# Type=simple reports active as soon as the process starts, so poll for a few seconds
+# to catch a sensor that exits straight away.
+if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+  systemctl reset-failed enigma-sensor || true
+  service_ok=1
+  if systemctl restart enigma-sensor; then
+    for _ in 1 2 3 4 5; do
+      sleep 1
+      state=$(systemctl is-active enigma-sensor 2>/dev/null || true)
+      if [ "$state" != "active" ]; then
+        service_ok=0
+        break
+      fi
+    done
+  else
+    service_ok=0
+    state=$(systemctl is-active enigma-sensor 2>/dev/null || true)
+  fi
+  if [ "$service_ok" != "1" ]; then
+    echo "ERROR: the enigma-sensor service is not running (state: ${state:-unknown})."
+    echo "Last service log lines:"
+    journalctl -u enigma-sensor -n 20 --no-pager || true
+    echo "Check 'sudo systemctl status enigma-sensor' and the config at /etc/enigma-sensor/config.json."
+    exit 1
+  fi
 fi
 
 echo "Enigma Sensor installed and configured."

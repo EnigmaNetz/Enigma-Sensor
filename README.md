@@ -93,7 +93,8 @@ The installer:
   fails to install, it falls back to the OpenSUSE Zeek repository;
 - installs the `enigma-sensor` package, a systemd service that starts at boot;
 - writes `/etc/enigma-sensor/config.json` if it does not already exist, readable only by root
-  (mode 0600, also applied to an existing config), then restarts the service.
+  (mode 0600, also applied to an existing config), then restarts the service and checks that it is
+  running; if it is not, it prints the service's last log lines and exits non-zero.
 
 Re-running the installer upgrades the sensor and keeps the existing config. If Zeek cannot be
 upgraded to 8.0.10, the sensor is still installed on the existing Zeek, but the installer prints a

@@ -333,7 +333,9 @@ Azure logs a connection as it begins, every five minutes while it is open, and w
 sensor adds up those intervals and uploads one record per connection when it ends, as Zeek does,
 so it uploads a connection that is still open only once it reaches `max_flow_age_minutes`. When
 two flow-logged VMs talk to each other, both network interfaces log the connection; it is uploaded
-once, from the side that started it.
+once, from the side that started it. This matching goes by private address, so addresses must be
+unique across all the flow logs one sensor reads: give virtual networks with overlapping address
+spaces a sensor each, or their flows between same-addressed VMs are dropped as duplicates.
 
 Delivery is at least once. The state file is saved only after a poll's records are uploaded or
 buffered, so a restart or a failed upload reads again from the same place rather than losing

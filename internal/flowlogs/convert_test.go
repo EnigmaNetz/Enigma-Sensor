@@ -108,12 +108,12 @@ func TestBeginWithoutEndClosesWhenIdle(t *testing.T) {
 		at(60*time.Second, vmA+","+client+",50002,443,6,O,B,NX,,,,"),
 		at(300*time.Second, vmA+","+client+",50002,443,6,O,C,NX,3,300,2,200"),
 	)
-	h.conv.Flush()
+	h.conv.Flush(nil)
 	require.Empty(t, h.recs, "nothing is idle yet")
 
 	// The NIC's newest tuple moves 16 minutes past the second connection's last tuple
 	h.add(macA, at(1260*time.Second, vmA+","+client+",50003,443,6,O,B,NX,,,,"))
-	h.conv.Flush()
+	h.conv.Flush(nil)
 	require.Len(t, h.recs, 2)
 	byPort := map[uint16]ConnRecord{}
 	for _, r := range h.recs {
@@ -338,7 +338,7 @@ func TestLateOwnershipDropsTheDuplicateSession(t *testing.T) {
 	h.add(macA, at(600*time.Second, k+"O,E,NX,2,200,1,100"))
 	// macB's clock moves well past the idle timeout, which would flush a leftover session
 	h.add(macB, at(time.Hour, vmB+","+client+",50000,443,6,O,B,NX,,,,"))
-	h.conv.Flush()
+	h.conv.Flush(nil)
 	require.Len(t, h.recs, 1)
 	require.Equal(t, uint64(12), h.recs[0].OrigPkts, "only the source NIC's counters")
 }
@@ -353,9 +353,24 @@ func TestStaleNICClosed(t *testing.T) {
 	h := newHarness(t, Options{})
 	h.add(macA, at(0, vmA+","+client+",50000,443,6,O,B,NX,,,,"))
 	h.add(macB, at(3*time.Hour, vmB+","+client+",50000,443,6,O,B,NX,,,,"))
-	h.conv.Flush()
+	h.conv.Flush(nil)
 	require.Len(t, h.recs, 1)
 	require.Equal(t, vmA, h.recs[0].OrigH)
+}
+
+// A NIC that still has blobs to read is behind, not quiet: its connections and addresses stay.
+func TestNICStillBeingReadIsNotStale(t *testing.T) {
+	h := newHarness(t, Options{})
+	h.add(macA, at(0, vmA+","+client+",50000,443,6,O,B,NX,,,,"))
+	h.add(macB, at(25*time.Hour, vmB+","+client+",50000,443,6,O,B,NX,,,,"))
+	h.conv.Flush(map[string]bool{macA: true})
+	require.Empty(t, h.recs)
+	require.Contains(t, h.conv.state.PrivateIP, macA)
+	require.Contains(t, h.conv.state.Watermarks, macA)
+	h.conv.Flush(nil)
+	require.Len(t, h.recs, 1, "once read, a quiet NIC is closed")
+	require.Equal(t, vmA, h.recs[0].OrigH)
+	require.NotContains(t, h.conv.state.PrivateIP, macA)
 }
 
 // stream is a mixed input exercising every path, for the determinism and restart tests.
@@ -399,7 +414,7 @@ func runStream(t *testing.T, split int) []byte {
 			tp.MAC, tp.Pos = e.mac, fmt.Sprintf("blob@%d", j+i*split)
 			conv.Add(tp)
 		}
-		conv.Flush()
+		conv.Flush(nil)
 	}
 	return out
 }

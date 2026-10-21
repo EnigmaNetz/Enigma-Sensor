@@ -39,7 +39,7 @@ func convertBlob(t *testing.T, data []byte) ([]ConnRecord, Stats) {
 		require.NoError(t, err)
 		require.True(t, ok)
 	}
-	conv.Flush()
+	conv.Flush(nil)
 	return out, conv.Stats
 }
 

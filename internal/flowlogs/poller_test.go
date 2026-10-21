@@ -925,3 +925,64 @@ func TestBlobFaultSeparatesBlobFromContainer(t *testing.T) {
 	_, about = blobFault(&azcore.ResponseError{StatusCode: 503, ErrorCode: "ServerBusy"})
 	require.False(t, about)
 }
+
+// From review: with per-NIC flow logs each NIC is its own flow log resource, and list reads one
+// resource through all its hours before the next. A backlog read under a small budget must
+// convert exactly as one unlimited pass does: a NIC that still has unread blobs is not stale
+// just because another NIC's newer tuples were read first.
+func TestPollerMultiResourceBacklogMatchesSinglePass(t *testing.T) {
+	defer func(b int64) { pollReadBudget = b }(pollReadBudget)
+	nics := []struct{ root, mac, ip string }{
+		{strings.Replace(testRoot, "TEST-FLOWLOG", "FLOWLOG-A", 1), "00224800AAA1", "10.0.1.4"},
+		{strings.Replace(testRoot, "TEST-FLOWLOG", "FLOWLOG-B", 1), "00224800BBB1", "10.0.1.5"},
+	}
+	name := func(root string, hour time.Time, mac string) string {
+		return fmt.Sprintf("%s/y=%04d/m=%02d/d=%02d/h=%02d/m=00/macAddress=%s/PT1H.json",
+			root, hour.Year(), int(hour.Month()), hour.Day(), hour.Hour(), mac)
+	}
+	const hours = 6
+	run := func(budget int64) []string {
+		h := newPollerHarness(t)
+		start := pollNow.Truncate(time.Hour)
+		for _, n := range nics {
+			h.store.append(name(n.root, start, n.mac), start, flowRecord(n.mac, endTuple(start, n.ip, client, 40000)))
+		}
+		p := NewPoller(h.cfg)
+		h.poll(p) // sets LastPoll, so the outage below is read back
+
+		// Each NIC keeps one connection open for the whole outage, plus a short one per hour
+		for i, n := range nics {
+			k := fmt.Sprintf("%s,%s,%d,443,6,O,", n.ip, client, 50000+i)
+			for hr := 1; hr <= hours; hr++ {
+				at := start.Add(time.Duration(hr) * time.Hour)
+				var tuples []string
+				if hr == 1 {
+					tuples = append(tuples, fmt.Sprintf("%d,%sB,NX,,,,", ms(at), k))
+				}
+				for m := 5; m < 60; m += 5 {
+					tuples = append(tuples, fmt.Sprintf("%d,%sC,NX,10,1000,5,500", ms(at.Add(time.Duration(m)*time.Minute)), k))
+				}
+				if hr == hours {
+					tuples = append(tuples, fmt.Sprintf("%d,%sE,NX,1,100,1,100", ms(at.Add(59*time.Minute)), k))
+				}
+				tuples = append(tuples, endTuple(at.Add(30*time.Minute), n.ip, client, 41000+hr*10+i))
+				h.store.append(name(n.root, at, n.mac), at.Add(59*time.Minute), flowRecord(n.mac, tuples...))
+			}
+		}
+		h.now = start.Add(hours*time.Hour + time.Hour)
+		pollReadBudget = budget
+		for i := 0; i < 200 && h.poll(p); i++ {
+			h.now = h.now.Add(time.Second) // catch-up polls run back to back
+		}
+		var lines []string
+		for _, u := range h.uploader.uploads {
+			lines = append(lines, strings.Split(strings.TrimSpace(u), "\n")...)
+		}
+		sort.Strings(lines)
+		return lines
+	}
+	single := run(1 << 30)
+	oneBlob := int64(len(flowRecord(nics[0].mac))) * 20 // about one hour's blob per poll
+	require.Equal(t, single, run(oneBlob))
+	require.Greater(t, len(single), 2*hours, "the backlog was read")
+}

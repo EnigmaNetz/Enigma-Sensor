@@ -23,7 +23,7 @@ const (
 
 	// staleTimeout closes a connection whose NIC has logged nothing for this long, measured
 	// against the newest tuple from any NIC. idleTimeout cannot fire for a NIC that has stopped
-	// logging.
+	// logging. A NIC that still has blobs to read is not stale: it is only behind.
 	staleTimeout = 2 * time.Hour
 
 	// ownerTTL forgets an address no NIC has used for this long, so a reassigned address is
@@ -296,9 +296,12 @@ func (c *Converter) Add(t Tuple) {
 }
 
 // Flush closes every connection that has gone idle by its NIC's newest tuple, or whose NIC has
-// gone quiet. Call it after each poll's tuples have been added. Connections are closed in key
-// order so the output does not depend on map order.
-func (c *Converter) Flush() {
+// gone quiet. Call it after each poll's tuples have been added. reading holds the NICs that
+// still have blobs to read: while a backlog is read over several polls, one NIC's newer tuples
+// can be read before another's, so a NIC in reading is not quiet, and neither its connections
+// nor its learned addresses are dropped for it. Connections are closed in key order so the
+// output does not depend on map order.
+func (c *Converter) Flush(reading map[string]bool) {
 	var newest int64
 	for _, w := range c.state.Watermarks {
 		newest = max(newest, w)
@@ -311,22 +314,22 @@ func (c *Converter) Flush() {
 	for _, k := range keys {
 		s := c.state.Sessions[k]
 		if c.state.Watermarks[s.MAC]-s.Last > idleTimeout.Milliseconds() ||
-			newest-s.Last > staleTimeout.Milliseconds() {
+			(!reading[s.MAC] && newest-s.Last > staleTimeout.Milliseconds()) {
 			c.close(k, s, false)
 		}
 	}
 	for addr, seen := range c.state.Owners {
-		if newest-seen.Last > ownerTTL.Milliseconds() {
+		if !reading[seen.MAC] && newest-seen.Last > ownerTTL.Milliseconds() {
 			delete(c.state.Owners, addr)
 		}
 	}
 	for mac, addr := range c.state.PrivateIP {
-		if newest-addr.Last > ownerTTL.Milliseconds() {
+		if !reading[mac] && newest-addr.Last > ownerTTL.Milliseconds() {
 			delete(c.state.PrivateIP, mac)
 		}
 	}
 	for mac, w := range c.state.Watermarks {
-		if newest-w > ownerTTL.Milliseconds() {
+		if !reading[mac] && newest-w > ownerTTL.Milliseconds() {
 			delete(c.state.Watermarks, mac)
 		}
 	}

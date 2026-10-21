@@ -228,7 +228,14 @@ func (p *Poller) Poll(ctx context.Context) (res PollResult, err error) {
 			otherVersions++
 		}
 	}
-	conv.Flush()
+	// A NIC with blobs left to read is behind, not quiet
+	reading := map[string]bool{}
+	for _, b := range blobs {
+		if !st.Blobs[b.Name].done() {
+			reading[blobMAC(b.Name)] = true
+		}
+	}
+	conv.Flush(reading)
 	if err := out.close(); err != nil {
 		return PollResult{}, err
 	}

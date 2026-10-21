@@ -31,5 +31,11 @@
     "watch_dir": "./pcap-ingest",
     "poll_interval_seconds": 10,
     "file_stable_seconds": 5
+  },
+  "azure_flow_logs": {
+    "enabled": false,
+    "storage_account": "",
+    "vnet_cidrs": "",
+    "lb_rules": ""
   }
 }

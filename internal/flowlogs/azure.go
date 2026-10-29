@@ -20,11 +20,10 @@ type azureStore struct {
 	client *container.Client
 }
 
-// NewManagedIdentityStore returns a store for container in the storage account at endpoint
-// (https://<account>.blob.core.windows.net), signed in as the VM's managed identity. clientID
-// selects a user-assigned identity; empty means the system-assigned one. No token is fetched
-// until the first request.
-func NewManagedIdentityStore(endpoint, containerName, clientID string) (BlobStore, error) {
+// NewManagedIdentityCredential returns the VM's managed identity, for NewStore. clientID selects a
+// user-assigned identity; empty means the system-assigned one. No token is fetched until the
+// first request. One credential serves every storage account, so its token is fetched once.
+func NewManagedIdentityCredential(clientID string) (azcore.TokenCredential, error) {
 	opts := &azidentity.ManagedIdentityCredentialOptions{}
 	if clientID != "" {
 		opts.ID = azidentity.ClientID(clientID)
@@ -33,10 +32,11 @@ func NewManagedIdentityStore(endpoint, containerName, clientID string) (BlobStor
 	if err != nil {
 		return nil, fmt.Errorf("managed identity credential: %w", err)
 	}
-	return NewStore(endpoint, containerName, cred)
+	return cred, nil
 }
 
-// NewStore returns a store for container in the storage account at endpoint, using cred.
+// NewStore returns a store for container in the storage account at endpoint
+// (https://<account>.blob.core.windows.net), using cred.
 func NewStore(endpoint, containerName string, cred azcore.TokenCredential) (BlobStore, error) {
 	client, err := container.NewClient(containerURL(endpoint, containerName), cred, nil)
 	if err != nil {

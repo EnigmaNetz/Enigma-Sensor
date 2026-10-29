@@ -39,6 +39,7 @@ type fakeStore struct {
 	blobs    map[string][]string // records
 	modified map[string]time.Time
 	listed   []string
+	listErr  error
 	readErr  error
 	failBlob map[string]error // read errors for one blob
 	failNext int              // fail this many of the next reads, with failErr
@@ -67,6 +68,9 @@ func (f *fakeStore) List(_ context.Context, prefix string) ([]BlobInfo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.listed = append(f.listed, prefix)
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
 	var out []BlobInfo
 	for name := range f.blobs {
 		if strings.HasPrefix(name, prefix) {
@@ -137,7 +141,7 @@ func newPollerHarness(t *testing.T) *pollerHarness {
 	h := &pollerHarness{t: t, store: newFakeStore(), uploader: &fakeUploader{}, now: pollNow}
 	dir := t.TempDir()
 	h.cfg = PollerConfig{
-		Store: h.store, Uploader: h.uploader,
+		Accounts: []Account{{Name: "flowlogseast", Store: h.store}}, Uploader: h.uploader,
 		OutputDir: filepath.Join(dir, "captures"), StatePath: filepath.Join(dir, "state", "flowlogs.json"),
 		Interval: time.Minute,
 		Now:      func() time.Time { return h.now },
@@ -295,7 +299,7 @@ func TestPollerListsTodayAfterTheFullListing(t *testing.T) {
 	// Just after midnight the window still reaches yesterday
 	h.store.listed = nil
 	h.now = time.Date(2026, 10, 17, 0, 30, 0, 0, time.UTC)
-	p.rootsAt = h.now
+	p.accounts[0].rootsAt = h.now
 	h.poll(p)
 	require.Equal(t, []string{testRoot + "/y=2026/m=10/d=16/", testRoot + "/y=2026/m=10/d=17/"}, h.store.listed)
 
@@ -634,7 +638,7 @@ func TestPollerLogsARepeatedFailureOnce(t *testing.T) {
 	h.now = h.now.Add(failureLogEvery)
 	p.logFailure(fmt.Errorf("list blobs: %w", forbidden))
 	require.Contains(t, buf.String(), "Still failing after 6 polls")
-	p.logRecovery()
+	p.logRecovery(nil)
 	require.Contains(t, buf.String(), "Polling works again after 6 failed poll(s)")
 }
 
@@ -734,7 +738,7 @@ func TestPollerGivesUpOnABlobThatIsGone(t *testing.T) {
 	p := NewPoller(h.cfg)
 	res, err := p.Poll(context.Background())
 	require.NoError(t, err, "a download failure does not fail the poll")
-	require.Error(t, res.ReadErr, "but it is reported")
+	require.Len(t, res.Failures, 1, "but it is reported")
 	h.now = h.now.Add(time.Minute)
 	h.poll(p)
 	require.Contains(t, strings.Join(h.uploader.uploads, ""), `"id.orig_p":50002`)
@@ -758,7 +762,8 @@ func TestPollerKeepsBlobsThroughFailuresThatAreNotAboutThem(t *testing.T) {
 			for i := 0; i < 200; i++ { // three hours and more of polls a minute apart
 				res, err := p.Poll(context.Background())
 				require.NoError(t, err)
-				require.ErrorIs(t, res.ReadErr, failure)
+				require.Len(t, res.Failures, 1)
+				require.ErrorIs(t, res.Failures[0], failure)
 				h.now = h.now.Add(time.Minute)
 			}
 			h.store.readErr = nil

@@ -57,9 +57,17 @@ const idleInterval = time.Minute
 // single uploader, so the buffer has one flusher.
 var newFlowLogPoller = func(cfg *config.Config, uploader Uploader) (flowLogRunner, error) {
 	a := cfg.AzureFlowLogs
-	store, err := flowlogs.NewManagedIdentityStore(cfg.FlowLogEndpoint(), a.Container, a.ManagedIdentityClientID)
+	cred, err := flowlogs.NewManagedIdentityCredential(a.ManagedIdentityClientID)
 	if err != nil {
 		return nil, err
+	}
+	var accounts []flowlogs.Account
+	for _, acct := range cfg.FlowLogAccounts() {
+		store, err := flowlogs.NewStore(acct.Endpoint, a.Container, cred)
+		if err != nil {
+			return nil, fmt.Errorf("storage account %s: %w", acct.Name, err)
+		}
+		accounts = append(accounts, flowlogs.Account{Name: acct.Name, Store: store})
 	}
 	var cidrs []netip.Prefix
 	for _, c := range cfg.FlowLogVNetCIDRs() {
@@ -74,7 +82,7 @@ var newFlowLogPoller = func(cfg *config.Config, uploader Uploader) (flowLogRunne
 		return nil, fmt.Errorf("azure_flow_logs.lb_rules: %w", err)
 	}
 	poller := flowlogs.NewPoller(flowlogs.PollerConfig{
-		Store:    store,
+		Accounts: accounts,
 		Uploader: uploader,
 		Converter: flowlogs.Options{
 			VNetCIDRs: cidrs,
@@ -481,7 +489,9 @@ func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, proce
 		if uploader == nil {
 			log.Printf("[flowlogs] Upload is off: converted flow logs are kept in %s and not uploaded", cfg.Capture.OutputDir)
 		}
-		log.Printf("[flowlogs] Reading %s/%s every %d seconds", cfg.FlowLogEndpoint(), cfg.AzureFlowLogs.Container, cfg.AzureFlowLogs.PollIntervalSeconds)
+		for _, acct := range cfg.FlowLogAccounts() {
+			log.Printf("[flowlogs] Reading %s/%s every %d seconds", acct.Endpoint, cfg.AzureFlowLogs.Container, cfg.AzureFlowLogs.PollIntervalSeconds)
+		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

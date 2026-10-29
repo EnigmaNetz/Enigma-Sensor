@@ -77,7 +77,8 @@ CI runs the tests natively on each platform.
 
 `internal/flowlogs` is tested against a fake blob store. `TestAzurite` also runs the poller
 through the real Azure SDK against Azurite, the Azure Storage emulator, writing blobs block by
-block the way Network Watcher does. It is skipped unless the emulator's endpoint and account are
+block the way Network Watcher does, and `TestAzuriteTwoAccounts` reads two containers as two
+storage accounts. They are skipped unless the emulator's endpoint and account are
 set; the emulator's well-known development account key is in Microsoft's Azurite documentation and
 is never committed here:
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -750,8 +751,9 @@ func TestConfig_AzureFlowLogs_Defaults(t *testing.T) {
 		a.StateFile != "logs/flowlogs-state.json" {
 		t.Errorf("Unexpected defaults: %+v", a)
 	}
-	if got := cfg.FlowLogEndpoint(); got != "https://flowlogs01.blob.core.windows.net" {
-		t.Errorf("Unexpected endpoint %q", got)
+	want := []FlowLogAccount{{Name: "flowlogs01", Endpoint: "https://flowlogs01.blob.core.windows.net"}}
+	if got := cfg.FlowLogAccounts(); !reflect.DeepEqual(got, want) {
+		t.Errorf("Unexpected accounts %+v", got)
 	}
 
 	// Disabled, nothing is checked or defaulted
@@ -759,6 +761,30 @@ func TestConfig_AzureFlowLogs_Defaults(t *testing.T) {
 	cfg.AzureFlowLogs.LBRules = "not a rule"
 	if err := cfg.ValidateAndSetDefaults(); err != nil {
 		t.Errorf("Unexpected error with flow logs disabled: %v", err)
+	}
+}
+
+func TestConfig_AzureFlowLogs_Accounts(t *testing.T) {
+	cfg := &Config{NetworkID: "Test-Network-01"}
+	cfg.Capture.OutputDir = "./captures"
+	cfg.AzureFlowLogs.Enabled = true
+	cfg.AzureFlowLogs.StorageAccount = "flowlogseast, flowlogswest"
+	if err := cfg.ValidateAndSetDefaults(); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	want := []FlowLogAccount{
+		{Name: "flowlogseast", Endpoint: "https://flowlogseast.blob.core.windows.net"},
+		{Name: "flowlogswest", Endpoint: "https://flowlogswest.blob.core.windows.net"},
+	}
+	if got := cfg.FlowLogAccounts(); !reflect.DeepEqual(got, want) {
+		t.Errorf("Unexpected accounts %+v", got)
+	}
+
+	cfg.AzureFlowLogs.StorageAccount = ""
+	cfg.AzureFlowLogs.BlobEndpoint = "https://flowlogs01.blob.core.usgovcloudapi.net"
+	want = []FlowLogAccount{{Name: "flowlogs01.blob.core.usgovcloudapi.net", Endpoint: "https://flowlogs01.blob.core.usgovcloudapi.net"}}
+	if got := cfg.FlowLogAccounts(); !reflect.DeepEqual(got, want) {
+		t.Errorf("Unexpected accounts with blob_endpoint %+v", got)
 	}
 }
 
@@ -770,6 +796,14 @@ func TestConfig_AzureFlowLogs_Validation(t *testing.T) {
 	}{
 		{"missing account", func(c *Config) { c.AzureFlowLogs.StorageAccount = "" }, "storage_account"},
 		{"bad account", func(c *Config) { c.AzureFlowLogs.StorageAccount = "Flow_Logs" }, "storage_account"},
+		{"two accounts", func(c *Config) { c.AzureFlowLogs.StorageAccount = "flowlogseast,flowlogswest" }, ""},
+		{"bad account in a list", func(c *Config) { c.AzureFlowLogs.StorageAccount = "flowlogseast,Flow_Logs" }, "Flow_Logs"},
+		{"duplicate account", func(c *Config) { c.AzureFlowLogs.StorageAccount = "flowlogseast, flowlogseast" }, "twice"},
+		{"only commas", func(c *Config) { c.AzureFlowLogs.StorageAccount = " , " }, "storage_account"},
+		{"endpoint with two accounts", func(c *Config) {
+			c.AzureFlowLogs.StorageAccount = "flowlogseast,flowlogswest"
+			c.AzureFlowLogs.BlobEndpoint = "https://flowlogseast.blob.core.usgovcloudapi.net"
+		}, "blob_endpoint"},
 		{"endpoint instead of account", func(c *Config) {
 			c.AzureFlowLogs.StorageAccount = ""
 			c.AzureFlowLogs.BlobEndpoint = "https://flowlogs01.blob.core.usgovcloudapi.net"

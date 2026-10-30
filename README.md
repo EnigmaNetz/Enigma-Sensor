@@ -315,11 +315,11 @@ In Azure:
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `azure_flow_logs.storage_account` | none (required when enabled) | Storage account the flow logs are written to |
-| `azure_flow_logs.container` | `insights-logs-flowlogflowevent` | Container that holds them, Network Watcher's default |
-| `azure_flow_logs.blob_endpoint` | `https://<storage_account>.blob.core.windows.net` | Blob endpoint, for a sovereign cloud. Must be `https` |
-| `azure_flow_logs.managed_identity_client_id` | empty | Client ID of a user-assigned managed identity. Empty uses the VM's system-assigned identity |
-| `azure_flow_logs.vnet_cidrs` | empty | Comma-separated IPv4 address spaces of the virtual network, for example `10.0.0.0/16`. They set `local_orig` and `local_resp`, and decide which denied flows come from outside the network. Empty treats private addresses (RFC 1918) as local; set it if the network uses public address space internally |
+| `azure_flow_logs.storage_account` | none (required when enabled) | Storage account the flow logs are written to, or a comma-separated list of them, for example `flowlogseast,flowlogswest`. See [Several storage accounts](#several-storage-accounts) |
+| `azure_flow_logs.container` | `insights-logs-flowlogflowevent` | Container that holds them, Network Watcher's default. The same container is read in every storage account |
+| `azure_flow_logs.blob_endpoint` | `https://<storage_account>.blob.core.windows.net` | Blob endpoint, for a sovereign cloud. Must be `https`, and works with one storage account only |
+| `azure_flow_logs.managed_identity_client_id` | empty | Client ID of a user-assigned managed identity. Empty uses the VM's system-assigned identity. The one identity reads every storage account |
+| `azure_flow_logs.vnet_cidrs` | empty | Comma-separated IPv4 address spaces of the virtual network, or of every virtual network the storage accounts log, for example `10.0.0.0/16`. They set `local_orig` and `local_resp`, and decide which denied flows come from outside the network. Empty treats private addresses (RFC 1918) as local; set it if the network uses public address space internally |
 | `azure_flow_logs.lb_rules` | empty | Comma-separated `<backend address or CIDR>:<port>[/tcp\|/udp]=<service>` entries that set `service` for traffic to a load balancer's backends, for example `10.0.2.0/24:443=ssl,10.0.2.0/24:80=http`. Flow logs carry no protocol detection, so without a rule `service` is unset |
 | `azure_flow_logs.poll_interval_seconds` | `60` | How often new flow log records are read (10 to 3600). Azure adds records about once a minute |
 | `azure_flow_logs.max_flow_age_minutes` | `60` | A connection open longer than this is uploaded with its counts so far and continues in a new record (5 to 1440) |
@@ -348,6 +348,30 @@ once with what to check, then hourly until it clears; it never causes flow logs 
 The only files skipped on purpose are logged: one that holds a record that cannot be read
 (from that record on), one that was deleted from the storage account, and one that keeps
 failing to download for two hours with an error about that file alone.
+
+#### Several storage accounts
+
+Azure writes a virtual network's flow logs to a storage account in the same region, so virtual
+networks in several regions mean several storage accounts. One sensor can read them all: list
+them in `azure_flow_logs.storage_account`, and in Azure give the sensor VM's managed identity the
+**Storage Blob Data Reader** role on each one. Role assignments are not tied to a region, so no key
+or secret is needed for any account. If an account in another region has a firewall, it must let
+the sensor in; a private endpoint for that account in the sensor's virtual network is the
+dependable way, since a virtual network rule may not cover a network in another region. Reading an
+account in another region is billed as data transfer between regions.
+
+The accounts are read as one: a connection between VMs whose flow logs are in different accounts,
+over peered virtual networks, is uploaded once, and each poll's download limit is shared, so
+reading more accounts does not use more memory. When one account cannot be read (a missing role
+assignment, a firewall, a deleted container), the others are still read and uploaded, the log
+names the account with what to check, and once it can be read again its flow logs are read back
+to where it left off, up to 24 hours, as after a restart.
+
+Add an account at the end of the list. The sensor keeps its place in the first account under that
+account's file names alone, so the first account must stay first: put another account first and
+the sensor reads the last two hours of both again, uploading those records twice. Removing the
+first account does the same to the account that becomes first; removing any other account
+does not.
 
 #### Flow logs next to a virtual network TAP
 

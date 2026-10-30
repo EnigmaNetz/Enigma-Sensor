@@ -2,6 +2,7 @@ package flowlogs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"sort"
@@ -41,16 +42,56 @@ var (
 	maxRecordRead  int64 = 256 << 20
 )
 
-// list returns the flow log blobs worth reading this poll, sorted by name: every tracked blob,
-// and every other blob changed since trackWindow before the last committed poll (or before now,
-// on a first start), back to maxLookback at most. Every blob it returns is tracked in st from
-// then on, so a poll that reads none of them (it ran out of budget, say) cannot let them fall
-// out of the next poll's lookback. The date in the path sorts each NIC's hourly blobs into
-// order, and the converter needs each NIC's tuples in order.
-func (p *Poller) list(ctx context.Context, st *State, now time.Time) ([]BlobInfo, error) {
+// list returns the flow log blobs worth reading this poll, from every account, sorted by key:
+// every tracked blob, and every other blob changed since trackWindow before the last committed
+// poll that listed its account (or before now, on a first start), back to maxLookback at most.
+// Blobs are named by their key (see account). Every blob it returns is tracked in st from then
+// on, so a poll that reads none of them (it ran out of budget, say) cannot let them fall out of
+// the next poll's lookback. The date in the path sorts each NIC's hourly blobs into order, and
+// the converter needs each NIC's tuples in order.
+//
+// An account that cannot be listed is left out of this poll and returned in down with its
+// error; err is set only when no account could be listed.
+func (p *Poller) list(ctx context.Context, st *State, now time.Time) (out []BlobInfo, down map[*account]error, err error) {
+	down = map[*account]error{}
+	for _, a := range p.accounts {
+		// While the others are read through a backlog, polls run back to back; an account that
+		// failed is tried again once per interval, not every poll
+		if len(p.accounts) > 1 && a.listErr != nil && now.Sub(a.listFailedAt) < p.cfg.Interval {
+			down[a] = a.listErr
+			continue
+		}
+		blobs, err := p.listAccount(ctx, a, st, now)
+		if err != nil {
+			a.listErr, a.listFailedAt = p.wrap(a, err), now
+			down[a] = a.listErr
+			continue
+		}
+		a.listErr = nil
+		out = append(out, blobs...)
+	}
+	if len(down) == len(p.accounts) {
+		if len(down) == 1 {
+			return nil, nil, down[p.accounts[0]]
+		}
+		errs := make([]error, len(p.accounts))
+		for i, a := range p.accounts {
+			errs[i] = down[a]
+		}
+		return nil, nil, errors.Join(errs...)
+	}
+	// Keys sort by account (every other account's start with @, before the first account's) and
+	// then by blob name. Only the order within a NIC matters, and a NIC's blobs are all in one
+	// account
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, down, nil
+}
+
+// listAccount lists one account's blobs for list.
+func (p *Poller) listAccount(ctx context.Context, a *account, st *State, now time.Time) ([]BlobInfo, error) {
 	base := now
-	if !st.LastPoll.IsZero() && st.LastPoll.Before(now) {
-		base = st.LastPoll
+	if last := st.lastPoll(a); !last.IsZero() && last.Before(now) {
+		base = last
 	}
 	wanted := base.Add(-trackWindow)
 	cutoff := wanted
@@ -59,16 +100,16 @@ func (p *Poller) list(ctx context.Context, st *State, now time.Time) ([]BlobInfo
 	}
 
 	var found []BlobInfo
-	if p.roots == nil || now.Sub(p.rootsAt) >= rootRefresh {
-		all, err := p.cfg.Store.List(ctx, "")
+	if a.roots == nil || now.Sub(a.rootsAt) >= rootRefresh {
+		all, err := a.Store.List(ctx, "")
 		if err != nil {
 			return nil, err
 		}
-		p.roots, p.rootsAt = roots(all), now
+		a.roots, a.rootsAt = roots(all), now
 		found = all
 	} else {
-		for _, prefix := range dayPrefixes(p.roots, cutoff, now) {
-			blobs, err := p.cfg.Store.List(ctx, prefix)
+		for _, prefix := range dayPrefixes(a.roots, cutoff, now) {
+			blobs, err := a.Store.List(ctx, prefix)
 			if err != nil {
 				return nil, err
 			}
@@ -81,6 +122,7 @@ func (p *Poller) list(ctx context.Context, st *State, now time.Time) ([]BlobInfo
 		if !strings.HasSuffix(b.Name, blobSuffix) {
 			continue
 		}
+		b.Name = a.key(b.Name)
 		bs, tracked := st.Blobs[b.Name]
 		switch {
 		case tracked:
@@ -97,10 +139,17 @@ func (p *Poller) list(ctx context.Context, st *State, now time.Time) ([]BlobInfo
 		out = append(out, b)
 	}
 	if skipped > 0 {
-		log.Printf("[flowlogs] Skipping %d flow log blob(s) last changed more than %v ago, while the sensor was stopped or failing", skipped, maxLookback)
+		log.Printf("[flowlogs] Skipping %d flow log blob(s)%s last changed more than %v ago, while the sensor was stopped or failing", skipped, p.in(a), maxLookback)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
+}
+
+// in names the account in a log line, when there is more than one to tell apart.
+func (p *Poller) in(a *account) string {
+	if len(p.accounts) == 1 {
+		return ""
+	}
+	return " in storage account " + a.Name
 }
 
 // roots returns the distinct flow log roots (the path before /y=) in a listing.
@@ -196,13 +245,15 @@ func (p *Poller) learnNewNICs(ctx context.Context, st *State, blobs []BlobInfo, 
 }
 
 // read downloads the new part of each blob and returns its complete records, advancing each
-// blob's offset in st past them. readErr is the first download failure, for Run to report.
+// blob's offset in st past them. readErrs holds each account's first download failure, for Run
+// to report.
 //
 // A NIC's tuples must be converted in order, so once one of its blobs is not read to the end
 // (a failed download, or a read limit), its later blobs wait for the next poll. more is true
 // only when a read limit stopped a blob after making progress, so an immediate next poll has
 // something to do; a failed download waits for the next interval.
-func (p *Poller) read(ctx context.Context, st *State, blobs []BlobInfo, now time.Time, budget *readBudget) (recs []rawRecord, read int, more bool, readErr error) {
+func (p *Poller) read(ctx context.Context, st *State, blobs []BlobInfo, now time.Time, budget *readBudget) (recs []rawRecord, read int, more bool, readErrs map[*account]error) {
+	readErrs = map[*account]error{}
 	held := map[string]bool{}
 	for _, b := range blobs {
 		nic := blobMAC(b.Name)
@@ -225,8 +276,8 @@ func (p *Poller) read(ctx context.Context, st *State, blobs []BlobInfo, now time
 		remaining := b.Size - bs.Offset
 		c, err := p.readChunk(ctx, b.Name, bs.Offset, remaining, maxBlobRead, maxRecordRead, budget)
 		if err != nil {
-			if readErr == nil {
-				readErr = err
+			if a, _ := p.owner(b.Name); readErrs[a] == nil {
+				readErrs[a] = p.wrap(a, err)
 			}
 			held[nic] = true
 			p.blobFailed(b.Name, bs, err, now)
@@ -253,7 +304,7 @@ func (p *Poller) read(ctx context.Context, st *State, blobs []BlobInfo, now time
 			bs.Scanned = b.Size
 		}
 	}
-	return recs, read, more, readErr
+	return recs, read, more, readErrs
 }
 
 // blobFailed records a failed download. Only an error about this blob gives it up: at once if
@@ -307,8 +358,9 @@ func (p *Poller) readChunk(ctx context.Context, name string, offset, remaining, 
 	var data []byte
 	limit := min(remaining, first, budget.left) // callers only read with budget left
 	overshooting := false
+	a, blob := p.owner(name)
 	for {
-		part, err := p.cfg.Store.Read(ctx, name, offset+int64(len(data)), limit-int64(len(data)))
+		part, err := a.Store.Read(ctx, blob, offset+int64(len(data)), limit-int64(len(data)))
 		if err != nil {
 			return chunk{}, err
 		}

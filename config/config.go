@@ -105,12 +105,14 @@ type Config struct {
 	AzureFlowLogs struct {
 		// Enabled turns the flow log poller on
 		Enabled bool `json:"enabled"`
-		// StorageAccount is the storage account the flow logs are written to
+		// StorageAccount is the storage account the flow logs are written to, or a
+		// comma-separated list of them, for VNets in several regions. Keep the first account
+		// first when adding more: its read positions are kept under its blob names alone
 		StorageAccount string `json:"storage_account"`
 		// Container holds the flow logs (default: insights-logs-flowlogflowevent)
 		Container string `json:"container"`
 		// BlobEndpoint overrides https://<storage_account>.blob.core.windows.net, for a
-		// sovereign cloud. Must be https
+		// sovereign cloud. Must be https, and works with one storage account only
 		BlobEndpoint string `json:"blob_endpoint"`
 		// ManagedIdentityClientID selects a user-assigned managed identity; empty uses the VM's
 		// system-assigned identity
@@ -142,12 +144,31 @@ func (c *Config) FlowLogVNetCIDRs() []string {
 	return splitCSV(c.AzureFlowLogs.VNetCIDRs)
 }
 
-// FlowLogEndpoint returns the blob service endpoint the flow log poller reads from.
-func (c *Config) FlowLogEndpoint() string {
-	if c.AzureFlowLogs.BlobEndpoint != "" {
-		return c.AzureFlowLogs.BlobEndpoint
+// FlowLogAccount is a storage account the flow log poller reads, and its blob service endpoint.
+type FlowLogAccount struct {
+	Name     string
+	Endpoint string
+}
+
+// FlowLogAccounts returns the storage accounts the flow log poller reads, in the configured
+// order. With blob_endpoint set there is one, at that endpoint.
+func (c *Config) FlowLogAccounts() []FlowLogAccount {
+	a := c.AzureFlowLogs
+	if a.BlobEndpoint != "" {
+		name := ""
+		if names := splitCSV(a.StorageAccount); len(names) > 0 {
+			name = names[0]
+		}
+		if u, err := url.Parse(a.BlobEndpoint); name == "" && err == nil {
+			name = u.Host
+		}
+		return []FlowLogAccount{{Name: name, Endpoint: a.BlobEndpoint}}
 	}
-	return "https://" + c.AzureFlowLogs.StorageAccount + ".blob.core.windows.net"
+	var out []FlowLogAccount
+	for _, name := range splitCSV(a.StorageAccount) {
+		out = append(out, FlowLogAccount{Name: name, Endpoint: "https://" + name + ".blob.core.windows.net"})
+	}
+	return out
 }
 
 // DefaultFlowLogContainer is where Network Watcher writes VNet flow logs.
@@ -169,11 +190,25 @@ func (config *Config) validateAzureFlowLogs() error {
 	if config.Capture.OutputDir == "" {
 		return fmt.Errorf("capture.output_dir is required when azure_flow_logs is enabled: the converted logs are written there")
 	}
+	accounts := splitCSV(a.StorageAccount)
 	if a.BlobEndpoint == "" {
-		if !storageAccountName.MatchString(a.StorageAccount) {
-			return fmt.Errorf("azure_flow_logs.storage_account must be 3 to 24 lowercase letters and digits, got %q", a.StorageAccount)
+		if len(accounts) == 0 {
+			return fmt.Errorf("azure_flow_logs.storage_account is required: one storage account, or a comma-separated list")
+		}
+		seen := map[string]bool{}
+		for _, name := range accounts {
+			if !storageAccountName.MatchString(name) {
+				return fmt.Errorf("azure_flow_logs.storage_account: each account must be 3 to 24 lowercase letters and digits, got %q", name)
+			}
+			if seen[name] {
+				return fmt.Errorf("azure_flow_logs.storage_account lists %q twice", name)
+			}
+			seen[name] = true
 		}
 	} else {
+		if len(accounts) > 1 {
+			return fmt.Errorf("azure_flow_logs.blob_endpoint supports one storage account only; list one account, and run a sensor for each further account in that cloud")
+		}
 		u, err := url.Parse(a.BlobEndpoint)
 		if err != nil || u.Scheme != "https" || u.Host == "" || (u.Path != "" && u.Path != "/") {
 			return fmt.Errorf("azure_flow_logs.blob_endpoint must be an https URL with no path, got %q", a.BlobEndpoint)

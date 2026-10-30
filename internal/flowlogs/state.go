@@ -22,9 +22,31 @@ type State struct {
 	Version int `json:"version"`
 	// LastPoll is when a poll was last committed, within ten minutes. After the sensor has been
 	// stopped or failing, the next poll looks back to it, so the blobs written meanwhile are read.
-	LastPoll  time.Time             `json:"last_poll"`
-	Blobs     map[string]*BlobState `json:"blobs"`
-	Converter *ConverterState       `json:"converter"`
+	// It is the first storage account's; AccountPolls holds every other account's, by name, so
+	// an account that cannot be listed keeps its lookback while the others are read.
+	LastPoll     time.Time             `json:"last_poll"`
+	AccountPolls map[string]time.Time  `json:"account_polls,omitempty"`
+	Blobs        map[string]*BlobState `json:"blobs"`
+	Converter    *ConverterState       `json:"converter"`
+}
+
+// lastPoll returns when a poll that listed a was last committed.
+func (s *State) lastPoll(a *account) time.Time {
+	if a.prefix == "" {
+		return s.LastPoll
+	}
+	return s.AccountPolls[a.Name]
+}
+
+func (s *State) setLastPoll(a *account, t time.Time) {
+	if a.prefix == "" {
+		s.LastPoll = t
+		return
+	}
+	if s.AccountPolls == nil {
+		s.AccountPolls = map[string]time.Time{}
+	}
+	s.AccountPolls[a.Name] = t
 }
 
 // BlobState records how far one blob has been read.

@@ -34,6 +34,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -136,14 +137,14 @@ func readLog(path, name string, newRec func() proto.Message, add func(proto.Mess
 	if path == "" {
 		return nil
 	}
-	f, err := os.Open(path)
+	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
 		return fmt.Errorf("open: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), MaxLineBytes)
@@ -288,7 +289,7 @@ func convert(fd protoreflect.FieldDescriptor, raw json.RawMessage) (protoreflect
 		return protoreflect.ValueOfFloat64(round6(f)), nil
 	case protoreflect.Uint32Kind:
 		n, err := toUint(raw, 32)
-		return protoreflect.ValueOfUint32(uint32(n)), err
+		return protoreflect.ValueOfUint32(uint32(n)), err //nolint:gosec // G115: toUint(raw, 32) keeps n within 32 bits
 	case protoreflect.Uint64Kind:
 		n, err := toUint(raw, 64)
 		return protoreflect.ValueOfUint64(n), err
@@ -334,6 +335,9 @@ func toUint(raw json.RawMessage, bits int) (uint64, error) {
 	// Zeek writes counts as integers; accept an integral float in case a writer does not.
 	f, ferr := strconv.ParseFloat(string(raw), 64)
 	if ferr != nil || f < 0 || f != float64(uint64(f)) {
+		return 0, err
+	}
+	if bits < 64 && uint64(f) >= 1<<bits {
 		return 0, err
 	}
 	return uint64(f), nil

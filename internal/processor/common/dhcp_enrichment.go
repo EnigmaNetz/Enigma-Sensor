@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
-	"github.com/google/gopacket"
-	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/pcapgo"
+	"github.com/gopacket/gopacket"
+	"github.com/gopacket/gopacket/layers"
+	"github.com/gopacket/gopacket/pcapgo"
 )
 
 // EnrichDHCPLog parses DHCP option 55 (parameter request list) from the
@@ -43,11 +44,11 @@ type packetReader interface {
 // Only BOOTREQUEST packets are examined; the first fingerprint seen per MAC
 // is kept since option 55 is a stable property of the client OS/stack.
 func ExtractDHCPFingerprints(pcapPath string) (map[string]string, error) {
-	f, err := os.Open(pcapPath)
+	f, err := os.Open(filepath.Clean(pcapPath))
 	if err != nil {
 		return nil, fmt.Errorf("open pcap: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	// Try pcapng first (Windows pktmon output); fall back to regular pcap (Linux tcpdump output).
 	var reader packetReader
@@ -66,7 +67,7 @@ func ExtractDHCPFingerprints(pcapPath string) (map[string]string, error) {
 
 	result := make(map[string]string)
 	src := gopacket.NewPacketSource(reader, reader.LinkType())
-	src.DecodeOptions.Lazy = true
+	src.Lazy = true
 
 	for packet := range src.Packets() {
 		dhcpLayer := packet.Layer(layers.LayerTypeDHCPv4)

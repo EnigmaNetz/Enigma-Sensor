@@ -23,7 +23,7 @@ func (o *output) write(rec ConnRecord) {
 		return
 	}
 	if o.f == nil {
-		if o.err = os.MkdirAll(o.dir, 0o755); o.err != nil {
+		if o.err = os.MkdirAll(o.dir, 0o750); o.err != nil {
 			return
 		}
 		if o.f, o.err = os.Create(filepath.Join(o.dir, connLog)); o.err != nil {

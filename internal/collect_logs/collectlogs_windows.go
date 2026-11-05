@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 )
 
 // ArchiveExt is the archive extension used on Windows.
@@ -18,7 +19,7 @@ const ArchiveExt = ".zip"
 func writeArchiveDefault(outName string, entries []archiveEntry, blobs []archiveBlob) (int, error) {
 	// Never overwrite an existing file. The mode has no effect on Windows: the
 	// archive takes its permissions from the folder it is written to.
-	out, err := os.OpenFile(outName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+	out, err := os.OpenFile(filepath.Clean(outName), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create archive file %s: %w", outName, err)
 	}
@@ -64,7 +65,7 @@ func addFileToZip(zipWriter *zip.Writer, entry archiveEntry) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	w, err := zipWriter.Create(entry.Name)
 	if err != nil {

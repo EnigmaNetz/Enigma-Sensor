@@ -1,7 +1,8 @@
 # Stage 1: builder
-# golang:1.25-bookworm provides Go 1.25 on Debian Bookworm (amd64)
-# libpcap-dev is required at build time for github.com/google/gopacket (CGO)
-FROM golang:1.25-bookworm AS builder
+# golang:1.27-bookworm provides Go 1.27 on Debian Bookworm (amd64)
+# libpcap-dev and CGO are not needed by the Linux build: it uses only the pure-Go
+# gopacket/pcapgo; gopacket/pcap is Windows-only.
+FROM golang:1.27-bookworm AS builder
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libpcap-dev \
@@ -15,7 +16,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 # Copy full source and compile a statically linked binary for linux/amd64.
-# CGO_ENABLED=1 is required by gopacket which wraps libpcap via cgo.
+# CGO_ENABLED=1 is kept as before; see the note on libpcap-dev above.
 COPY . .
 RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
     go build -o enigma-sensor ./cmd/enigma-sensor

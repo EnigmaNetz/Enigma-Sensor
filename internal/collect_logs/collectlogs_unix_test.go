@@ -56,13 +56,13 @@ func TestCollectLogs_Unix_ArchiveContainsExpectedFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open archive: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	gz, err := gzip.NewReader(f)
 	if err != nil {
 		t.Fatalf("failed to open gzip reader: %v", err)
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 
 	tr := tar.NewReader(gz)
 	members := map[string][]byte{}
@@ -121,13 +121,13 @@ func TestCollectLogs_Unix_MissingDirsAreHandled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open archive: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	gz, err := gzip.NewReader(f)
 	if err != nil {
 		t.Fatalf("failed to open gzip reader: %v", err)
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 
 	tr := tar.NewReader(gz)
 	found := map[string]bool{}
@@ -183,13 +183,13 @@ func TestCollectLogs_Unix_NonRegularCaptureEntry_DoesNotCorruptArchive(t *testin
 	if err != nil {
 		t.Fatalf("failed to open archive: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	gz, err := gzip.NewReader(f)
 	if err != nil {
 		t.Fatalf("failed to open gzip reader: %v", err)
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 
 	tr := tar.NewReader(gz)
 	members := map[string][]byte{}
@@ -248,12 +248,12 @@ func readArchiveMembers(t *testing.T, path string) map[string][]byte {
 	if err != nil {
 		t.Fatalf("failed to open archive: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	gz, err := gzip.NewReader(f)
 	if err != nil {
 		t.Fatalf("failed to open gzip reader: %v", err)
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 
 	members := map[string][]byte{}
 	tr := tar.NewReader(gz)

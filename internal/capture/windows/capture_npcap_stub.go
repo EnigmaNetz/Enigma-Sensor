@@ -24,5 +24,5 @@ func IsNpcapAvailable() bool {
 
 // Capture stub for non-Windows platforms
 func (c *NpcapCapturer) Capture(ctx context.Context, config common.CaptureConfig) (string, error) {
-	return "", fmt.Errorf("Npcap capture not supported on this platform")
+	return "", fmt.Errorf("npcap capture not supported on this platform")
 }

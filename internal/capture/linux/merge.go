@@ -9,9 +9,10 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 
-	"github.com/google/gopacket"
-	"github.com/google/gopacket/pcapgo"
+	"github.com/gopacket/gopacket"
+	"github.com/gopacket/gopacket/pcapgo"
 )
 
 // pcapSource is one input file in a merge, holding its next unread packet.
@@ -54,18 +55,18 @@ func mergePcapFiles(inputFiles []string, outputFile string) (err error) {
 	sources := make([]*pcapSource, 0, len(inputFiles))
 	defer func() {
 		for _, s := range sources {
-			s.file.Close()
+			_ = s.file.Close()
 		}
 	}()
 
 	for _, path := range inputFiles {
-		f, openErr := os.Open(path)
+		f, openErr := os.Open(filepath.Clean(path))
 		if openErr != nil {
 			return fmt.Errorf("failed to open %s: %w", path, openErr)
 		}
 		r, readErr := pcapgo.NewReader(bufio.NewReader(f))
 		if readErr != nil {
-			f.Close()
+			_ = f.Close()
 			return fmt.Errorf("failed to read pcap header from %s: %w", path, readErr)
 		}
 		sources = append(sources, &pcapSource{path: path, file: f, reader: r})
@@ -87,7 +88,7 @@ func mergePcapFiles(inputFiles []string, outputFile string) (err error) {
 		}
 	}
 
-	out, err := os.Create(outputFile)
+	out, err := os.Create(filepath.Clean(outputFile))
 	if err != nil {
 		return fmt.Errorf("failed to create %s: %w", outputFile, err)
 	}
@@ -96,7 +97,7 @@ func mergePcapFiles(inputFiles []string, outputFile string) (err error) {
 			err = fmt.Errorf("failed to close %s: %w", outputFile, closeErr)
 		}
 		if err != nil {
-			os.Remove(outputFile)
+			_ = os.Remove(outputFile)
 		}
 	}()
 

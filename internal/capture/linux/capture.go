@@ -36,7 +36,7 @@ func (c *LinuxCapturer) Capture(ctx context.Context, config common.CaptureConfig
 	if err == nil {
 		for _, entry := range entries {
 			if !entry.IsDir() && filepath.Ext(entry.Name()) == ".pcap" {
-				os.Remove(filepath.Join(c.outputDir, entry.Name()))
+				_ = os.Remove(filepath.Join(c.outputDir, entry.Name()))
 			}
 		}
 	}
@@ -187,7 +187,7 @@ func (c *LinuxCapturer) runMultiInterfaceCapture(ctx context.Context, interfaces
 			// Wait for process to complete
 			if err := cmd.Wait(); err != nil {
 				// Nothing will process a failed interface's partial capture
-				os.Remove(outputFile)
+				_ = os.Remove(outputFile)
 				mu.Lock()
 				captureErrors = append(captureErrors, fmt.Errorf("tcpdump capture failed for interface %s: %v", interfaceName, err))
 				mu.Unlock()
@@ -227,14 +227,14 @@ func (c *LinuxCapturer) runMultiInterfaceCapture(ctx context.Context, interfaces
 	if err := mergePcapFiles(outputFiles, mergedFile); err != nil {
 		// Nothing will process these files, so don't leave full-packet captures on disk
 		for _, file := range outputFiles {
-			os.Remove(file)
+			_ = os.Remove(file)
 		}
 		return "", fmt.Errorf("failed to merge pcap files: %w", err)
 	}
 
 	// Clean up individual interface files after successful merge
 	for _, file := range outputFiles {
-		os.Remove(file)
+		_ = os.Remove(file)
 	}
 
 	log.Printf("[capture] Successfully merged %d interface captures into: %s", len(outputFiles), mergedFile)

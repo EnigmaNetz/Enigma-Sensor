@@ -161,7 +161,7 @@ Other references: `installer/linux/zeek/README.md` (bundled Zeek packages), `ins
 
 ## Project Overview
 
-The Enigma AI Sensor is a Go 1.25 agent installed on customer machines. Each loop it:
+The Enigma AI Sensor is a Go 1.27 agent installed on customer machines. Each loop it:
 
 PCAP is packet capture; gRPC is gRPC Remote Procedure Calls.
 
@@ -190,12 +190,13 @@ go test ./...
 go test -race ./...                       # continuous integration (CI) runs this on Ubuntu, Windows and macOS
 GOOS=windows GOARCH=amd64 go vet ./...    # compile-check Windows code and tests from Linux
 GOOS=darwin GOARCH=amd64 go vet ./...
-gofmt -l .                                # no lint or format gate in CI; keep this empty
+gofmt -l .                                # no format gate in CI; keep this empty
+golangci-lint run ./...                   # CI fails on any finding, per GOOS (.golangci.yml)
 bash scripts/test-linux-install.sh        # needs docker, dos2unix, fakeroot
 ```
 
-`GOOS=windows go test` does not work from Linux (exec format error). There is no golangci-lint
-config in the repo.
+`GOOS=windows go test` does not work from Linux (exec format error). Lint with
+`GOOS=windows golangci-lint run ./...` (or `darwin`) to cover build-tagged code.
 
 ## Code Map
 

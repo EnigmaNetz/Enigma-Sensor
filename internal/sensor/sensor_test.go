@@ -33,11 +33,11 @@ func (m *mockCapturer) Capture(ctx context.Context, cfg common.CaptureConfig) (s
 	// Create the fake file so the worker can stat it
 	pcapPath := fmt.Sprintf("/tmp/fake_%d.pcap", n)
 	f, _ := os.Create(pcapPath)
-	f.Close()
+	_ = f.Close()
 	// Also create a fake .etl file to test deletion
 	etlPath := fmt.Sprintf("/tmp/fake_%d.etl", n)
 	etl, _ := os.Create(etlPath)
-	etl.Close()
+	_ = etl.Close()
 	return pcapPath, nil
 }
 
@@ -359,9 +359,13 @@ func TestAddFingerprintScriptToMainZeek_AddsDirective(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(f.Name())
-	f.WriteString("@load base/protocols/dhcp\n")
-	f.Close()
+	defer func() { _ = os.Remove(f.Name()) }()
+	if _, err := f.WriteString("@load base/protocols/dhcp\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := addFingerprintScriptToMainZeek(f.Name()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -378,9 +382,13 @@ func TestAddFingerprintScriptToMainZeek_Idempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(f.Name())
-	f.WriteString("@load base/protocols/dhcp\n@load ./dhcp-fingerprint.zeek\n")
-	f.Close()
+	defer func() { _ = os.Remove(f.Name()) }()
+	if _, err := f.WriteString("@load base/protocols/dhcp\n@load ./dhcp-fingerprint.zeek\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := addFingerprintScriptToMainZeek(f.Name()); err != nil {
 		t.Fatalf("unexpected error: %v", err)

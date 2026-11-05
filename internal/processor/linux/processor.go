@@ -44,8 +44,8 @@ type realFS struct{}
 
 func (realFS) MkdirAll(path string, perm os.FileMode) error { return os.MkdirAll(path, perm) }
 func (realFS) Stat(name string) (os.FileInfo, error)        { return os.Stat(name) }
-func (realFS) Open(name string) (*os.File, error)           { return os.Open(name) }
-func (realFS) Create(name string) (*os.File, error)         { return os.Create(name) }
+func (realFS) Open(name string) (*os.File, error)           { return os.Open(filepath.Clean(name)) }
+func (realFS) Create(name string) (*os.File, error)         { return os.Create(filepath.Clean(name)) }
 func (realFS) Rename(oldpath, newpath string) error         { return os.Rename(oldpath, newpath) }
 
 type realCmd struct{ cmd *exec.Cmd }
@@ -55,7 +55,7 @@ func (r *realCmd) Run() error { return r.cmd.Run() }
 type realCmdRunner struct{}
 
 func (realCmdRunner) Command(name string, arg ...string) Cmd {
-	return &realCmd{cmd: exec.Command(name, arg...)}
+	return &realCmd{cmd: exec.Command(name, arg...)} //nolint:gosec // G204: callers pass the fixed Zeek path and built arguments
 }
 
 // Processor implements the Processor interface for Linux

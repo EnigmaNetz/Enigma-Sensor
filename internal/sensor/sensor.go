@@ -130,7 +130,7 @@ func ensureZeekWindows() error {
 	var zipFile *os.File
 	var err error
 	for _, path := range zipPaths {
-		zipFile, err = os.Open(path)
+		zipFile, err = os.Open(filepath.Clean(path))
 		if err == nil {
 			break
 		}
@@ -138,7 +138,7 @@ func ensureZeekWindows() error {
 	if zipFile == nil {
 		return err
 	}
-	defer zipFile.Close()
+	defer func() { _ = zipFile.Close() }()
 	stat, err := zipFile.Stat()
 	if err != nil {
 		return err
@@ -153,7 +153,7 @@ func ensureZeekWindows() error {
 			return fmt.Errorf("invalid file path in zip archive: %w", err)
 		}
 
-		fpath := filepath.Join(zeekDir, f.Name)
+		fpath := filepath.Join(zeekDir, f.Name) //nolint:gosec // G305: checked by validateZipPath above and the prefix check below
 
 		// Additional security check: ensure the resolved path is within zeekDir
 		cleanPath := filepath.Clean(fpath)
@@ -175,23 +175,10 @@ func ensureZeekWindows() error {
 			}
 			continue
 		}
-		if err := os.MkdirAll(filepath.Dir(fpath), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(fpath), 0o750); err != nil {
 			return err
 		}
-		outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
-		if err != nil {
-			outFile.Close()
-			return err
-		}
-		rc, err := f.Open()
-		if err != nil {
-			outFile.Close()
-			return err
-		}
-		_, err = io.Copy(outFile, rc)
-		outFile.Close()
-		rc.Close()
-		if err != nil {
+		if err := extractZipFile(f, cleanPath); err != nil {
 			return err
 		}
 	}
@@ -225,10 +212,31 @@ func ensureZeekWindows() error {
 	return nil
 }
 
+// extractZipFile writes one archive entry to path, reporting a failed write or close.
+func extractZipFile(f *zip.File, path string) (retErr error) {
+	rc, err := f.Open()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rc.Close() }()
+	out, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode()) //nolint:gosec // G304: path checked against zip slip by the caller
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeErr := out.Close(); closeErr != nil && retErr == nil {
+			retErr = closeErr
+		}
+	}()
+	// The archive is the Zeek runtime shipped by the installer, not user input.
+	_, err = io.Copy(out, rc) //nolint:gosec // G110: trusted archive from the installer
+	return err
+}
+
 // addSamplingScriptToMainZeek adds the sampling script load directive to main.zeek if not already present
 func addSamplingScriptToMainZeek(mainZeekPath string) error {
 	// Read the current main.zeek file
-	content, err := os.ReadFile(mainZeekPath)
+	content, err := os.ReadFile(filepath.Clean(mainZeekPath))
 	if err != nil {
 		return fmt.Errorf("failed to read main.zeek: %w", err)
 	}
@@ -246,7 +254,7 @@ func addSamplingScriptToMainZeek(mainZeekPath string) error {
 	updatedContent := contentStr + "\n" + samplingLoadDirective + "\n"
 
 	// Write the updated content back
-	if err := os.WriteFile(mainZeekPath, []byte(updatedContent), 0644); err != nil {
+	if err := os.WriteFile(mainZeekPath, []byte(updatedContent), 0o600); err != nil { //nolint:gosec // G703: fixed path in the Zeek runtime
 		return fmt.Errorf("failed to write updated main.zeek: %w", err)
 	}
 
@@ -256,7 +264,7 @@ func addSamplingScriptToMainZeek(mainZeekPath string) error {
 
 // addFingerprintScriptToMainZeek adds the DHCP fingerprint script load directive to main.zeek if not already present
 func addFingerprintScriptToMainZeek(mainZeekPath string) error {
-	content, err := os.ReadFile(mainZeekPath)
+	content, err := os.ReadFile(filepath.Clean(mainZeekPath))
 	if err != nil {
 		return fmt.Errorf("failed to read main.zeek: %w", err)
 	}
@@ -271,7 +279,7 @@ func addFingerprintScriptToMainZeek(mainZeekPath string) error {
 
 	updatedContent := contentStr + "\n" + fingerprintLoadDirective + "\n"
 
-	if err := os.WriteFile(mainZeekPath, []byte(updatedContent), 0644); err != nil {
+	if err := os.WriteFile(mainZeekPath, []byte(updatedContent), 0o600); err != nil { //nolint:gosec // G703: fixed path in the Zeek runtime
 		return fmt.Errorf("failed to write updated main.zeek: %w", err)
 	}
 
@@ -505,10 +513,7 @@ func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, proce
 	}
 
 	// Optionally handle Ctrl+C for graceful shutdown
-	doSignals := true
-	if disableSignals {
-		doSignals = false
-	}
+	doSignals := !disableSignals
 	var sigCh chan os.Signal
 	if doSignals {
 		sigCh = make(chan os.Signal, 1)
@@ -621,7 +626,7 @@ func RunSensor(ctx context.Context, cfg *config.Config, capturer Capturer, proce
 		}
 		timestamp := time.Now().UTC().Format("20060102T150405.000000000Z")
 		zeekOutDir := filepath.Join(outputDir, "zeek_out_"+timestamp)
-		if err := os.MkdirAll(zeekOutDir, 0755); err != nil {
+		if err := os.MkdirAll(zeekOutDir, 0o750); err != nil {
 			closeQueue()
 			return err
 		}

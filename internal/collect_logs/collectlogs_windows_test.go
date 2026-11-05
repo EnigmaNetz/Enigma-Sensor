@@ -50,7 +50,7 @@ func TestCollectLogs_Windows_CreatesZipWithExpectedFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open zip: %v", err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	files := map[string]bool{}
 	for _, f := range r.File {
@@ -95,7 +95,7 @@ func TestCollectLogs_Windows_MissingDirsAreHandled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open zip: %v", err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	var foundConfig, foundVersion, foundSysinfo bool
 	for _, f := range r.File {
@@ -147,7 +147,7 @@ func readArchiveMembers(t *testing.T, path string) map[string][]byte {
 	if err != nil {
 		t.Fatalf("failed to open zip: %v", err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	members := map[string][]byte{}
 	for _, f := range r.File {
@@ -156,7 +156,7 @@ func readArchiveMembers(t *testing.T, path string) map[string][]byte {
 			t.Fatalf("failed to open member %s: %v", f.Name, err)
 		}
 		buf, err := io.ReadAll(rc)
-		rc.Close()
+		_ = rc.Close()
 		if err != nil {
 			t.Fatalf("failed to read member %s: %v", f.Name, err)
 		}

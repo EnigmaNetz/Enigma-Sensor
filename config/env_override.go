@@ -99,7 +99,7 @@ func setFieldFromString(field reflect.Value, value string) error {
 			return err
 		}
 		field.SetBool(b)
-	case reflect.Ptr:
+	case reflect.Pointer:
 		// Handle pointer types by allocating and setting the underlying value
 		if field.IsNil() {
 			field.Set(reflect.New(field.Type().Elem()))

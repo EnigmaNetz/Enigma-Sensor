@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"EnigmaNetz/Enigma-Go-Sensor/internal/records"
 )
@@ -17,17 +18,17 @@ import (
 // returned with its line number. Blank lines are kept without calling edit. A missing file
 // returns 0 and no error. The result is the number of lines dropped or changed.
 func rewriteLog(path string, edit func(line []byte) ([]byte, error)) (int, error) {
-	in, err := os.Open(path)
+	in, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return 0, nil
 		}
 		return 0, fmt.Errorf("read: %w", err)
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 
 	tmpPath := path + ".rewrite"
-	out, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	out, err := os.OpenFile(filepath.Clean(tmpPath), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return 0, fmt.Errorf("create temporary file: %w", err)
 	}
@@ -46,7 +47,7 @@ func rewriteLog(path string, edit func(line []byte) ([]byte, error)) (int, error
 		return 0, err
 	}
 	// Close the log before replacing it: Windows cannot rename over an open file.
-	in.Close()
+	_ = in.Close()
 	if err := os.Rename(tmpPath, path); err != nil {
 		return 0, fmt.Errorf("replace log: %w", err)
 	}

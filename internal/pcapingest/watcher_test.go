@@ -153,7 +153,9 @@ func TestWatcher_DetectsNewPCAP(t *testing.T) {
 
 	// Create subdirectories and place a file
 	incomingDir := filepath.Join(dir, "incoming")
-	os.MkdirAll(incomingDir, 0755)
+	if err := os.MkdirAll(incomingDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	createTestPCAP(t, incomingDir, "test.pcap")
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -166,7 +168,9 @@ func TestWatcher_DetectsNewPCAP(t *testing.T) {
 	// Wait for the file to be processed
 	time.Sleep(200 * time.Millisecond)
 	cancel()
-	<-done
+	if err := <-done; err != nil {
+		t.Errorf("Run returned %v", err)
+	}
 
 	if proc.calls != 1 {
 		t.Errorf("Expected 1 processor call, got %d", proc.calls)
@@ -187,7 +191,9 @@ func TestWatcher_MoveToProcessed(t *testing.T) {
 
 	incomingDir := filepath.Join(dir, "incoming")
 	processedDir := filepath.Join(dir, "processed")
-	os.MkdirAll(incomingDir, 0755)
+	if err := os.MkdirAll(incomingDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	createTestPCAP(t, incomingDir, "test.pcap")
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -198,7 +204,9 @@ func TestWatcher_MoveToProcessed(t *testing.T) {
 
 	time.Sleep(200 * time.Millisecond)
 	cancel()
-	<-done
+	if err := <-done; err != nil {
+		t.Errorf("Run returned %v", err)
+	}
 
 	// File should be in processed
 	if _, err := os.Stat(filepath.Join(processedDir, "test.pcap")); err != nil {
@@ -217,7 +225,9 @@ func TestWatcher_MoveToFailed(t *testing.T) {
 
 	incomingDir := filepath.Join(dir, "incoming")
 	failedDir := filepath.Join(dir, "failed")
-	os.MkdirAll(incomingDir, 0755)
+	if err := os.MkdirAll(incomingDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	createTestPCAP(t, incomingDir, "bad.pcap")
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -228,7 +238,9 @@ func TestWatcher_MoveToFailed(t *testing.T) {
 
 	time.Sleep(200 * time.Millisecond)
 	cancel()
-	<-done
+	if err := <-done; err != nil {
+		t.Errorf("Run returned %v", err)
+	}
 
 	// File should be in failed
 	if _, err := os.Stat(filepath.Join(failedDir, "bad.pcap")); err != nil {
@@ -245,7 +257,9 @@ func TestWatcher_IgnoresNonPCAP(t *testing.T) {
 	w, dir := newTestWatcher(t, proc, up)
 
 	incomingDir := filepath.Join(dir, "incoming")
-	os.MkdirAll(incomingDir, 0755)
+	if err := os.MkdirAll(incomingDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	createTestPCAP(t, incomingDir, "readme.txt")
 	createTestPCAP(t, incomingDir, "data.csv")
 
@@ -257,7 +271,9 @@ func TestWatcher_IgnoresNonPCAP(t *testing.T) {
 
 	time.Sleep(200 * time.Millisecond)
 	cancel()
-	<-done
+	if err := <-done; err != nil {
+		t.Errorf("Run returned %v", err)
+	}
 
 	if proc.calls != 0 {
 		t.Errorf("Expected 0 processor calls for non-PCAP files, got %d", proc.calls)
@@ -303,7 +319,9 @@ func TestWatcher_EmptyDirectory(t *testing.T) {
 
 	time.Sleep(150 * time.Millisecond)
 	cancel()
-	<-done
+	if err := <-done; err != nil {
+		t.Errorf("Run returned %v", err)
+	}
 
 	if proc.calls != 0 {
 		t.Errorf("Expected 0 processor calls for empty dir, got %d", proc.calls)
@@ -320,7 +338,9 @@ func TestWatcher_PcapngExtension(t *testing.T) {
 	w, dir := newTestWatcher(t, proc, up)
 
 	incomingDir := filepath.Join(dir, "incoming")
-	os.MkdirAll(incomingDir, 0755)
+	if err := os.MkdirAll(incomingDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	createTestPCAP(t, incomingDir, "capture.pcapng")
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -331,7 +351,9 @@ func TestWatcher_PcapngExtension(t *testing.T) {
 
 	time.Sleep(200 * time.Millisecond)
 	cancel()
-	<-done
+	if err := <-done; err != nil {
+		t.Errorf("Run returned %v", err)
+	}
 
 	if proc.calls != 1 {
 		t.Errorf("Expected 1 processor call for .pcapng file, got %d", proc.calls)
@@ -349,7 +371,9 @@ func TestWatcher_APIGone(t *testing.T) {
 	w, dir := newTestWatcher(t, proc, up)
 
 	incomingDir := filepath.Join(dir, "incoming")
-	os.MkdirAll(incomingDir, 0755)
+	if err := os.MkdirAll(incomingDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	createTestPCAP(t, incomingDir, "test.pcap")
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -419,10 +443,18 @@ func TestWatcher_EndToEnd(t *testing.T) {
 	processingDir := filepath.Join(dir, "processing")
 	processedDir := filepath.Join(dir, "processed")
 	failedDir := filepath.Join(dir, "failed")
-	os.MkdirAll(incomingDir, 0755)
-	os.MkdirAll(processingDir, 0755)
-	os.MkdirAll(processedDir, 0755)
-	os.MkdirAll(failedDir, 0755)
+	if err := os.MkdirAll(incomingDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(processingDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(processedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(failedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	// Create a real valid PCAP file in incoming directory
 	pcapPath := filepath.Join(incomingDir, "test.pcap")

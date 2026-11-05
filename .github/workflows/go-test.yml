@@ -9,6 +9,35 @@ permissions:
   contents: read
 
 jobs:
+  # golangci-lint with .golangci.yml (govet, staticcheck, errcheck, gosec). Report-only
+  # (continue-on-error) until the existing findings are fixed; then drop continue-on-error
+  # so it gates. GOOS lints each platform's build-tagged code from one Linux runner.
+  lint:
+    name: Lint (${{ matrix.goos }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [linux, windows, darwin]
+    env:
+      GOOS: ${{ matrix.goos }}
+      GOARCH: amd64
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Set up Go
+      uses: actions/setup-go@v7
+      with:
+        go-version: '1.27.x'
+        cache: false
+
+    - name: Run golangci-lint (report-only)
+      continue-on-error: true
+      uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a  # v9.3.0
+      with:
+        version: v2.15.0
+
   test:
     # The Go version is left out of the name so the required check names in the
     # main ruleset stay the same across Go upgrades.
@@ -17,7 +46,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        go-version: ['1.25.x']
+        go-version: ['1.27.x']
 
     steps:
     - uses: actions/checkout@v7
@@ -55,13 +84,10 @@ jobs:
         git diff --exit-code THIRD_PARTY_NOTICES
 
     # ReportGenerator reads Cobertura, not Go profiles; the converter comes through Go's
-    # checksum-verified module proxy. It needs Go >= 1.25, so this step alone may fetch
-    # that toolchain; the tests above still run on the matrix Go version.
+    # checksum-verified module proxy and runs on the matrix Go version.
     - name: Convert coverage to Cobertura
       if: always() && matrix.os == 'ubuntu-latest'
       continue-on-error: true
-      env:
-        GOTOOLCHAIN: auto
       run: |
         if [ -f coverage.out ]; then
           go tool cover -func=coverage.out | tail -1

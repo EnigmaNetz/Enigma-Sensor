@@ -1,0 +1,19 @@
+version: "2"
+
+# Lint config for the Go sensor (B1CF-2162). CI runs it on Linux, Windows and
+# macOS so each platform's build-tagged code is checked.
+linters:
+  default: none
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - gosec
+  exclusions:
+    # Skip generated protobuf and gRPC code.
+    generated: lax
+
+issues:
+  # Report every finding, not the first 50 per linter or 3 per message.
+  max-issues-per-linter: 0
+  max-same-issues: 0

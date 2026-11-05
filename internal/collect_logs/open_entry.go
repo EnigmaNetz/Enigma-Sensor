@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -61,7 +62,7 @@ func openEntry(e archiveEntry) (io.ReadCloser, int64, time.Time, error) {
 }
 
 func openRegular(path string) (*os.File, os.FileInfo, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -82,8 +83,9 @@ func gunzippedSize(r io.Reader) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer gz.Close()
-	return io.Copy(io.Discard, gz)
+	defer func() { _ = gz.Close() }()
+	// The sensor's own rotated logs, counted into io.Discard: nothing is held in memory.
+	return io.Copy(io.Discard, gz) //nolint:gosec // G110: input is the sensor's own log
 }
 
 func isGzip(path string) bool {

@@ -12,6 +12,12 @@ linters:
   exclusions:
     # Skip generated protobuf and gRPC code.
     generated: lax
+    rules:
+      # gosec targets shipped code. Tests read and write fixtures in t.TempDir(),
+      # which trips its file-path and permission rules without being a risk.
+      - path: _test\.go
+        linters:
+          - gosec
 
 issues:
   # Report every finding, not the first 50 per linter or 3 per message.

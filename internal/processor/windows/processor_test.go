@@ -78,7 +78,7 @@ func TestProcessPCAP(t *testing.T) {
 	if err := os.MkdirAll(zeekBaseDir, 0755); err != nil {
 		t.Fatalf("Failed to create zeekBaseDir: %v", err)
 	}
-	defer os.RemoveAll("zeek-windows")
+	defer func() { _ = os.RemoveAll("zeek-windows") }()
 	fs := &mockFS{
 		existing: map[string]bool{
 			filepath.Clean(runDir + "/conn.log"): true,
@@ -104,7 +104,7 @@ func TestProcessPCAP_ZeekWritesJSONLogs(t *testing.T) {
 	if err := os.MkdirAll(zeekBaseDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll("zeek-windows")
+	defer func() { _ = os.RemoveAll("zeek-windows") }()
 	fs := &mockFS{
 		existing:  map[string]bool{filepath.Clean(filepath.Join(zeekBaseDir, "bin", "zeek.exe")): true},
 		renameErr: map[string]error{},

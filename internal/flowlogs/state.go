@@ -111,7 +111,7 @@ func decodeState(data []byte) (*State, error) {
 // file that cannot be read as state is renamed to <path>.corrupt and an empty state returned,
 // so the sensor keeps running; the cost is rereading the blobs still in the tracking window.
 func loadState(path string) ([]byte, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if errors.Is(err, os.ErrNotExist) {
 		return json.Marshal(newState())
 	}
@@ -133,11 +133,11 @@ func loadState(path string) ([]byte, error) {
 // so a crash leaves either the old state or the new one, never part of one. It holds addresses
 // seen on the customer's network, so only the sensor's user can read it.
 func saveState(path string, data []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return fmt.Errorf("create flow log state dir: %w", err)
 	}
 	tmp := path + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	f, err := os.OpenFile(filepath.Clean(tmp), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return fmt.Errorf("write flow log state: %w", err)
 	}

@@ -93,7 +93,7 @@ func main() {
 	// Set up standard logger to log to file if specified
 	if cfg.Logging.File != "" {
 		logDir := filepath.Dir(cfg.Logging.File)
-		if err := os.MkdirAll(logDir, 0755); err != nil {
+		if err := os.MkdirAll(logDir, 0o750); err != nil {
 			log.Fatalf("Failed to create log directory: %v", err)
 		}
 		// Use lumberjack for log rotation based on config

@@ -32,9 +32,10 @@ func NewNpcapCapturer() *NpcapCapturer {
 // IsNpcapAvailable checks if Npcap is installed and usable
 func IsNpcapAvailable() bool {
 	// Check if Npcap service is running
+	// WINDIR comes from the service environment, not from a user.
 	npcapDllPath := filepath.Join(os.Getenv("WINDIR"), "System32", "Npcap", "wpcap.dll")
-	if _, err := os.Stat(npcapDllPath); err == nil {
-		log.Printf("[capture] Npcap detected at %s", npcapDllPath)
+	if _, err := os.Stat(npcapDllPath); err == nil { //nolint:gosec // G703: fixed path under WINDIR
+		log.Printf("[capture] Npcap detected at %s", npcapDllPath) //nolint:gosec // G706: fixed path under WINDIR
 		return true
 	}
 
@@ -52,7 +53,7 @@ func IsNpcapAvailable() bool {
 // Capture runs Npcap capture with promiscuous mode and returns the output file path
 // If interface is "any" or "all", captures from all active interfaces in parallel
 // Supports comma-separated interface list (e.g., "iface1,iface2") for multi-interface capture
-func (c *NpcapCapturer) Capture(ctx context.Context, captureConfig common.CaptureConfig) (string, error) {
+func (c *NpcapCapturer) Capture(ctx context.Context, captureConfig common.CaptureConfig) (_ string, retErr error) {
 	c.outputDir = captureConfig.OutputDir
 
 	// Clean output directory of .pcap files before capture
@@ -60,7 +61,7 @@ func (c *NpcapCapturer) Capture(ctx context.Context, captureConfig common.Captur
 	if err == nil {
 		for _, entry := range entries {
 			if !entry.IsDir() && filepath.Ext(entry.Name()) == ".pcap" {
-				os.Remove(filepath.Join(c.outputDir, entry.Name()))
+				_ = os.Remove(filepath.Join(c.outputDir, entry.Name()))
 			}
 		}
 	}
@@ -107,11 +108,15 @@ func (c *NpcapCapturer) Capture(ctx context.Context, captureConfig common.Captur
 	timestamp := time.Now().Format("20060102_150405")
 	pcapFile := filepath.Join(c.outputDir, fmt.Sprintf("capture_%s.pcap", timestamp))
 
-	f, err := os.Create(pcapFile)
+	f, err := os.Create(filepath.Clean(pcapFile))
 	if err != nil {
 		return "", fmt.Errorf("failed to create pcap file: %w", err)
 	}
-	defer f.Close()
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil && retErr == nil {
+			retErr = fmt.Errorf("failed to close pcap file: %w", closeErr)
+		}
+	}()
 
 	// For multi-interface capture, we need to use a consistent link type
 	// We'll use Ethernet (1) as the standard link type

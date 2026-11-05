@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 )
 
 // ArchiveExt is the archive extension used on non-Windows platforms.
@@ -19,7 +20,7 @@ const ArchiveExt = ".tar.gz"
 // counted.
 func writeArchiveDefault(outName string, entries []archiveEntry, blobs []archiveBlob) (int, error) {
 	// The archive holds logs and captures, so only its owner may read it.
-	out, err := os.OpenFile(outName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	out, err := os.OpenFile(filepath.Clean(outName), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create archive file %s: %w", outName, err)
 	}
@@ -80,7 +81,7 @@ func addFileToTar(tarWriter *tar.Writer, entry archiveEntry) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	hdr := &tar.Header{
 		Name:     entry.Name,

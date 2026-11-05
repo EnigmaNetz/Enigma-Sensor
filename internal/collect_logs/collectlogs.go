@@ -122,7 +122,7 @@ func collect(outName string, src sources) (size int64, retErr error) {
 		fmt.Fprintf(&notes, "config: none found (tried %s)\n", strings.Join(src.configPaths, ", "))
 	} else {
 		fmt.Fprintf(&notes, "config: %s\n", configPath)
-		data, readErr := os.ReadFile(configPath)
+		data, readErr := os.ReadFile(filepath.Clean(configPath))
 		if readErr != nil {
 			fmt.Fprintf(&notes, "config not archived: %v\n", readErr)
 		}
@@ -349,9 +349,9 @@ func getSystemInfo() string {
 	b.WriteString("\nGo version: ")
 	b.WriteString(runtime.Version())
 	b.WriteString("\nNumCPU: ")
-	b.WriteString(fmt.Sprintf("%d", runtime.NumCPU()))
+	fmt.Fprintf(&b, "%d", runtime.NumCPU())
 	b.WriteString("\nGOMAXPROCS: ")
-	b.WriteString(fmt.Sprintf("%d", runtime.GOMAXPROCS(0)))
+	fmt.Fprintf(&b, "%d", runtime.GOMAXPROCS(0))
 	b.WriteString("\n")
 	// Hostname
 	if hn, err := os.Hostname(); err == nil {
@@ -362,14 +362,14 @@ func getSystemInfo() string {
 	// Memory stats
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	b.WriteString(fmt.Sprintf("Memory: Alloc=%d TotalAlloc=%d Sys=%d NumGC=%d\n", m.Alloc, m.TotalAlloc, m.Sys, m.NumGC))
+	fmt.Fprintf(&b, "Memory: Alloc=%d TotalAlloc=%d Sys=%d NumGC=%d\n", m.Alloc, m.TotalAlloc, m.Sys, m.NumGC)
 
 	// OS-specific details
 	switch runtime.GOOS {
 	case "linux":
 		// /etc/os-release
 		if f, err := os.Open("/etc/os-release"); err == nil {
-			defer f.Close()
+			defer func() { _ = f.Close() }()
 			b.WriteString("/etc/os-release:\n")
 			scanner := bufio.NewScanner(f)
 			for scanner.Scan() {

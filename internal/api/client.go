@@ -131,7 +131,7 @@ func NewLogUploader(serverAddr string, apiKey string, networkID string, captureI
 	if caCertFile == "" {
 		creds = credentials.NewClientTLSFromCert(nil, host)
 	} else {
-		pem, err := os.ReadFile(caCertFile)
+		pem, err := os.ReadFile(filepath.Clean(caCertFile))
 		if err != nil {
 			return nil, fmt.Errorf("failed to read CA certificate file %s: %w", caCertFile, err)
 		}
@@ -353,7 +353,7 @@ func (u *LogUploader) retryBackoff(retry int) time.Duration {
 	if d <= 0 {
 		return 0
 	}
-	return d/2 + rand.N(d/2+1)
+	return d/2 + rand.N(d/2+1) //nolint:gosec // G404: retry jitter, not a security value
 }
 
 // waitBeforeRetry sleeps for the backoff before retry number retry, returning
@@ -446,7 +446,7 @@ func (u *LogUploader) bufferSave(data []byte, ext string) error {
 	if u.bufferDir == "" {
 		return nil
 	}
-	if err := os.MkdirAll(u.bufferDir, 0o755); err != nil {
+	if err := os.MkdirAll(u.bufferDir, 0o750); err != nil {
 		return fmt.Errorf("failed to create buffer dir: %w", err)
 	}
 	// Name encoded with timestamp for ordering
@@ -535,7 +535,7 @@ func (u *LogUploader) flushBuffer(ctx context.Context) error {
 			continue
 		}
 		// Try upload
-		data, readErr := os.ReadFile(full)
+		data, readErr := os.ReadFile(filepath.Clean(full))
 		if readErr != nil {
 			// If unreadable, remove to avoid blocking
 			_ = os.Remove(full)

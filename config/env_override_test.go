@@ -419,7 +419,7 @@ func TestApplyEnvOverrides_AllFieldEnvVarNames(t *testing.T) {
 				} else {
 					sentinel = "true"
 				}
-			case reflect.Ptr:
+			case reflect.Pointer:
 				// Dereference to get the element kind
 				elemKind := fieldVal.Type().Elem().Kind()
 				switch elemKind {

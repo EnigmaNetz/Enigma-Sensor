@@ -130,7 +130,7 @@ CI runs in GitHub Actions.
 
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
-| `go-test.yml` | Push to `main`, every PR | `go test -v -race ./...` on Ubuntu, Windows and macOS; on Ubuntu, also fails if `THIRD_PARTY_NOTICES` is out of date; `golangci-lint` (`.golangci.yml`) for Linux, Windows and macOS, report-only for now |
+| `go-test.yml` | Push to `main`, every PR | `go test -v -race ./...` on Ubuntu, Windows and macOS; on Ubuntu, also fails if `THIRD_PARTY_NOTICES` is out of date; `golangci-lint` (`.golangci.yml`) for Linux, Windows and macOS, failing on any finding |
 | `linux-install-test.yml` | Push to `main`, every PR | `scripts/test-linux-install.sh`, then builds the Docker image and checks its Zeek is 8.0.x |
 | `windows-install-test.yml` | Push to `main`, every PR | Builds the Windows installer and runs `scripts/test-windows-install.ps1` |
 | `pr-build-artifacts.yml` | PR labelled `build:windows`, `build:linux`, `build:macos` or `build:all` | Builds installers and binaries as workflow artifacts (kept 7 days) |
@@ -138,9 +138,8 @@ CI runs in GitHub Actions.
 | `proto-drift.yml` | Push to `main`, every PR into `main` | Fails if `internal/api/ingest/sensor_records.proto` differs from Enigma-Publisher's copy on `stage`, read with a scoped GitHub App token |
 | `docker-publish.yml` | `v*` tag push | Builds and pushes `ghcr.io/enigmanetz/enigma-sensor` tagged with the version, `major.minor`, `major` and `latest` |
 
-`pr-build-artifacts.yml` and `go-build-release.yml` both call `build-artifacts-reusable.yml`. The lint
-job does not fail the build yet, and there is no format check in CI; run `gofmt -l .` before
-opening a PR.
+`pr-build-artifacts.yml` and `go-build-release.yml` both call `build-artifacts-reusable.yml`. There is
+no format check in CI; run `gofmt -l .` before opening a PR.
 
 ### The upload contract
 

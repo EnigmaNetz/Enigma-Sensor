@@ -27,7 +27,7 @@ func readTSV(t *testing.T, path string) []map[string]any {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	var fields, types []string
 	var rows []map[string]any
 	scanner := bufio.NewScanner(f)
@@ -376,4 +376,28 @@ func TestRead(t *testing.T) {
 			t.Fatalf("err = %v", err)
 		}
 	})
+}
+
+// An integral float above the field's width must fail, not wrap when stored in a uint32.
+func TestToUintRejectsFloatOutOfRange(t *testing.T) {
+	cases := []struct {
+		raw     string
+		bits    int
+		want    uint64
+		wantErr bool
+	}{
+		{"4294967295", 32, 4294967295, false},
+		{"4294967295.0", 32, 4294967295, false},
+		{"4294967296", 32, 0, true},
+		{"4294967296.0", 32, 0, true},
+		{"4294967296.0", 64, 4294967296, false},
+		{"-1.0", 32, 0, true},
+		{"1.5", 32, 0, true},
+	}
+	for _, c := range cases {
+		got, err := toUint([]byte(c.raw), c.bits)
+		if (err != nil) != c.wantErr || got != c.want {
+			t.Errorf("toUint(%s, %d) = %d, %v; want %d, error %v", c.raw, c.bits, got, err, c.want, c.wantErr)
+		}
+	}
 }

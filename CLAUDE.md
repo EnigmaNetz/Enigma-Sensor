@@ -191,7 +191,7 @@ go test -race ./...                       # continuous integration (CI) runs thi
 GOOS=windows GOARCH=amd64 go vet ./...    # compile-check Windows code and tests from Linux
 GOOS=darwin GOARCH=amd64 go vet ./...
 gofmt -l .                                # no format gate in CI; keep this empty
-golangci-lint run ./...                   # CI runs it report-only per GOOS (.golangci.yml)
+golangci-lint run ./...                   # CI fails on any finding, per GOOS (.golangci.yml)
 bash scripts/test-linux-install.sh        # needs docker, dos2unix, fakeroot
 ```
 

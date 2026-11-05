@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -328,14 +329,8 @@ func (config *Config) ValidateAndSetDefaults() error {
 	if config.EnigmaAPI.Server == "" {
 		config.EnigmaAPI.Server = "api.enigmaai.net:443"
 	}
-	if config.EnigmaAPI.Upload == false {
-		config.EnigmaAPI.Upload = false
-	}
 	if config.EnigmaAPI.MaxPayloadSizeMB == 0 {
 		config.EnigmaAPI.MaxPayloadSizeMB = 25 // 25MB default
-	}
-	if config.Capture.Loop != true {
-		config.Capture.Loop = false
 	}
 	if config.Capture.Interface == "" {
 		config.Capture.Interface = "any"
@@ -505,7 +500,7 @@ func LoadConfig(configPath string) (*Config, error) {
 	}
 
 	// Read config file
-	data, err := os.ReadFile(configPath)
+	data, err := os.ReadFile(filepath.Clean(configPath))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}

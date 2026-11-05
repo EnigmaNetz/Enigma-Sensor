@@ -22,7 +22,7 @@ func writeTestPcap(t *testing.T, path string, linkType layers.LinkType, tag byte
 	if err != nil {
 		t.Fatalf("create %s: %v", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	w := pcapgo.NewWriter(f)
 	if err := w.WriteFileHeader(65535, linkType); err != nil {
 		t.Fatalf("write header: %v", err)
@@ -41,7 +41,7 @@ func readTestPcap(t *testing.T, path string) [][]byte {
 	if err != nil {
 		t.Fatalf("open %s: %v", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	r, err := pcapgo.NewReader(f)
 	if err != nil {
 		t.Fatalf("read header: %v", err)

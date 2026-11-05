@@ -276,7 +276,7 @@ func TestWindowsCapturer_InterfaceSecurity(t *testing.T) {
 
 			// Should fail at interface validation, not command execution
 			errMsg := err.Error()
-			if !(containsString(errMsg, "invalid interface") || containsString(errMsg, "failed to parse interface")) {
+			if !containsString(errMsg, "invalid interface") && !containsString(errMsg, "failed to parse interface") {
 				t.Errorf("Expected interface validation error for %q, got: %v", tt.input, err)
 			}
 

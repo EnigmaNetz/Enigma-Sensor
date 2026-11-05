@@ -198,7 +198,7 @@ func getLinuxVersion() string {
 	if err != nil {
 		return "Linux"
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	var name, version string
 	scanner := bufio.NewScanner(file)
@@ -239,7 +239,7 @@ func getZeekVersion() string {
 		zeekPath = "/opt/zeek/bin/zeek"
 	}
 
-	cmd := exec.Command(zeekPath, "--version")
+	cmd := exec.Command(zeekPath, "--version") //nolint:gosec // G204: zeekPath is one of two fixed paths above
 	output, err := cmd.Output()
 	if err != nil {
 		return ""

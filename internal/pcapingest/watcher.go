@@ -69,7 +69,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 	failedDir := filepath.Join(w.watchDir, "failed")
 
 	for _, dir := range []string{incomingDir, processingDir, processedDir, failedDir} {
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return fmt.Errorf("failed to create directory %s: %w", dir, err)
 		}
 	}

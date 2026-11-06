@@ -14,6 +14,8 @@ jobs:
       contains(github.event.pull_request.labels.*.name, 'build:linux') ||
       contains(github.event.pull_request.labels.*.name, 'build:macos') ||
       contains(github.event.pull_request.labels.*.name, 'build:all')
+    permissions:
+      contents: read
     uses: ./.github/workflows/build-artifacts-reusable.yml
     with:
       artifact_prefix: PR${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}

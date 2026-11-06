@@ -14,6 +14,7 @@ jobs:
   lint:
     name: Lint (${{ matrix.goos }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -23,10 +24,10 @@ jobs:
       GOARCH: amd64
 
     steps:
-    - uses: actions/checkout@v7
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
     - name: Set up Go
-      uses: actions/setup-go@v7
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
       with:
         go-version: '1.27.x'
         cache: false
@@ -41,16 +42,19 @@ jobs:
     # main ruleset stay the same across Go upgrades.
     name: Run Tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         go-version: ['1.27.x']
 
     steps:
-    - uses: actions/checkout@v7
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      with:
+        fetch-depth: 2  # the merge commit and its parents; the coverage steps read the PR base
 
     - name: Set up Go
-      uses: actions/setup-go@v7
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
       with:
         go-version: ${{ matrix.go-version }}
         cache: true
@@ -68,7 +72,7 @@ jobs:
       run: rm -f .out
 
     # The ubuntu leg also writes a coverage profile (atomic is required with -race).
-    # Platform-gated packages are measured only on the leg that runs them.
+    # Only that leg is measured, so Windows-only and macOS-only code counts toward no coverage figure.
     - name: Run tests
       run: go test -v -race ${{ matrix.os == 'ubuntu-latest' && '-coverprofile=coverage.out -covermode=atomic' || '' }} ./...
 
@@ -101,7 +105,7 @@ jobs:
       with:
         dotnet-version: 8.x
 
-    - name: Summarize unit coverage (report-only)
+    - name: Summarize unit coverage
       if: always() && matrix.os == 'ubuntu-latest'
       continue-on-error: true
       uses: danielpalme/ReportGenerator-GitHub-Action@861674232075b2c6bd1405a04c4bb9b150653e81  # v5.5.12
@@ -109,7 +113,7 @@ jobs:
         reports: coverage.xml
         targetdir: coverage-report-unit
         reporttypes: MarkdownSummaryGithub;JsonSummary
-        title: Unit coverage (report-only)
+        title: Unit coverage
 
     - name: Add unit coverage to the job summary
       if: always() && matrix.os == 'ubuntu-latest'
@@ -133,3 +137,38 @@ jobs:
           coverage-report-unit/Summary.json
           coverage-report-unit/SummaryGithub.md
         if-no-files-found: ignore
+
+    # The coverage rule (B1CF-2165), on the Linux leg of PRs. These are steps here, not a job, so a
+    # failure fails `Run Tests (ubuntu-latest)`, which the main ruleset already requires. This repo
+    # is public and Enigma-Release is private, so it cannot call the shared coverage template:
+    # scripts/ci/gates.py is a copy of that template's gate, and diff-cover matches its pin.
+    - name: Find the PR base
+      id: base
+      if: github.event_name == 'pull_request' && matrix.os == 'ubuntu-latest'
+      run: echo "sha=$(git rev-parse HEAD^1)" >> "$GITHUB_OUTPUT"
+
+    - name: Check the coverage floor
+      if: github.event_name == 'pull_request' && matrix.os == 'ubuntu-latest'
+      env:
+        BASE_SHA: ${{ steps.base.outputs.sha }}
+      run: |
+        python3 scripts/ci/gates.py coverage --reports coverage.xml \
+          --floor-file .github/coverage-floors.json --suite unit --base-sha "$BASE_SHA"
+
+    - name: Require 80% coverage on changed lines
+      if: github.event_name == 'pull_request' && matrix.os == 'ubuntu-latest'
+      env:
+        BASE_SHA: ${{ steps.base.outputs.sha }}
+      # *.pb.go is generated, and proto-drift.yml forces regenerating it, so it isn't testable here.
+      run: |
+        status=0
+        pipx run diff-cover==10.6.0 coverage.xml --compare-branch "$BASE_SHA" --exclude '*.pb.go' \
+          --fail-under 80 > diff-cover.txt 2>&1 || status=$?
+        cat diff-cover.txt
+        {
+          echo "### Changed-line coverage (need 80%)"
+          echo '```'
+          cat diff-cover.txt
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
+        exit "$status"

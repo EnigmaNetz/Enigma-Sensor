@@ -130,7 +130,7 @@ CI runs in GitHub Actions.
 
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
-| `go-test.yml` | Push to `main`, every PR | `go test -v -race ./...` on Ubuntu, Windows and macOS; on Ubuntu, also fails if `THIRD_PARTY_NOTICES` is out of date; `golangci-lint` (`.golangci.yml`) for Linux, Windows and macOS, failing on any finding |
+| `go-test.yml` | Push to `main`, every PR | `go test -v -race ./...` on Ubuntu, Windows and macOS; on Ubuntu, also fails if `THIRD_PARTY_NOTICES` is out of date and, on PRs, enforces coverage (line coverage at or above the floor in `.github/coverage-floors.json`, which can only go up, and 80% on changed lines, measured on Linux only, so Windows-only and macOS-only code isn't covered by either check, and generated `*.pb.go` files don't count); `golangci-lint` (`.golangci.yml`) for Linux, Windows and macOS, failing on any finding |
 | `linux-install-test.yml` | Push to `main`, every PR | `scripts/test-linux-install.sh`, then builds the Docker image and checks its Zeek is 8.0.x |
 | `windows-install-test.yml` | Push to `main`, every PR | Builds the Windows installer and runs `scripts/test-windows-install.ps1` |
 | `pr-build-artifacts.yml` | PR labelled `build:windows`, `build:linux`, `build:macos` or `build:all` | Builds installers and binaries as workflow artifacts (kept 7 days) |

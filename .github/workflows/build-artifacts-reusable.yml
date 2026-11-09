@@ -33,17 +33,22 @@ on:
         type: boolean
         default: true
 
+# No top-level permissions on purpose. A called workflow inherits exactly what its caller grants:
+# contents: write from go-build-release.yml, which the release upload steps need, and contents: read
+# from pr-build-artifacts.yml. Declaring read here would break releases, and declaring write would
+# fail on PR callers.
 jobs:
   build-windows:
     name: Build Windows Installer
     runs-on: windows-latest
+    timeout-minutes: 30
     if: inputs.build_windows
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version: '1.27.x'
           cache: true
@@ -70,7 +75,7 @@ jobs:
         shell: powershell
 
       - name: Upload Windows Installer Artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: enigma-sensor-windows-${{ inputs.artifact_prefix }}
           path: installer/windows/Output/enigma-sensor-windows-*.exe
@@ -78,7 +83,7 @@ jobs:
 
       - name: Upload to GitHub Release
         if: inputs.upload_to_release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3  # v3.0.4
         with:
           fail_on_unmatched_files: true
           files: installer/windows/Output/enigma-sensor-windows-*.exe
@@ -88,13 +93,14 @@ jobs:
   build-linux:
     name: Build Linux Package
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     if: inputs.build_linux
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version: '1.27.x'
           cache: true
@@ -141,7 +147,7 @@ jobs:
             -C .. LICENSE THIRD_PARTY_NOTICES
 
       - name: Upload Linux Package Artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: enigma-sensor-linux-${{ inputs.artifact_prefix }}
           path: bin/enigma-sensor-linux-*.deb
@@ -149,7 +155,7 @@ jobs:
 
       - name: Upload to GitHub Release
         if: inputs.upload_to_release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3  # v3.0.4
         with:
           fail_on_unmatched_files: true
           files: |
@@ -161,13 +167,14 @@ jobs:
   build-macos:
     name: Build macOS Binary
     runs-on: macos-latest
+    timeout-minutes: 30
     if: inputs.build_macos
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version: '1.27.x'
           cache: true
@@ -184,7 +191,7 @@ jobs:
           tar -czf enigma-sensor-macos-${{ inputs.artifact_prefix }}.tar.gz enigma-sensor-darwin-* LICENSE THIRD_PARTY_NOTICES
 
       - name: Upload macOS Binary Artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: enigma-sensor-macos-${{ inputs.artifact_prefix }}
           path: bin/enigma-sensor-macos-*.tar.gz
@@ -192,7 +199,7 @@ jobs:
 
       - name: Upload to GitHub Release
         if: inputs.upload_to_release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3  # v3.0.4
         with:
           fail_on_unmatched_files: true
           files: bin/enigma-sensor-macos-${{ inputs.artifact_prefix }}.tar.gz

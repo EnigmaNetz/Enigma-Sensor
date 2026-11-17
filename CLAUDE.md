@@ -144,6 +144,12 @@ behaviour, and link to those files rather than copying their content here.
 Other references: `installer/linux/zeek/README.md` (bundled Zeek packages), `installer/windows/README.md`
 (Windows installer).
 
+## Architecture decisions
+
+`docs/adr/` holds ADRs (Architecture Decision Records) explaining why the sensor is built the way it
+is. A new decision that shapes the code gets an ADR in the same PR (pull request); see
+`docs/adr/README.md`.
+
 ## Git Workflow
 **Branch naming convention:**
 - Format: `task/[TICKET-ID]-[short-description]`

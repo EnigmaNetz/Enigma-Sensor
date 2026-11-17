@@ -130,7 +130,12 @@ func main() {
 		if server == "" || apiKey == "" {
 			log.Printf("enigma_api.server and enigma_api.api_key must be set to upload logs; skipping upload.")
 		} else {
-			u, err := api.NewLogUploader(server, apiKey, cfg.NetworkID, cfg.Capture.Interface, cfg.EnigmaAPI.MaxPayloadSizeMB, cfg.Buffering.Dir, cfg.Buffering.MaxAgeHours, cfg.EnigmaAPI.CACertFile)
+			u, err := api.NewLogUploader(server, apiKey, cfg.NetworkID, cfg.Capture.Interface, cfg.EnigmaAPI.MaxPayloadSizeMB, api.BufferSettings{
+				Dir:         cfg.Buffering.Dir,
+				MaxAgeHours: cfg.Buffering.MaxAgeHours,
+				MaxSizeMB:   cfg.Buffering.MaxSizeMB,
+				MinFreeMB:   cfg.Buffering.MinFreeMB,
+			}, cfg.EnigmaAPI.CACertFile)
 			if err != nil {
 				log.Printf("Failed to initialize LogUploader: %v", err)
 			} else {

@@ -139,7 +139,7 @@ func TestNewLogUploaderCACertFile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			uploader, err := NewLogUploader("api.example.test:443", "test-key", "Test-Network-01", "any", 25, t.TempDir(), 24, tt.certFile(t))
+			uploader, err := NewLogUploader("api.example.test:443", "test-key", "Test-Network-01", "any", 25, BufferSettings{Dir: t.TempDir(), MaxAgeHours: 24}, tt.certFile(t))
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.errContain)

@@ -263,6 +263,8 @@ Invalid values stop the sensor at startup with a message naming the field. The p
 | `zeek.excluded_subnets` | empty | Comma-separated CIDR (Classless Inter-Domain Routing) blocks, for example `10.0.0.0/8,172.20.10.0/24`. Any record whose addresses (including DNS answers) fall inside one is removed before upload. If filtering fails, nothing from that capture is uploaded |
 | `buffering.dir` | `logs/buffer` | Where uploads that failed are kept for retry. Relative paths resolve from the working directory |
 | `buffering.max_age_hours` | `2` | Buffered uploads older than this are discarded |
+| `buffering.max_size_mb` | `500` | Most disk space all buffered uploads together may use (10 to 1048576). When a new one would go over, the oldest are deleted first |
+| `buffering.min_free_mb` | `1024` | Free disk space buffering must leave on the buffer's volume (1 to 1048576). When a new upload would go under, the oldest buffered uploads are deleted first |
 | `logging.file` | none | Log file. Output always also goes to the console |
 | `logging.max_size_mb` | `50` | Rotate the log at this size (10 to 500) |
 | `logging.log_retention_days` | `7` | Days to keep rotated logs (1 to 30) |
@@ -417,6 +419,13 @@ Each upload attempt times out after 4.5 minutes. If an upload fails three times 
 seconds, then 5 to 10 seconds, between attempts), or is interrupted because the sensor is stopping,
 it is saved to `buffering.dir` and retried before the next upload, until it is older than
 `buffering.max_age_hours`.
+
+The buffer is capped by size too, so a long outage cannot fill the disk. Before saving, the sensor
+deletes the oldest buffered uploads (including `.bin` files from older sensor versions) until the
+new one fits under `buffering.max_size_mb` and leaves `buffering.min_free_mb` free, and logs how
+many it deleted (`Buffer full: dropped the N oldest buffered payload(s)`). If the disk would stay
+below `buffering.min_free_mb` even with the whole buffer deleted, nothing is deleted and the new
+upload is not saved.
 
 If the API refuses an upload as invalid (status 400), it is not retried or buffered: sending it
 again cannot succeed. The sensor logs the refusal and carries on with the next window.

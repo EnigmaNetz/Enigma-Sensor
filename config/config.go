@@ -72,6 +72,10 @@ type Config struct {
 		Dir string `json:"dir"`
 		// MaxAgeHours is the maximum age of buffered items before purge
 		MaxAgeHours int `json:"max_age_hours"`
+		// MaxSizeMB caps the total size of buffered payloads; the oldest are dropped first
+		MaxSizeMB int64 `json:"max_size_mb"`
+		// MinFreeMB is the free disk space buffering must leave on the buffer's volume
+		MinFreeMB int64 `json:"min_free_mb"`
 	} `json:"buffering"`
 
 	// Zeek configuration
@@ -365,6 +369,16 @@ func (config *Config) ValidateAndSetDefaults() error {
 	}
 	if config.Buffering.MaxAgeHours == 0 {
 		config.Buffering.MaxAgeHours = 2 // Default to 2 hours retention
+	}
+	if config.Buffering.MaxSizeMB == 0 {
+		config.Buffering.MaxSizeMB = 500
+	} else if config.Buffering.MaxSizeMB < 10 || config.Buffering.MaxSizeMB > 1048576 {
+		return fmt.Errorf("buffering.max_size_mb must be between 10 and 1048576, got %d", config.Buffering.MaxSizeMB)
+	}
+	if config.Buffering.MinFreeMB == 0 {
+		config.Buffering.MinFreeMB = 1024
+	} else if config.Buffering.MinFreeMB < 1 || config.Buffering.MinFreeMB > 1048576 {
+		return fmt.Errorf("buffering.min_free_mb must be between 1 and 1048576, got %d", config.Buffering.MinFreeMB)
 	}
 	// Defaults and validation for PcapIngest
 	if config.PcapIngest.Enabled && config.PcapIngest.WatchDir == "" {

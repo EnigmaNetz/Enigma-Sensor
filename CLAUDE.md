@@ -255,7 +255,9 @@ bash scripts/test-linux-install.sh        # needs docker, dos2unix, fakeroot
   is logged. Between
   attempts it waits half to all of `retryDelay` (5 s), doubled per retry, and the wait ends early on
   cancellation. Buffered payloads are retried oldest first before the next upload and purged after
-  `buffering.max_age_hours`. Delivery is at least once. Only one worker flushes the buffer at a
+  `buffering.max_age_hours`, and the oldest are dropped first to keep the buffer under
+  `buffering.max_size_mb` and the disk above `buffering.min_free_mb` (`buffer_cap.go`, under
+  `bufferMu`). Delivery is at least once. Only one worker flushes the buffer at a
   time (`flushMu`), and buffer files are written under a `.tmp` name and renamed.
 - `.bin` buffer files are old Zeek-log payloads from a sensor version before typed uploads. They
   are still sent through `publishService.uploadExcelMethod` (`internal/api/publish/`, API key in

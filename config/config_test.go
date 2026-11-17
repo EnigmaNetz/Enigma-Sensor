@@ -363,6 +363,54 @@ func TestConfig_ValidateAndSetDefaults_MaxSizeMB(t *testing.T) {
 	}
 }
 
+func TestConfig_ValidateAndSetDefaults_BufferLimits(t *testing.T) {
+	cfg := &Config{NetworkID: "Test-Network-01"}
+	if err := cfg.ValidateAndSetDefaults(); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if cfg.Buffering.MaxSizeMB != 500 {
+		t.Errorf("Expected default Buffering.MaxSizeMB to be 500, got %d", cfg.Buffering.MaxSizeMB)
+	}
+	if cfg.Buffering.MinFreeMB != 1024 {
+		t.Errorf("Expected default Buffering.MinFreeMB to be 1024, got %d", cfg.Buffering.MinFreeMB)
+	}
+
+	tests := []struct {
+		name      string
+		maxSizeMB int64
+		minFreeMB int64
+		errorMsg  string
+	}{
+		{"values in range preserved", 50, 2048, ""},
+		{"max_size_mb at minimum preserved", 10, 1, ""},
+		{"max_size_mb below minimum errors", 9, 0, "buffering.max_size_mb must be between"},
+		{"negative max_size_mb errors", -1, 0, "buffering.max_size_mb must be between"},
+		{"max_size_mb above maximum errors", 1048577, 0, "buffering.max_size_mb must be between"},
+		{"negative min_free_mb errors", 0, -1, "buffering.min_free_mb must be between"},
+		{"min_free_mb above maximum errors", 0, 1048577, "buffering.min_free_mb must be between"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{NetworkID: "Test-Network-01"}
+			cfg.Buffering.MaxSizeMB = tt.maxSizeMB
+			cfg.Buffering.MinFreeMB = tt.minFreeMB
+			err := cfg.ValidateAndSetDefaults()
+			if tt.errorMsg != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.errorMsg) {
+					t.Errorf("Expected error containing %q, got %v", tt.errorMsg, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+			if cfg.Buffering.MaxSizeMB != tt.maxSizeMB || cfg.Buffering.MinFreeMB != tt.minFreeMB {
+				t.Errorf("Expected %d/%d, got %d/%d", tt.maxSizeMB, tt.minFreeMB, cfg.Buffering.MaxSizeMB, cfg.Buffering.MinFreeMB)
+			}
+		})
+	}
+}
+
 func TestConfig_ValidateAndSetDefaults_LogRetentionDays(t *testing.T) {
 	tests := []struct {
 		name        string

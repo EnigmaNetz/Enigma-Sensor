@@ -90,6 +90,15 @@ type LogUploader struct {
 	maxPayloadSizeMB int64         // maximum uncompressed batch size before splitting
 	bufferDir        string
 	bufferMaxAge     time.Duration
+	// bufferMaxBytes caps the total size of buffered payloads; 0 means no cap.
+	bufferMaxBytes int64
+	// bufferMinFree is the free disk space to leave on the buffer's volume; 0 means no check.
+	bufferMinFree int64
+	// diskFree reports the free bytes on the volume holding a directory; nil means freeDiskBytes.
+	diskFree func(dir string) (uint64, error)
+	// bufferMu serializes buffer writes, so two workers never both fit their payload into the
+	// same free space.
+	bufferMu sync.Mutex
 	// flushMu lets one worker at a time flush the buffer directory, so a
 	// buffered payload is never read and uploaded by two workers at once.
 	flushMu sync.Mutex
@@ -119,8 +128,18 @@ type grpcClientImpl struct {
 	ingest ingest.SensorIngestClient
 }
 
+// BufferSettings configures the disk buffer for uploads that failed.
+type BufferSettings struct {
+	Dir         string
+	MaxAgeHours int
+	// MaxSizeMB caps the total size of buffered payloads.
+	MaxSizeMB int64
+	// MinFreeMB is the free disk space a buffer write must leave.
+	MinFreeMB int64
+}
+
 // NewLogUploader creates a new log uploader instance
-func NewLogUploader(serverAddr string, apiKey string, networkID string, captureInterface string, maxPayloadSizeMB int64, bufferDir string, bufferMaxAgeHours int, caCertFile string) (*LogUploader, error) {
+func NewLogUploader(serverAddr string, apiKey string, networkID string, captureInterface string, maxPayloadSizeMB int64, buffer BufferSettings, caCertFile string) (*LogUploader, error) {
 	var opts []grpc.DialOption
 
 	host := serverAddr
@@ -165,8 +184,10 @@ func NewLogUploader(serverAddr string, apiKey string, networkID string, captureI
 		retryCount:       3,
 		retryDelay:       5 * time.Second,
 		maxPayloadSizeMB: maxPayloadSizeMB,
-		bufferDir:        bufferDir,
-		bufferMaxAge:     time.Duration(bufferMaxAgeHours) * time.Hour,
+		bufferDir:        buffer.Dir,
+		bufferMaxAge:     time.Duration(buffer.MaxAgeHours) * time.Hour,
+		bufferMaxBytes:   buffer.MaxSizeMB * 1024 * 1024,
+		bufferMinFree:    buffer.MinFreeMB * 1024 * 1024,
 	}, nil
 }
 
@@ -441,13 +462,20 @@ func (u *LogUploader) bufferRecords(req *ingest.UploadRecordsRequest) error {
 }
 
 // bufferSave writes a payload to disk for later retry, named for its time so the oldest is
-// flushed first and with ext marking its format.
+// flushed first and with ext marking its format. It first drops the oldest buffered payloads
+// as needed to stay under the size cap and free-space floor, and writes nothing if the payload
+// still does not fit.
 func (u *LogUploader) bufferSave(data []byte, ext string) error {
 	if u.bufferDir == "" {
 		return nil
 	}
+	u.bufferMu.Lock()
+	defer u.bufferMu.Unlock()
 	if err := os.MkdirAll(u.bufferDir, 0o750); err != nil {
 		return fmt.Errorf("failed to create buffer dir: %w", err)
+	}
+	if err := u.makeBufferRoom(int64(len(data))); err != nil {
+		return err
 	}
 	// Name encoded with timestamp for ordering
 	ts := time.Now().UTC().Format("20060102T150405Z")

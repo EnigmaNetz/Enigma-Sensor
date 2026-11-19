@@ -157,6 +157,8 @@ is. A new decision that shapes the code gets an ADR in the same PR (pull request
 - Use lowercase with hyphens for description
 - Always include ticket ID in branch name
 - Branch from `main`; PRs target `main` (this repo has no `stage` branch)
+- Every PR needs exactly one `update:optional`, `update:recommended` or `update:security` label
+  (DEVELOPMENT.md, Release); the release notes are generated from them
 
 **Commit message requirements:**
 - MUST include ticket reference at end: `Ref [TICKET-ID]`

@@ -134,9 +134,10 @@ CI runs in GitHub Actions.
 | `linux-install-test.yml` | Push to `main`, every PR | `scripts/test-linux-install.sh`, then builds the Docker image and checks its Zeek is 8.0.x |
 | `windows-install-test.yml` | Push to `main`, every PR | Builds the Windows installer and runs `scripts/test-windows-install.ps1` |
 | `pr-build-artifacts.yml` | PR labelled `build:windows`, `build:linux`, `build:macos` or `build:all` | Builds installers and binaries as workflow artifacts (kept 7 days) |
-| `go-build-release.yml` | Any tag push | Builds everything and attaches it to the GitHub Release for that tag, then publishes `SHA256SUMS` and a build provenance attestation for each asset |
+| `update-label.yml` | Every PR into `main` | Fails unless the PR has exactly one of `update:optional`, `update:recommended` or `update:security` (see [Release](#release)) |
+| `go-build-release.yml` | Any tag push | Fails if the tag does not match `internal/version/version.go`, creates a draft GitHub Release with notes from `scripts/release-notes.sh`, builds everything and attaches it, uploads `SHA256SUMS` and a build provenance attestation for each asset, then publishes the release |
 | `proto-drift.yml` | Push to `main`, every PR into `main` | Fails if `internal/api/ingest/sensor_records.proto` differs from Enigma-Publisher's copy on `stage`, read with a scoped GitHub App token |
-| `docker-publish.yml` | `v*` tag push | Builds and pushes `ghcr.io/enigmanetz/enigma-sensor` tagged with the version, `major.minor`, `major` and `latest` |
+| `docker-publish.yml` | `v*` tag push | Fails if the tag does not match `version.go`, then builds and pushes `ghcr.io/enigmanetz/enigma-sensor` tagged with the version, `major.minor`, `major` and `latest` |
 
 `pr-build-artifacts.yml` and `go-build-release.yml` both call `build-artifacts-reusable.yml`. There is
 no format check in CI; run `gofmt -l .` before opening a PR.
@@ -238,6 +239,28 @@ docker build -t enigma-sensor .
 2. Open a PR and merge it to `main`.
 3. Tag the version bump commit `v<version>` (for example `v1.9.5`) and push the tag. That runs
    `go-build-release.yml` and `docker-publish.yml`.
+
+Nobody writes release notes. Every PR into `main` carries one label, chosen by its author:
+
+| Label | Use it for |
+| --- | --- |
+| `update:optional` | An opt-in feature, or an internal change customers do not need to install (version bumps, CI) |
+| `update:recommended` | Fixes or improvements every customer should get |
+| `update:security` | A security fix, or a change older sensors will break without |
+
+`scripts/release-notes.sh` lists the PRs merged since the previous tag and ends the notes with
+`Update: <highest label among them>`. A PR merged before the labels existed counts as optional. The
+previous release's version-bump PR is left out: its merge lands after the previous tag, but its
+content shipped in that release. Preview the notes for a range with
+`scripts/release-notes.sh v1.11.0 v1.11.1` (needs `gh` signed in).
+
+The last non-empty line of the notes always matches `^Update: (optional|recommended|security)$`.
+Enigma-Subscriber will read it to say how urgent an update is (B1CF-2245), so keep that format.
+
+The release stays a draft until every asset, `SHA256SUMS` and the attestations are up, so a failed
+build never becomes the latest release. `go-build-release.yml` and `docker-publish.yml` both run
+`scripts/ci/check-tag-version.sh` first, so a tag that does not match `version.go` publishes
+nothing.
 
 Sensors in the field update only when someone reinstalls them, so older versions stay in use for a
 long time. Keep the upload format backward compatible.

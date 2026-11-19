@@ -86,6 +86,7 @@ jobs:
         uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3  # v3.0.4
         with:
           fail_on_unmatched_files: true
+          draft: true  # go-build-release.yml publishes the draft once every asset is up
           files: installer/windows/Output/enigma-sensor-windows-*.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -158,6 +159,7 @@ jobs:
         uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3  # v3.0.4
         with:
           fail_on_unmatched_files: true
+          draft: true  # go-build-release.yml publishes the draft once every asset is up
           files: |
             enigma-sensor-*-linux-release.zip
             enigma-sensor-linux-amd64-${{ inputs.artifact_prefix }}.tar.gz
@@ -202,6 +204,7 @@ jobs:
         uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3  # v3.0.4
         with:
           fail_on_unmatched_files: true
+          draft: true  # go-build-release.yml publishes the draft once every asset is up
           files: bin/enigma-sensor-macos-${{ inputs.artifact_prefix }}.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -9,6 +9,7 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 5
+    labels: ["update:optional"]  # CI-only change; update-label.yml needs one
     groups:
       github-actions:
         patterns: ["*"]

@@ -1,0 +1,27 @@
+name: Update Label
+
+# Every PR into main says how important its change is to customers, so the
+# release workflow can write an `Update:` line into the release notes (see
+# scripts/release-notes.sh). Reads labels from the event payload; no token needed.
+on:
+  pull_request:
+    branches: [ main ]
+    types: [ opened, reopened, synchronize, labeled, unlabeled, edited ]  # edited: retargeted to main
+
+permissions: {}
+
+jobs:
+  update-label:
+    name: Exactly one update:* label
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check labels
+        env:
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          count=$(jq '[.[] | select(. == "update:optional" or . == "update:recommended" or . == "update:security")] | length' <<<"$LABELS")
+          if [ "$count" -ne 1 ]; then
+            echo "::error::This PR has $count update:* labels; it needs exactly one of: update:optional (opt-in feature or internal change customers do not need), update:recommended (fixes or improvements every customer should get), update:security (security fix, or a change older sensors break without)."
+            exit 1
+          fi

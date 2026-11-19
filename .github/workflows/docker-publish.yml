@@ -18,6 +18,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
+      - name: Check the tag matches version.go
+        run: scripts/ci/check-tag-version.sh "$TAG"
+        env:
+          TAG: ${{ github.ref_name }}
+
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
 

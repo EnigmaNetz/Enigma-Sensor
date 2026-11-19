@@ -9,7 +9,48 @@ permissions:
   contents: write
 
 jobs:
+  # Runs before anything is built or published. Fails on a tag that does not match
+  # internal/version/version.go, so a mistyped tag never becomes the latest
+  # release, then creates the release as a draft with notes from
+  # scripts/release-notes.sh. The build jobs upload to the draft and keep its
+  # notes; checksums-and-attestations publishes it last, so the latest release
+  # always has its assets.
+  prepare-release:
+    name: Check tag and write release notes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write       # create the release
+      pull-requests: read   # read titles and labels of the merged PRs
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0  # all history and tags, to find the previous tag
+          persist-credentials: false
+
+      - name: Check the tag matches version.go
+        run: scripts/ci/check-tag-version.sh "$TAG"
+
+      - name: Write release notes
+        run: |
+          PREV=$(git describe --tags --abbrev=0 --match 'v*' "$TAG^" 2>/dev/null || true)
+          echo "Listing PRs merged between ${PREV:-the first commit} and $TAG"
+          scripts/release-notes.sh "$PREV" "$TAG" > release-notes.md
+          cat release-notes.md
+
+      - name: Create the release
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --notes-file release-notes.md
+          else
+            gh release create "$TAG" --draft --verify-tag --title "$TAG" --notes-file release-notes.md
+          fi
+
   build:
+    needs: prepare-release
     permissions:
       contents: write  # the called workflow's release upload steps
     uses: ./.github/workflows/build-artifacts-reusable.yml
@@ -63,3 +104,8 @@ jobs:
 
       - name: Upload SHA256SUMS to the release
         run: gh release upload "$TAG" SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
+
+      # Last step: until now the release was a draft, invisible to the Releases API
+      # that Enigma-Subscriber reads, so a failed build never becomes the latest.
+      - name: Publish the release
+        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
